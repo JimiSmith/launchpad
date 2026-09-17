@@ -1,0 +1,17 @@
+[package]
+name = "zellij-launchpad-prototype"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.1"
+publish = false
+
+[dependencies]
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm_0_29"] }
+crossterm = "0.29"
+neo_frizbee = { version = "=0.13.1", default-features = false, features = ["safe_read"] }
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
+
+[profile.release]
+lto = "thin"
+strip = true

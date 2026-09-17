@@ -1,0 +1,5 @@
+# Terminal snapshots preserve blank cells and full viewport rows.
+verification/[0-9]*.txt whitespace=-blank-at-eol,-blank-at-eof
+verification/mouse-*-80x24.txt whitespace=-blank-at-eol,-blank-at-eof
+verification/mouse-*-40x10.txt whitespace=-blank-at-eol,-blank-at-eof
+verification/mouse-*-120x36.txt whitespace=-blank-at-eol,-blank-at-eof

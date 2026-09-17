@@ -1,0 +1,12 @@
+ ›_ Launchpad            DEMO · F1 help 
+ 01 Directory                    Ctrl+P 
+  › ~/Projects/                         
+  · ~/Projects/                         
+ 02 Launch with                  Ctrl+T 
+ [ Shell ]   Claude     Codex           
+   Copilot     Hermes                   
+ 03 Recent · 8–10/10             Ctrl+R 
+ 08 Codex    ~/Projects/修理            
+ 09 Hermes   ~/Projects/notes           
+ ›  Shell    ~/Projects/it's literal; … 
+ RECENT ↑↓ · Tab copy · Enter replay    

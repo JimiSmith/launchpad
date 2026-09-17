@@ -1,0 +1,49 @@
+Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/deps/zellij_launchpad_prototype-e04d1f11add86fb2)
+
+running 9 tests
+test app::tests::completion_accepts_only_then_validated_enter_simulates_launch ... ok
+test app::tests::hidden_controls_never_launch_and_escape_help_quit_are_safe ... ok
+test app::tests::history_replays_copies_prunes_duplicates_and_revalidates_tools ... ok
+test editor::tests::deletion_that_joins_neighbors_keeps_cursor_on_grapheme_boundary ... ok
+test editor::tests::edits_whole_graphemes_and_keeps_literal_text ... ok
+test cells::tests::clipping_keeps_graphemes_and_reserves_ellipsis_cells ... ok
+test app::tests::focus_navigation_completion_cycle_and_path_keys_are_distinct ... ok
+test app::tests::invalid_paths_preserve_form_and_literal_paths_launch_all_five_tools ... ok
+test fixtures::tests::frizbee_finds_bare_nested_and_noncontiguous_names ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/zellij_launchpad_prototype-fe185919c95b5993)
+
+running 1 test
+test terminal::tests::maps_shortcuts_without_stealing_printable_q_or_repeated_enter ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/non_tty.rs (target/debug/deps/non_tty-17c267d3681d5ac1)
+
+running 1 test
+test rejects_non_tty_without_escape_sequences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/render.rs (target/debug/deps/render-1fffde9b4f881e80)
+
+running 5 tests
+test minimum_usable_view_keeps_selected_history_visible ... ok
+test narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls ... ok
+test roomy_layout_uses_spare_rows_for_history_rhythm ... ok
+test dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes ... ok
+test help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+   Doc-tests zellij_launchpad_prototype
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+    Finished `release` profile [optimized] target(s) in 0.08s

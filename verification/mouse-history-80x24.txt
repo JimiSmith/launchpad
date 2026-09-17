@@ -1,0 +1,24 @@
+  ›_ Launchpad                                              DEMO / memory only  
+  01 Directory                                                          Ctrl+P  
+  ┌──────────────────────────────────────────────────────────────────────────┐  
+  │ › ~/Projects/research/notes                                              │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+  Enter launches · edit to search · ↓ tools                                     
+                                                                                
+                                                                                
+  02 Launch with                                                        Ctrl+T  
+  [ Shell ]   Claude     Codex     Copilot     Hermes              Enter ↵      
+  ────────────────────────────────────────────────────────────────────────────  
+  03 Recent launches · 10 events                                        Ctrl+R  
+     TOOL     DIRECTORY                                                   WHEN  
+  01 Codex    ~/Projects/research/notes                               Just now  
+  ›  Claude   ~/Projects/launchpad                                     12m ago  
+  03 Shell    ~/Projects/notes                                         38m ago  
+  04 Codex    ~/Projects/service                                        1h ago  
+  05 Hermes   ~/Projects/team notes                                     2h ago  
+  06 Claude   ~/Projects/launchpad                                      3h ago  
+  07 Copilot  ~/Projects/service                                        4h ago  
+  08 Shell    ~/Projects/current                                     Yesterday  
+  09 Codex    ~/Projects/修理                                        Yesterday  
+  10 Hermes   ~/Projects/notes                                       Yesterday  
+  Tab copy · Enter replay                     F1 help · F5 reset · Ctrl+Q quit  

@@ -1,0 +1,24 @@
+  Terminal placeholder                                              SIMULATION  
+                                                                                
+  Codex · simulated launch accepted                                             
+                                                                                
+  cwd  /home/demo/Projects/notes                                                
+  tool Codex · fixture target                                                   
+                                                                                
+  No process was started. No host data was read.                                
+  One launch event was added to in-memory history.                              
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+  Esc back to Launchpad · F5 reset · Ctrl+Q quit                                
