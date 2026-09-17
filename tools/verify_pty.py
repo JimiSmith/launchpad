@@ -36,7 +36,7 @@ def child_setup():
 
 
 process = subprocess.Popen(
-    [str(BINARY)], stdin=slave, stdout=slave, stderr=slave,
+    [str(BINARY), "--demo"], stdin=slave, stdout=slave, stderr=slave,
     env={**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"},
     preexec_fn=child_setup, cwd=ROOT,
 )

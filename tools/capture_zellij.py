@@ -51,7 +51,7 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 server = http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(QuietHandler,directory=OUT))
 thread = threading.Thread(target=server.serve_forever,daemon=True)
 thread.start()
-shots = ['01-initial-80x24','06-unicode-80x24','07-wide-120x36',
+shots = sys.argv[2:] or ['01-initial-80x24','06-unicode-80x24','07-wide-120x36',
          '09-narrow-40x10','10-guard-30x8','13-split-before-key-quit']
 try:
     with sync_playwright() as pw:

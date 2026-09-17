@@ -161,7 +161,11 @@ fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
                 format!("cwd  {}", event.path),
                 format!("tool {} · fixture target", event.tool.label()),
                 String::new(),
-                "No process was started. No host data was read.".into(),
+                if app.is_demo() {
+                    "No process was started. No host data was read.".into()
+                } else {
+                    "Directory validated. No process was started.".into()
+                },
                 "One launch event was added to in-memory history.".into(),
             ];
             f.render_widget(
@@ -211,7 +215,13 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         at(area, area.y, 1),
         "›_ Launchpad",
-        if narrow { "DEMO" } else { "DEMO / memory only" },
+        if app.is_demo() {
+            if narrow { "DEMO" } else { "DEMO / memory only" }
+        } else if narrow {
+            "SIMULATED LAUNCH"
+        } else {
+            "HOME / launches simulated"
+        },
         accent().add_modifier(Modifier::BOLD),
     );
     let mut y = area.y + if roomy { 2 } else { 1 };
@@ -362,8 +372,16 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         row(
             f,
             at(area, y, 1),
-            &"─".repeat(area.width as usize),
-            base().fg(LINE),
+            &if app.is_demo() {
+                "─".repeat(area.width as usize)
+            } else {
+                app.search_status.clone()
+            },
+            if app.is_demo() {
+                base().fg(LINE)
+            } else {
+                muted()
+            },
         );
         1
     };
@@ -510,8 +528,10 @@ fn suggestions(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         row(
             f,
             at(area, area.y, 1),
-            if app.message.is_some() {
-                "Edit the path or select another fixture."
+            if !app.is_demo() && area.width < 60 {
+                &app.search_status
+            } else if app.message.is_some() {
+                "Edit the path or choose another directory."
             } else {
                 "Enter launches · edit to search · ↓ tools"
             },
@@ -541,7 +561,7 @@ fn suggestions(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         let label = format!(
             " {} {}/",
             if active { "›" } else { "·" },
-            app.path_label(d.path)
+            app.path_label(&d.path)
         );
         if area.width >= 70 {
             pair(f, a, &label, d.note, style);

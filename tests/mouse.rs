@@ -40,7 +40,7 @@ fn click_label(app: &mut App, w: u16, h: u16, label: &str) {
 #[test]
 fn history_click_selects_only_then_copy_or_replay_is_explicit() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
-        let mut app = App::default();
+        let mut app = App::demo();
         app.recent = 9;
         app.update(Action::Escape); // dismiss completions before choosing a history path
         click_label(&mut app, w, h, "it's");
@@ -71,7 +71,7 @@ fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
 }
 #[test]
 fn wheel_is_section_local_and_clamped() {
-    let mut app = App::default();
+    let mut app = App::demo();
     wheel(&mut app, 80, 24, 10, 5, true);
     assert_eq!(app.highlighted, Some(0));
     for _ in 0..30 {
@@ -114,7 +114,7 @@ fn wheel_is_section_local_and_clamped() {
 #[test]
 fn explicit_launch_back_help_reset_and_quit_controls() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
-        let mut app = App::default();
+        let mut app = App::demo();
         app.update(Action::Down); // highlighted completion must not hijack explicit launch
         click_label(&mut app, w, h, "Enter ↵");
         assert!(matches!(&app.screen, Screen::Terminal(e) if e.path == "/home/demo/Projects"));
@@ -134,7 +134,7 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
 fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
     use zellij_launchpad_prototype::app::Tool;
     for (w, h, x, y) in [(80, 24, 26, 9), (120, 36, 26, 12), (40, 12, 4, 6)] {
-        let mut app = App::default();
+        let mut app = App::demo();
         click(&mut app, w, h, x, y);
         assert_eq!(app.focus, Focus::Tools, "{w}x{h}");
         assert_eq!(app.tool, if w == 40 { Tool::Copilot } else { Tool::Codex });
@@ -143,7 +143,7 @@ fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
 }
 #[test]
 fn suggestion_click_accepts_without_launching() {
-    let mut app = App::default();
+    let mut app = App::demo();
     app.update(Action::Clear);
     app.update(Action::Text("notes".into()));
     click(&mut app, 80, 24, 12, 6);
@@ -158,7 +158,7 @@ fn scrolled_input_maps_visible_origin_and_clipped_tail() {
     use zellij_launchpad_prototype::cells::{input_cursor, input_window};
     let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(100));
     for (w, h, x, y, budget) in [(80, 24, 6, 3, 70), (40, 10, 4, 2, 34)] {
-        let mut app = App::default();
+        let mut app = App::demo();
         app.editor.set(&text);
         let (visible, _) = input_window(&text, text.len(), budget);
         let start = text.len() - visible.len();
@@ -173,7 +173,7 @@ fn scrolled_input_maps_visible_origin_and_clipped_tail() {
 }
 #[test]
 fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
-    let app = App::default();
+    let app = App::demo();
     let map = draw(&app, 80, 24);
     for pointer in [Pointer::Click, Pointer::ScrollDown, Pointer::ScrollUp] {
         for (x, y) in [(0, 0), (79, 23), (80, 24), (u16::MAX, u16::MAX)] {
@@ -193,7 +193,7 @@ fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
         map.action(Pointer::Click, 20, 10, Rect::new(0, 0, 80, 24)),
         None
     ); // separator
-    let mut closed = App::default();
+    let mut closed = App::demo();
     closed.update(Action::Escape);
     closed.update(Action::Escape);
     assert_eq!(closed.screen, Screen::Closed);
@@ -202,16 +202,16 @@ fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
 }
 #[test]
 fn scrolled_suggestions_click_the_visible_result() {
-    let mut app = App::default();
+    let mut app = App::demo();
     app.highlighted = Some(app.suggestions.len() - 1);
-    let expected = app.path_label(app.dirs[*app.suggestions.last().unwrap()].path);
+    let expected = app.path_label(&app.dirs[*app.suggestions.last().unwrap()].path);
     click(&mut app, 40, 10, 10, 3);
     assert_eq!(app.editor.text, expected);
     assert_eq!(app.screen, Screen::Dashboard);
 }
 #[test]
 fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
-    let mut app = App::default();
+    let mut app = App::demo();
     app.update(Action::ToggleCopilot);
     app.update(Action::SelectHistory(app.history[5].id));
     click_label(&mut app, 80, 24, "Enter replay");
@@ -233,7 +233,7 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
 }
 #[test]
 fn path_click_uses_cells_graphemes_padding_and_focus() {
-    let mut app = App::default();
+    let mut app = App::demo();
     app.editor.set("修理/e\u{301}👩🏽‍💻");
     app.focus = Focus::Tools;
     click(&mut app, 80, 24, 9, 3); // second cell of 理: before the whole grapheme

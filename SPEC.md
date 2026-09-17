@@ -1,6 +1,8 @@
 # Zellij Launchpad — draft product specification
 
-Status: proposed v0.1; not implemented. Working name, not checked for uniqueness.
+Status: proposed v0.1. HOME-only search is implemented; launches remain simulated.
+Current scope and deviations: [home-search notes](docs/home-search.md).
+Working name, not checked for uniqueness.
 
 ## 1. Existing solutions and differentiation
 

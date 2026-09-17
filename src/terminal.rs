@@ -121,6 +121,10 @@ impl Drop for Session {
     }
 }
 
+fn input_wait(indexing: bool, mouse_ready: bool) -> Duration {
+    Duration::from_millis(if indexing && mouse_ready { 10 } else { 100 })
+}
+
 pub fn run() -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
@@ -129,10 +133,19 @@ pub fn run() -> io::Result<()> {
     }
     let _session = Session::start()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    let mut app = App::default();
+    let mut app = if std::env::args().skip(1).any(|arg| arg == "--demo") {
+        App::demo()
+    } else if let Some(home) = std::env::var_os("HOME") {
+        App::from_home(home.clone().into(), home.into())
+    } else {
+        let mut app = App::default();
+        app.search_status = "HOME is missing. Set HOME to your home directory and restart.".into();
+        app
+    };
     let mut mouse_ready = true;
     let mut last_size = terminal.size()?;
     while !app.quit {
+        app.index_tick();
         let size = terminal.size()?;
         if size != last_size {
             mouse_ready = false;
@@ -141,7 +154,7 @@ pub fn run() -> io::Result<()> {
         app.compact = size.width < 40 || size.height < 10;
         let mut hits = view::HitMap::default();
         terminal.draw(|f| hits = view::render_with_hits(f, &app))?;
-        if !event::poll(Duration::from_millis(100))? {
+        if !event::poll(input_wait(app.is_indexing(), mouse_ready))? {
             // Resize has no generation tag in the mouse protocol. Quarantine
             // queued coordinates until the resized frame is drawn and input is quiet.
             mouse_ready = true;
@@ -199,13 +212,19 @@ mod tests {
         }
     }
     #[test]
+    fn indexing_keeps_resize_mouse_quarantine_at_one_hundred_ms() {
+        assert_eq!(input_wait(true, false), Duration::from_millis(100));
+        assert_eq!(input_wait(true, true), Duration::from_millis(10));
+        assert_eq!(input_wait(false, true), Duration::from_millis(100));
+    }
+    #[test]
     fn mouse_adapter_only_accepts_left_down_and_vertical_wheel() {
         use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
         use ratatui::{backend::TestBackend, layout::Rect};
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         let mut hits = view::HitMap::default();
         terminal
-            .draw(|f| hits = view::render_with_hits(f, &App::default()))
+            .draw(|f| hits = view::render_with_hits(f, &App::demo()))
             .unwrap();
         let area = Rect::new(0, 0, 80, 24);
         let event = |kind| MouseEvent {

@@ -1,9 +1,4 @@
-#[derive(Debug, Clone)]
-pub struct Directory {
-    pub path: &'static str,
-    pub note: &'static str,
-    pub error: Option<&'static str>,
-}
+pub use crate::search::Directory;
 pub fn history() -> Vec<crate::app::Launch> {
     use crate::app::{Launch, Tool::*};
     [
@@ -71,37 +66,16 @@ pub fn directories() -> Vec<Directory> {
         ),
     ]
     .into_iter()
-    .map(|(path, note, error)| Directory { path, note, error })
+    .map(|(path, note, error)| Directory {
+        path: path.into(),
+        note,
+        error,
+    })
     .collect()
 }
 /// Lexical fixture resolution only: never consults the host or a shell.
 pub fn normalize(raw: &str) -> Option<String> {
-    if raw.is_empty()
-        || raw.chars().any(char::is_control)
-        || (raw.starts_with('~') && raw != "~" && !raw.starts_with("~/"))
-    {
-        return None;
-    }
-    let path = if raw == "~" {
-        HOME.to_owned()
-    } else if let Some(rest) = raw.strip_prefix("~/") {
-        format!("{HOME}/{rest}")
-    } else if raw.starts_with('/') {
-        raw.to_owned()
-    } else {
-        format!("{CWD}/{raw}")
-    };
-    let mut parts = Vec::new();
-    for p in path.split('/') {
-        match p {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(p),
-        }
-    }
-    Some(format!("/{}", parts.join("/")))
+    crate::search::normalize_in(raw, HOME, CWD)
 }
 pub fn short(path: &str) -> String {
     if path == HOME {
@@ -115,53 +89,7 @@ pub fn short(path: &str) -> String {
 /// Frizbee scores both basename and complete path; ties use logical path order.
 /// Use Matcher::new, NOT query syntax: quotes, spaces and $ remain literal.
 pub fn matches(raw: &str, dirs: &[Directory]) -> Vec<usize> {
-    use neo_frizbee::{Config, Matcher};
-    let config = Config {
-        max_typos: Some(0),
-        ..Config::default()
-    };
-    let explicit = raw.starts_with('/')
-        || raw.starts_with('~')
-        || raw.starts_with("./")
-        || raw.starts_with("../");
-    let query = if explicit {
-        normalize(raw).unwrap_or_else(|| raw.into())
-    } else {
-        raw.to_owned()
-    };
-    let allow_hidden = raw
-        .split('/')
-        .any(|p| p.starts_with('.') && p != "." && p != "..");
-    let candidates: Vec<_> = dirs
-        .iter()
-        .enumerate()
-        .filter(|(_, d)| allow_hidden || !d.path.split('/').any(|p| p.starts_with('.')))
-        .collect();
-    let paths: Vec<_> = candidates.iter().map(|(_, d)| d.path).collect();
-    let names: Vec<_> = candidates
-        .iter()
-        .map(|(_, d)| d.path.rsplit('/').next().unwrap_or(d.path))
-        .collect();
-    let mut scores = vec![None; candidates.len()];
-    let mut matcher = Matcher::new(&query, &config);
-    for m in matcher
-        .match_list(&paths)
-        .into_iter()
-        .chain(matcher.match_list(&names))
-    {
-        let score = &mut scores[m.index as usize];
-        *score = Some(score.unwrap_or(0).max(m.score));
-    }
-    let mut ranked: Vec<_> = scores
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, score)| score.map(|s| (candidates[i].0, s)))
-        .collect();
-    ranked.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| dirs[a.0].path.cmp(dirs[b.0].path))
-    });
-    ranked.into_iter().map(|(i, _)| i).collect()
+    crate::search::matches_in(raw, dirs, HOME, CWD)
 }
 #[cfg(test)]
 mod tests {

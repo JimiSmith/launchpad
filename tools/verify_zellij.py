@@ -38,7 +38,7 @@ env.update(TERM='xterm-256color', COLORTERM='truecolor', HOME=str(OUT/'home'),
 config = OUT/'config.kdl'
 layout = OUT/'layout.kdl'
 config.write_text((ROOT/'examples/locked.kdl').read_text() + f'\nsession_name "{NAME}"\n')
-shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)
+layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace('.wasm"', '.wasm" { demo "true"; }'))
 master, slave = pty.openpty()
 original = termios.tcgetattr(slave)
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH',24,80,0,0))
@@ -287,7 +287,7 @@ try:
     send("printf 'SURVIVOR_OK\\n'\r")
     expect('SURVIVOR_OK','ordinary shell pane remains usable')
     snapshot('12-surviving-shell')
-    reopened=cli('action','launch-plugin','file:'+str(WASM)).strip()
+    reopened=cli('action','launch-plugin','--configuration','demo=true','file:'+str(WASM)).strip()
     (OUT/'reopened-plugin.txt').write_text(reopened+'\n')
     expect('Launchpad','WASM reloads in split alongside surviving ordinary pane')
     snapshot('13-split-before-key-quit')

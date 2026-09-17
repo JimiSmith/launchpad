@@ -50,8 +50,27 @@ pub struct State {
     area: ratatui::layout::Rect,
     pointer: Option<(u16, u16)>,
     mouse_quiet_since: Option<std::time::Instant>,
+    pending_home: Option<std::path::PathBuf>,
 }
 impl State {
+    pub fn prepare_home(&mut self, home: Option<String>) -> bool {
+        self.pending_home = None;
+        let Some(home) = home else {
+            self.app.search_status =
+                "Session HOME is missing. Reopen from a session with HOME set.".into();
+            return false;
+        };
+        let path = std::path::PathBuf::from(home);
+        if let Err(error) =
+            zellij_launchpad_prototype::search::HomeIndex::new(path.clone(), "/host".into())
+        {
+            self.app.search_status = error;
+            return false;
+        }
+        self.pending_home = Some(path);
+        self.app.search_status = "Opening HOME filesystem…".into();
+        true
+    }
     pub fn handle(&mut self, event: zellij_tile::prelude::Event) -> bool {
         use zellij_launchpad_prototype::view::Pointer;
         use zellij_tile::prelude::{Event, Mouse};
@@ -67,6 +86,28 @@ impl State {
             }
         }
         let action = match event {
+            Event::PermissionRequestResult(zellij_tile::prelude::PermissionStatus::Denied) => {
+                self.pending_home = None;
+                self.app.search_status =
+                    "HOME access denied. Reopen the plugin and allow its two permissions.".into();
+                return true;
+            }
+            Event::HostFolderChanged(home) => {
+                if self.pending_home.as_ref() == Some(&home) {
+                    self.pending_home = None;
+                    self.app =
+                        zellij_launchpad_prototype::app::App::from_home(home, "/host".into());
+                    return true;
+                }
+                return false;
+            }
+            Event::FailedToChangeHostFolder(_) => {
+                self.pending_home = None;
+                self.app.search_status =
+                    "HOME filesystem unavailable. Check HOME access and reopen the plugin.".into();
+                return true;
+            }
+            Event::Timer(_) => return self.app.index_tick(),
             Event::Key(key) => key_action(key),
             Event::PastedText(text) => Some(Action::Text(text)),
             Event::Mouse(
@@ -145,11 +186,52 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn demo_state() -> State {
+        State {
+            app: zellij_launchpad_prototype::app::App::demo(),
+            ..State::default()
+        }
+    }
+    #[test]
+    fn home_access_waits_for_ack_and_denial_is_not_demo() {
+        use zellij_tile::prelude::{Event, PermissionStatus};
+        let mut state = State::default();
+        assert!(!state.app.is_indexing());
+        state.handle(Event::PermissionRequestResult(PermissionStatus::Denied));
+        assert!(state.app.search_status.contains("denied"));
+        assert!(state.app.history.is_empty());
+        assert!(!state.app.is_indexing());
+        assert!(state.prepare_home(Some("/home/example".into())));
+        state.handle(Event::HostFolderChanged("/somewhere/else".into()));
+        assert!(!state.app.is_indexing(), "never index a non-HOME mount");
+        state.handle(Event::HostFolderChanged("/home/example".into()));
+        assert!(state.app.is_indexing());
+    }
+    #[test]
+    fn missing_home_and_failed_remount_stay_restricted() {
+        use zellij_tile::prelude::Event;
+        for home in [
+            None,
+            Some("".into()),
+            Some("relative".into()),
+            Some("/".into()),
+        ] {
+            let mut state = State::default();
+            assert!(!state.prepare_home(home));
+            assert!(!state.app.is_indexing());
+            assert!(state.app.search_status.contains("HOME"));
+        }
+        let mut state = State::default();
+        state.prepare_home(Some("/home/example".into()));
+        state.handle(Event::FailedToChangeHostFolder(Some("denied".into())));
+        assert!(state.app.search_status.contains("unavailable"));
+        assert!(!state.app.is_indexing());
+    }
     #[test]
     fn sdk_click_hold_release_and_paste_obey_domain_contract() {
         use zellij_launchpad_prototype::app::{Screen, Tool};
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = State::default();
+        let mut s = demo_state();
         s.render_frame(24, 80);
         s.handle(Event::Key(key(BareKey::Char('u'), &[KeyModifier::Ctrl])));
         s.handle(Event::PastedText("notes\n\t".into()));
@@ -181,7 +263,7 @@ mod tests {
     #[test]
     fn wheel_uses_last_known_section_and_forgets_it_on_resize() {
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = State::default();
+        let mut s = demo_state();
         s.render_frame(24, 80);
         s.handle(Event::Mouse(Mouse::ScrollDown(3)));
         assert_eq!(
@@ -203,7 +285,7 @@ mod tests {
     fn queued_mouse_is_quarantined_after_resize() {
         use zellij_launchpad_prototype::{app::Screen, view::Pointer};
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = State::default();
+        let mut s = demo_state();
         s.render_frame(24, 80);
         s.render_frame(36, 120);
         let (x, y) = (0..36)
@@ -220,7 +302,7 @@ mod tests {
     #[test]
     fn renders_shared_ui_caret_hits_and_resizes_to_guard() {
         use zellij_launchpad_prototype::view::Pointer;
-        let mut state = State::default();
+        let mut state = demo_state();
         let frame = state.render_frame(24, 80);
         assert!(frame.contains("Launchpad"));
         assert!(frame.contains("\x1b[7m"), "synthetic caret is visible");

@@ -19,6 +19,11 @@ cargo tree -p launchpad-plugin --target wasm32-wasip1 --locked --edges normal > 
 "$PYTHON" -c 'from pathlib import Path; assert "crossterm" not in Path("target/plugin-verification/wasm-deps.txt").read_text()'
 run native-pty "$PYTHON" tools/verify_pty.py
 run native-cleanup "$PYTHON" tools/verify_cleanup.py
+run search-native "$PYTHON" tools/verify_search.py --native
+run search-plugin "$PYTHON" tools/verify_search.py
+run search-denied "$PYTHON" tools/verify_search.py --deny
+run search-real-home "$PYTHON" tools/verify_search.py --real-home
+run search-native-real-home "$PYTHON" tools/verify_search.py --native --real-home
 run live-1 "$PYTHON" tools/verify_zellij.py
 run live-2 "$PYTHON" tools/verify_zellij.py
 OUT=$("$PYTHON" -c 'import json;print(json.load(open("target/plugin-verification/live-2.log"))["evidence"])')

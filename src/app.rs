@@ -1,7 +1,4 @@
-use crate::{
-    editor::Editor,
-    fixtures::{self, Directory},
-};
+use crate::{editor::Editor, fixtures, search::Directory};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -98,6 +95,10 @@ pub struct App {
     pub confirm_clear: bool,
     cycle: Option<(Vec<usize>, usize)>,
     next_id: u64,
+    demo: bool,
+    index: Option<crate::search::HomeIndex>,
+    pub search_status: String,
+    show_suggestions: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollTarget {
@@ -108,9 +109,9 @@ pub enum ScrollTarget {
 impl Default for App {
     fn default() -> Self {
         let mut editor = Editor::default();
-        editor.set("~/Projects/");
-        let dirs = fixtures::directories();
-        let suggestions = fixtures::matches(&editor.text, &dirs);
+        editor.set("~");
+        let dirs = Vec::new();
+        let suggestions = Vec::new();
         Self {
             editor,
             dirs,
@@ -118,7 +119,7 @@ impl Default for App {
             highlighted: None,
             focus: Focus::Path,
             tool: Tool::Shell,
-            history: fixtures::history(),
+            history: Vec::new(),
             recent: 0,
             screen: Screen::Dashboard,
             message: None,
@@ -131,12 +132,90 @@ impl Default for App {
             confirm_clear: false,
             cycle: None,
             next_id: 10,
+            demo: false,
+            index: None,
+            search_status: "Waiting for HOME access.".into(),
+            show_suggestions: true,
         }
     }
 }
 impl App {
+    pub fn from_home(home: std::path::PathBuf, root: std::path::PathBuf) -> Self {
+        let mut app = Self::default();
+        match crate::search::HomeIndex::new(home, root) {
+            Ok(index) => {
+                app.search_status = index.status();
+                app.index = Some(index);
+            }
+            Err(error) => app.search_status = error,
+        }
+        app
+    }
+    pub fn is_demo(&self) -> bool {
+        self.demo
+    }
+    pub fn is_indexing(&self) -> bool {
+        self.index.as_ref().is_some_and(|i| i.is_scanning())
+    }
+    pub fn index_tick(&mut self) -> bool {
+        let Some(index) = self.index.as_mut() else {
+            return false;
+        };
+        if !index.is_scanning() {
+            return false;
+        }
+        index.step(128);
+        self.dirs.extend_from_slice(&index.dirs[self.dirs.len()..]);
+        self.search_status = index.status();
+        if self.show_suggestions && self.cycle.is_none() {
+            let selected = self
+                .highlighted
+                .and_then(|i| self.suggestions.get(i))
+                .copied();
+            self.suggestions = self.matches();
+            self.highlighted =
+                selected.and_then(|id| self.suggestions.iter().position(|&i| i == id));
+        }
+        true
+    }
+    fn matches(&self) -> Vec<usize> {
+        if self.demo {
+            return fixtures::matches(&self.editor.text, &self.dirs);
+        }
+        let Some(index) = &self.index else {
+            return Vec::new();
+        };
+        let home = index.home.to_str().expect("validated HOME");
+        let mut results = crate::search::matches_in(&self.editor.text, &self.dirs, home, home);
+        results.truncate(100);
+        results
+    }
+    pub fn demo() -> Self {
+        let mut app = Self {
+            demo: true,
+            dirs: fixtures::directories(),
+            history: fixtures::history(),
+            ..Self::default()
+        };
+        app.editor.set("~/Projects/");
+        app.suggestions = fixtures::matches(&app.editor.text, &app.dirs);
+        app
+    }
     pub fn path_label(&self, path: &str) -> String {
-        fixtures::short(path)
+        if self.demo {
+            return fixtures::short(path);
+        }
+        self.index
+            .as_ref()
+            .and_then(|i| std::path::Path::new(path).strip_prefix(&i.home).ok())
+            .map(|rest| {
+                if rest.as_os_str().is_empty() {
+                    "~".into()
+                } else {
+                    format!("~/{}", rest.display())
+                }
+            })
+            .unwrap_or_else(|| path.into())
     }
 
     pub fn update(&mut self, action: Action) {
@@ -146,7 +225,19 @@ impl App {
         }
         if action == Action::Reset {
             let compact = self.compact;
-            *self = Self::default();
+            let index = self.index.as_ref().map(|i| i.restart());
+            let status = self.search_status.clone();
+            *self = if self.demo {
+                Self::demo()
+            } else {
+                Self::default()
+            };
+            if let Some(index) = index {
+                self.search_status = index.status();
+                self.index = Some(index);
+            } else if !self.demo {
+                self.search_status = status;
+            }
             self.compact = compact;
             return;
         }
@@ -188,6 +279,7 @@ impl App {
                 self.message = None;
             } else if !self.suggestions.is_empty() || self.cycle.is_some() {
                 self.suggestions.clear();
+                self.show_suggestions = false;
                 self.highlighted = None;
                 self.cycle = None;
             } else if self.message.is_some() {
@@ -361,11 +453,12 @@ impl App {
                 }
                 Action::Tab => {
                     if let Some(e) = self.history.get(self.recent) {
-                        self.editor.set(&fixtures::short(&e.path));
+                        self.editor.set(&self.path_label(&e.path));
                         self.tool = e.tool;
                         self.focus = Focus::Path;
                         self.touched = true;
                         self.suggestions.clear();
+                        self.show_suggestions = false;
                         self.highlighted = None;
                         self.cycle = None;
                         self.message = Some(if self.available(e.tool) {
@@ -432,26 +525,55 @@ impl App {
         self.message = None;
         self.highlighted = None;
         self.cycle = None;
-        self.suggestions = fixtures::matches(&self.editor.text, &self.dirs);
+        self.show_suggestions = true;
+        self.suggestions = self.matches();
     }
     fn accept(&mut self, index: usize) {
-        self.editor.set(&fixtures::short(self.dirs[index].path));
+        if let Some(source) = &self.index
+            && let Err(error) = source.validate(&self.dirs[index].path)
+        {
+            self.message = Some(error);
+            self.suggestions.retain(|&i| i != index);
+            self.highlighted = None;
+            return;
+        }
+        self.editor.set(&self.path_label(&self.dirs[index].path));
+        self.show_suggestions = false;
         self.suggestions.clear();
         self.highlighted = None;
         self.message = None;
         self.touched = true;
     }
     fn launch(&mut self, raw: String, tool: Tool) {
-        let path = fixtures::normalize(&raw);
-        let Some(dir) = self.dirs.iter().find(|d| Some(d.path) == path.as_deref()) else {
-            self.message =
-                Some("Directory not found. Choose a suggestion or enter a fixture path.".into());
+        let path = if self.demo {
+            let path = fixtures::normalize(&raw);
+            let Some(dir) = self
+                .dirs
+                .iter()
+                .find(|d| Some(d.path.as_str()) == path.as_deref())
+            else {
+                self.message = Some(
+                    "Directory not found. Choose a suggestion or enter a fixture path.".into(),
+                );
+                return;
+            };
+            if let Some(error) = dir.error {
+                self.message = Some(error.into());
+                return;
+            }
+            dir.path.clone()
+        } else if let Some(index) = &self.index {
+            match index.validate(&raw) {
+                Ok(path) => path,
+                Err(error) => {
+                    self.message = Some(error);
+                    return;
+                }
+            }
+        } else {
+            self.message = Some(self.search_status.clone());
             return;
         };
-        if let Some(error) = dir.error {
-            self.message = Some(error.into());
-            return;
-        }
         if !self.available(tool) {
             self.message = Some(format!(
                 "{} is unavailable. Tab copies; Ctrl+T chooses a tool.",
@@ -462,7 +584,7 @@ impl App {
         self.next_id += 1;
         let event = Launch {
             id: self.next_id,
-            path: dir.path.into(),
+            path,
             tool,
             age: "Just now".into(),
         };
@@ -481,10 +603,20 @@ mod tests {
         a.update(Action::Text(text.into()));
     }
     #[test]
+    fn normal_startup_never_contains_demo_data() {
+        let app = App::default();
+        assert!(
+            app.history.is_empty(),
+            "real startup must not invent launch history"
+        );
+        assert!(app.dirs.is_empty());
+        assert_eq!(app.editor.text, "~");
+    }
+    #[test]
     fn hidden_controls_never_launch_and_escape_help_quit_are_safe() {
         let mut a = App {
             compact: true,
-            ..App::default()
+            ..App::demo()
         };
         a.update(Action::Enter);
         assert_eq!(a.screen, Screen::Dashboard);
@@ -508,7 +640,7 @@ mod tests {
     }
     #[test]
     fn invalid_paths_preserve_form_and_literal_paths_launch_all_five_tools() {
-        let mut a = App::default();
+        let mut a = App::demo();
         for (path, error) in [
             ("~/restricted", "Permission"),
             ("~/broken-link", "symlink"),
@@ -534,7 +666,7 @@ mod tests {
     }
     #[test]
     fn escape_cancels_history_clear_with_default_suggestions() {
-        let mut a = App::default();
+        let mut a = App::demo();
         let history = a.history.clone();
         let suggestions = a.suggestions.clone();
         assert!(!history.is_empty());
@@ -561,7 +693,7 @@ mod tests {
     }
     #[test]
     fn history_replays_copies_prunes_duplicates_and_revalidates_tools() {
-        let mut a = App::default();
+        let mut a = App::demo();
         assert_eq!(a.history.len(), 10);
         a.update(Action::Focus(Focus::History));
         a.update(Action::Down);
@@ -619,13 +751,13 @@ mod tests {
     }
     #[test]
     fn focus_navigation_completion_cycle_and_path_keys_are_distinct() {
-        let mut a = App::default();
+        let mut a = App::demo();
         query(&mut a, "notes");
         let options = a.suggestions.clone();
         a.update(Action::Tab);
-        assert_eq!(a.editor.text, fixtures::short(a.dirs[options[0]].path));
+        assert_eq!(a.editor.text, fixtures::short(&a.dirs[options[0]].path));
         a.update(Action::Tab);
-        assert_eq!(a.editor.text, fixtures::short(a.dirs[options[1]].path));
+        assert_eq!(a.editor.text, fixtures::short(&a.dirs[options[1]].path));
         a.update(Action::BackTab);
         assert_eq!(a.editor.text, "~/Projects/notes");
         assert_eq!(a.screen, Screen::Dashboard);
@@ -652,7 +784,7 @@ mod tests {
     }
     #[test]
     fn completion_accepts_only_then_validated_enter_simulates_launch() {
-        let mut a = App::default();
+        let mut a = App::demo();
         assert_eq!(a.focus, Focus::Path);
         assert_eq!(a.tool, Tool::Shell);
         query(&mut a, "nts");
