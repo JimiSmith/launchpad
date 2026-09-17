@@ -55,6 +55,7 @@ The input is the primary visual element. Suggestions occupy a capped region imme
 
 Responsive behaviour:
 
+- Maximum UI width: 160 terminal columns, including horizontal padding. Center the UI in wider terminals; side gutters are non-interactive. Apply the same cap to the dashboard, help, and simulated terminal/closed views.
 - At least 80×24: full layout and up to ten history rows.
 - Smaller viewports: scroll history, wrap tool choices, preserve path input and errors.
 - Below 40×10: explicit compact/resize notice; never launch because controls are hidden.

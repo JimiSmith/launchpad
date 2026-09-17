@@ -1,0 +1,24 @@
+// Isolated opt-in config, never installed as the user's global config.
+default_mode "locked"
+pane_frames false
+mouse_mode true
+session_serialization false
+show_startup_tips false
+show_release_notes false
+keybinds clear-defaults=true {
+    locked {
+        bind "Ctrl g" { SwitchToMode "normal"; }
+    }
+    normal {
+        bind "Ctrl g" { SwitchToMode "locked"; }
+        bind "Ctrl q" { Quit; }
+        bind "Alt Right" { GoToNextTab; }
+        bind "Alt Left" { GoToPreviousTab; }
+        bind "Ctrl p" { SwitchToMode "pane"; }
+        bind "Ctrl t" { SwitchToMode "tab"; }
+        bind "Ctrl r" { SwitchToMode "resize"; }
+    }
+    shared_except "locked" {
+        bind "Esc" { SwitchToMode "normal"; }
+    }
+}

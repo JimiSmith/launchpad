@@ -1,0 +1,24 @@
+  ›_ Launchpad                                              DEMO / memory only  
+  01 Directory                                                          Ctrl+P  
+  ┌──────────────────────────────────────────────────────────────────────────┐  
+  │ › ~/Projects/missing                                                     │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+   · ~/Projects/missing/                                     missing directory  
+                                                                                
+                                                                                
+  02 Launch with                                                        Ctrl+T  
+  [ Shell ]   Claude     Codex     Copilot     Hermes              Enter ↵      
+  Directory missing. Choose a suggestion; nothing was created.                  
+  03 Recent launches · 10 events                                        Ctrl+R  
+     TOOL     DIRECTORY                                                   WHEN  
+  01 Claude   ~/Projects/notes                                        Just now  
+  02 Claude   ~/Projects/notes                                        Just now  
+  03 Claude   ~/Projects/launchpad                                     12m ago  
+  04 Shell    ~/Projects/notes                                         38m ago  
+  05 Codex    ~/Projects/service                                        1h ago  
+  06 Hermes   ~/Projects/team notes                                     2h ago  
+  07 Claude   ~/Projects/launchpad                                      3h ago  
+  08 Copilot  ~/Projects/service                                        4h ago  
+  09 Shell    ~/Projects/current                                     Yesterday  
+  10 Codex    ~/Projects/修理                                        Yesterday  
+  PATH Tab complete · ↑↓ select               F1 help · F5 reset · Ctrl+Q quit  

@@ -1,0 +1,24 @@
+  Launchpad / help                                                  SIMULATION  
+                                                                                
+  F1 / Esc  Back to the launcher                                                
+  Ctrl+Q / Ctrl+C  Quit                                                         
+  Ctrl+P / Ctrl+T / Ctrl+R  Path / tools / recent                               
+                                                                                
+  PATH   Type any fixture path or fuzzy query, e.g. notes / nts                 
+  Tab / Shift+Tab  Accept next / previous completion                            
+  ↑ / ↓  Highlight suggestions; Enter accepts only                              
+  Enter without a highlight  Validate and simulate launch                       
+  ← / → / Home / End  Move by grapheme                                          
+  Ctrl+A / Ctrl+E  Home / end · Ctrl+U  Clear input                             
+  Backspace / Delete  Remove a whole grapheme                                   
+                                                                                
+  TOOLS  ← / → select · ↑ path · ↓ recent · Enter launch                        
+  RECENT ↑ / ↓ select · Home / End · Enter replay                               
+  Tab copy path + tool · Delete remove · Ctrl+L clear (confirm)                 
+                                                                                
+  F5  Reset fixtures · F6  Toggle Copilot availability                          
+  Esc dismisses transient UI, then closes an untouched pane                     
+  Esc returns from the simulated terminal / closed pane                         
+                                                                                
+  MOUSE Left click: place path cursor, accept a suggestion,                     
+  ↑↓ / wheel scroll · Home/End                                        Esc back  

@@ -37,6 +37,72 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     }
 }
 #[test]
+fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
+    use ratatui::layout::Rect;
+    use view::Pointer;
+
+    let mut states = vec![App::default()];
+    let mut help = App::default();
+    help.update(Action::Help);
+    states.push(help);
+    let mut terminal = App::default();
+    terminal.update(Action::Enter);
+    states.push(terminal);
+    let mut closed = App::default();
+    closed.update(Action::Escape);
+    closed.update(Action::Escape);
+    states.push(closed);
+
+    for app in states {
+        for height in [24, 36] {
+            let mut baseline = Terminal::new(TestBackend::new(160, height)).unwrap();
+            let mut base_hits = view::HitMap::default();
+            baseline
+                .draw(|f| base_hits = view::render_with_hits(f, &app))
+                .unwrap();
+            for width in [161, 200, 241] {
+                let offset = (width - 160) / 2;
+                let mut wide = Terminal::new(TestBackend::new(width, height)).unwrap();
+                let mut hits = view::HitMap::default();
+                wide.draw(|f| hits = view::render_with_hits(f, &app))
+                    .unwrap();
+                for y in 0..height {
+                    for x in 0..width {
+                        if x >= offset && x < offset + 160 {
+                            assert_eq!(
+                                wide.backend().buffer()[(x, y)],
+                                baseline.backend().buffer()[(x - offset, y)],
+                                "{width}x{height} at {x},{y}"
+                            );
+                        } else {
+                            assert_eq!(wide.backend().buffer()[(x, y)].symbol(), " ");
+                        }
+                        for pointer in [Pointer::Click, Pointer::ScrollUp, Pointer::ScrollDown] {
+                            let actual = hits.action(pointer, x, y, Rect::new(0, 0, width, height));
+                            let expected = if x >= offset && x < offset + 160 {
+                                base_hits.action(
+                                    pointer,
+                                    x - offset,
+                                    y,
+                                    Rect::new(0, 0, 160, height),
+                                )
+                            } else {
+                                None
+                            };
+                            assert_eq!(
+                                format!("{actual:?}"),
+                                format!("{expected:?}"),
+                                "mouse {width}x{height} at {x},{y}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn minimum_usable_view_keeps_selected_history_visible() {
     let mut a = App::default();
     a.update(Action::Focus(Focus::History));

@@ -1,0 +1,324 @@
+launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+├── ratatui v0.30.2
+│   ├── instability v0.3.13 (proc-macro)
+│   │   ├── darling v0.24.1
+│   │   │   ├── darling_core v0.24.1
+│   │   │   │   ├── ident_case v1.0.1
+│   │   │   │   ├── proc-macro2 v1.0.107
+│   │   │   │   │   └── unicode-ident v1.0.26
+│   │   │   │   ├── quote v1.0.47
+│   │   │   │   │   └── proc-macro2 v1.0.107 (*)
+│   │   │   │   ├── strsim v0.11.1
+│   │   │   │   └── syn v3.0.6
+│   │   │   │       ├── proc-macro2 v1.0.107 (*)
+│   │   │   │       ├── quote v1.0.47 (*)
+│   │   │   │       └── unicode-ident v1.0.26
+│   │   │   └── darling_macro v0.24.1 (proc-macro)
+│   │   │       ├── darling_core v0.24.1 (*)
+│   │   │       ├── quote v1.0.47 (*)
+│   │   │       └── syn v3.0.6 (*)
+│   │   ├── indoc v2.0.7 (proc-macro)
+│   │   ├── proc-macro2 v1.0.107 (*)
+│   │   ├── quote v1.0.47 (*)
+│   │   └── syn v3.0.6 (*)
+│   ├── ratatui-core v0.1.2
+│   │   ├── bitflags v2.13.2
+│   │   ├── compact_str v0.9.1
+│   │   │   ├── castaway v0.2.4
+│   │   │   │   └── rustversion v1.0.23 (proc-macro)
+│   │   │   ├── cfg-if v1.0.5
+│   │   │   ├── itoa v1.0.18
+│   │   │   ├── rustversion v1.0.23 (proc-macro)
+│   │   │   ├── ryu v1.0.23
+│   │   │   └── static_assertions v1.1.0
+│   │   ├── hashbrown v0.17.1
+│   │   │   ├── allocator-api2 v0.2.21
+│   │   │   ├── equivalent v1.0.2
+│   │   │   └── foldhash v0.2.0
+│   │   ├── itertools v0.14.0
+│   │   │   └── either v1.18.0
+│   │   ├── kasuari v0.4.12
+│   │   │   ├── hashbrown v0.16.1
+│   │   │   │   ├── allocator-api2 v0.2.21
+│   │   │   │   ├── equivalent v1.0.2
+│   │   │   │   └── foldhash v0.2.0
+│   │   │   └── thiserror v2.0.20
+│   │   │       └── thiserror-impl v2.0.20 (proc-macro)
+│   │   │           ├── proc-macro2 v1.0.107 (*)
+│   │   │           ├── quote v1.0.47 (*)
+│   │   │           └── syn v3.0.6 (*)
+│   │   ├── lru v0.18.4
+│   │   │   └── hashbrown v0.17.1 (*)
+│   │   ├── strum v0.28.0
+│   │   │   └── strum_macros v0.28.0 (proc-macro)
+│   │   │       ├── heck v0.5.0
+│   │   │       ├── proc-macro2 v1.0.107 (*)
+│   │   │       ├── quote v1.0.47 (*)
+│   │   │       └── syn v2.0.119
+│   │   │           ├── proc-macro2 v1.0.107 (*)
+│   │   │           ├── quote v1.0.47 (*)
+│   │   │           └── unicode-ident v1.0.26
+│   │   ├── thiserror v2.0.20 (*)
+│   │   ├── unicode-segmentation v1.13.3
+│   │   ├── unicode-truncate v2.0.1
+│   │   │   ├── itertools v0.14.0 (*)
+│   │   │   ├── unicode-segmentation v1.13.3
+│   │   │   └── unicode-width v0.2.2
+│   │   └── unicode-width v0.2.2
+│   └── ratatui-widgets v0.3.2
+│       ├── bitflags v2.13.2
+│       ├── hashbrown v0.17.1 (*)
+│       ├── indoc v2.0.7 (proc-macro)
+│       ├── instability v0.3.13 (proc-macro) (*)
+│       ├── itertools v0.14.0 (*)
+│       ├── line-clipping v0.3.8
+│       │   └── bitflags v2.13.2
+│       ├── ratatui-core v0.1.2 (*)
+│       ├── strum v0.28.0 (*)
+│       ├── unicode-segmentation v1.13.3
+│       └── unicode-width v0.2.2
+├── zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+│   ├── neo_frizbee v0.13.1
+│   ├── ratatui v0.30.2 (*)
+│   ├── unicode-normalization v0.1.25
+│   │   └── tinyvec v1.13.3
+│   ├── unicode-segmentation v1.13.3
+│   └── unicode-width v0.2.2
+└── zellij-tile v0.45.1
+    ├── prost v0.12.6
+    │   ├── bytes v1.12.1
+    │   └── prost-derive v0.12.6 (proc-macro)
+    │       ├── anyhow v1.0.104
+    │       ├── itertools v0.12.1
+    │       │   └── either v1.18.0
+    │       ├── proc-macro2 v1.0.107 (*)
+    │       ├── quote v1.0.47 (*)
+    │       └── syn v2.0.119 (*)
+    ├── serde v1.0.229
+    │   ├── serde_core v1.0.229
+    │   └── serde_derive v1.0.229 (proc-macro)
+    │       ├── proc-macro2 v1.0.107 (*)
+    │       ├── quote v1.0.47 (*)
+    │       └── syn v3.0.6 (*)
+    ├── serde_json v1.0.151
+    │   ├── itoa v1.0.18
+    │   ├── memchr v2.8.3
+    │   ├── serde_core v1.0.229
+    │   └── zmij v1.0.23
+    ├── strum v0.28.0 (*)
+    ├── strum_macros v0.28.0 (proc-macro) (*)
+    └── zellij-utils v0.45.1
+        ├── anyhow v1.0.104
+        ├── backtrace v0.3.76
+        │   ├── addr2line v0.25.1
+        │   │   └── gimli v0.32.3
+        │   ├── cfg-if v1.0.5
+        │   ├── libc v0.2.189
+        │   ├── miniz_oxide v0.8.9
+        │   │   └── adler2 v2.0.1
+        │   ├── object v0.37.3
+        │   │   └── memchr v2.8.3
+        │   └── rustc-demangle v0.1.28
+        ├── bitflags v2.13.2
+        ├── clap v4.6.7
+        │   ├── clap_builder v4.6.7
+        │   │   ├── anstream v1.0.0
+        │   │   │   ├── anstyle v1.0.14
+        │   │   │   ├── anstyle-parse v1.0.0
+        │   │   │   │   └── utf8parse v0.2.2
+        │   │   │   ├── anstyle-query v1.1.5
+        │   │   │   ├── colorchoice v1.0.5
+        │   │   │   ├── is_terminal_polyfill v1.70.2
+        │   │   │   └── utf8parse v0.2.2
+        │   │   ├── anstyle v1.0.14
+        │   │   ├── clap_lex v1.1.1
+        │   │   ├── strsim v0.11.1
+        │   │   └── terminal_size v0.4.4
+        │   └── clap_derive v4.6.7 (proc-macro)
+        │       ├── heck v0.5.0
+        │       ├── proc-macro2 v1.0.107 (*)
+        │       ├── quote v1.0.47 (*)
+        │       └── syn v3.0.6 (*)
+        ├── clap_complete v4.6.11
+        │   └── clap v4.6.7 (*)
+        ├── colored v3.1.1
+        ├── colorsys v0.6.7
+        ├── crossbeam v0.8.5
+        │   ├── crossbeam-channel v0.5.17
+        │   │   └── crossbeam-utils v0.8.23
+        │   ├── crossbeam-deque v0.8.8
+        │   │   ├── crossbeam-epoch v0.9.21
+        │   │   │   └── crossbeam-utils v0.8.23
+        │   │   └── crossbeam-utils v0.8.23
+        │   ├── crossbeam-epoch v0.9.21 (*)
+        │   ├── crossbeam-queue v0.3.14
+        │   │   └── crossbeam-utils v0.8.23
+        │   └── crossbeam-utils v0.8.23
+        ├── directories v6.0.0
+        │   └── dirs-sys v0.5.0
+        │       └── option-ext v0.2.0
+        ├── include_dir v0.7.4
+        │   └── include_dir_macros v0.7.4 (proc-macro)
+        │       ├── proc-macro2 v1.0.107 (*)
+        │       └── quote v1.0.47 (*)
+        ├── kdl v4.7.1
+        │   ├── miette v5.10.0
+        │   │   ├── miette-derive v5.10.0 (proc-macro)
+        │   │   │   ├── proc-macro2 v1.0.107 (*)
+        │   │   │   ├── quote v1.0.47 (*)
+        │   │   │   └── syn v2.0.119 (*)
+        │   │   ├── once_cell v1.21.4
+        │   │   ├── thiserror v1.0.69
+        │   │   │   └── thiserror-impl v1.0.69 (proc-macro)
+        │   │   │       ├── proc-macro2 v1.0.107 (*)
+        │   │   │       ├── quote v1.0.47 (*)
+        │   │   │       └── syn v2.0.119 (*)
+        │   │   └── unicode-width v0.1.14
+        │   ├── nom v7.1.3
+        │   │   ├── memchr v2.8.3
+        │   │   └── minimal-lexical v0.2.1
+        │   └── thiserror v1.0.69 (*)
+        ├── lazy_static v1.5.0
+        ├── libc v0.2.189
+        ├── log v0.4.34
+        ├── miette v7.6.0
+        │   ├── backtrace v0.3.76 (*)
+        │   ├── backtrace-ext v0.2.1
+        │   │   └── backtrace v0.3.76 (*)
+        │   ├── cfg-if v1.0.5
+        │   ├── miette-derive v7.6.0 (proc-macro)
+        │   │   ├── proc-macro2 v1.0.107 (*)
+        │   │   ├── quote v1.0.47 (*)
+        │   │   └── syn v2.0.119 (*)
+        │   ├── owo-colors v4.4.0
+        │   ├── supports-color v3.0.2
+        │   │   └── is_ci v1.2.0
+        │   ├── supports-hyperlinks v3.2.0
+        │   ├── supports-unicode v3.0.0
+        │   ├── terminal_size v0.4.4
+        │   ├── textwrap v0.16.4
+        │   │   ├── icu_segmenter v2.3.0
+        │   │   │   ├── icu_collections v2.3.0
+        │   │   │   │   ├── displaydoc v0.2.7 (proc-macro)
+        │   │   │   │   │   ├── proc-macro2 v1.0.107 (*)
+        │   │   │   │   │   ├── quote v1.0.47 (*)
+        │   │   │   │   │   └── syn v3.0.6 (*)
+        │   │   │   │   ├── potential_utf v0.1.6
+        │   │   │   │   │   ├── writeable v0.6.4
+        │   │   │   │   │   └── zerovec v0.11.8
+        │   │   │   │   │       ├── yoke v0.8.3
+        │   │   │   │   │       │   ├── stable_deref_trait v1.2.1
+        │   │   │   │   │       │   ├── yoke-derive v0.8.3 (proc-macro)
+        │   │   │   │   │       │   │   ├── proc-macro2 v1.0.107 (*)
+        │   │   │   │   │       │   │   ├── quote v1.0.47 (*)
+        │   │   │   │   │       │   │   ├── syn v3.0.6 (*)
+        │   │   │   │   │       │   │   └── synstructure v0.14.0
+        │   │   │   │   │       │   │       ├── proc-macro2 v1.0.107 (*)
+        │   │   │   │   │       │   │       ├── quote v1.0.47 (*)
+        │   │   │   │   │       │   │       └── syn v3.0.6 (*)
+        │   │   │   │   │       │   └── zerofrom v0.1.8
+        │   │   │   │   │       │       └── zerofrom-derive v0.1.8 (proc-macro)
+        │   │   │   │   │       │           ├── proc-macro2 v1.0.107 (*)
+        │   │   │   │   │       │           ├── quote v1.0.47 (*)
+        │   │   │   │   │       │           ├── syn v3.0.6 (*)
+        │   │   │   │   │       │           └── synstructure v0.14.0 (*)
+        │   │   │   │   │       ├── zerofrom v0.1.8 (*)
+        │   │   │   │   │       └── zerovec-derive v0.11.6 (proc-macro)
+        │   │   │   │   │           ├── proc-macro2 v1.0.107 (*)
+        │   │   │   │   │           ├── quote v1.0.47 (*)
+        │   │   │   │   │           └── syn v3.0.6 (*)
+        │   │   │   │   ├── utf8_iter v1.0.4
+        │   │   │   │   ├── yoke v0.8.3 (*)
+        │   │   │   │   ├── zerofrom v0.1.8 (*)
+        │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   ├── icu_locale_fallback v2.3.0
+        │   │   │   │   ├── icu_locale_core v2.3.0
+        │   │   │   │   │   ├── displaydoc v0.2.7 (proc-macro) (*)
+        │   │   │   │   │   ├── litemap v0.8.3
+        │   │   │   │   │   ├── tinystr v0.8.4
+        │   │   │   │   │   │   ├── displaydoc v0.2.7 (proc-macro) (*)
+        │   │   │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   │   │   ├── writeable v0.6.4
+        │   │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   │   ├── icu_locale_fallback_data v2.3.0
+        │   │   │   │   ├── icu_provider v2.3.1
+        │   │   │   │   │   ├── displaydoc v0.2.7 (proc-macro) (*)
+        │   │   │   │   │   ├── icu_locale_core v2.3.0 (*)
+        │   │   │   │   │   ├── stable_deref_trait v1.2.1
+        │   │   │   │   │   ├── writeable v0.6.4
+        │   │   │   │   │   ├── yoke v0.8.3 (*)
+        │   │   │   │   │   ├── zerofrom v0.1.8 (*)
+        │   │   │   │   │   ├── zerotrie v0.2.5
+        │   │   │   │   │   │   ├── displaydoc v0.2.7 (proc-macro) (*)
+        │   │   │   │   │   │   ├── yoke v0.8.3 (*)
+        │   │   │   │   │   │   └── zerofrom v0.1.8 (*)
+        │   │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   │   ├── potential_utf v0.1.6 (*)
+        │   │   │   │   ├── tinystr v0.8.4 (*)
+        │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   ├── icu_provider v2.3.1 (*)
+        │   │   │   ├── icu_segmenter_data v2.3.0
+        │   │   │   ├── potential_utf v0.1.6 (*)
+        │   │   │   ├── smallvec v1.16.1
+        │   │   │   ├── utf8_iter v1.0.4
+        │   │   │   └── zerovec v0.11.8 (*)
+        │   │   └── unicode-width v0.2.2
+        │   └── unicode-width v0.1.14
+        ├── percent-encoding v2.3.2
+        ├── prost v0.12.6 (*)
+        ├── serde v1.0.229 (*)
+        ├── serde_json v1.0.151 (*)
+        ├── sha2 v0.11.0
+        │   ├── cfg-if v1.0.5
+        │   └── digest v0.11.3
+        │       ├── block-buffer v0.12.1
+        │       │   └── hybrid-array v0.4.15
+        │       │       └── typenum v1.20.1
+        │       └── crypto-common v0.2.2
+        │           └── hybrid-array v0.4.15 (*)
+        ├── shellexpand v3.1.2
+        │   └── dirs v6.0.0
+        │       └── dirs-sys v0.5.0 (*)
+        ├── strip-ansi-escapes v0.2.1
+        │   └── vte v0.14.1
+        │       └── memchr v2.8.3
+        ├── strum v0.28.0 (*)
+        ├── strum_macros v0.28.0 (proc-macro) (*)
+        ├── tempfile v3.27.0
+        │   ├── fastrand v2.5.0
+        │   ├── once_cell v1.21.4
+        │   └── rustix v1.1.5
+        │       ├── bitflags v2.13.2
+        │       ├── errno v0.3.14
+        │       │   └── libc v0.2.189
+        │       └── libc v0.2.189
+        ├── thiserror v2.0.20 (*)
+        ├── unicode-width v0.2.2
+        ├── url v2.5.8
+        │   ├── form_urlencoded v1.2.2
+        │   │   └── percent-encoding v2.3.2
+        │   ├── idna v1.1.0
+        │   │   ├── idna_adapter v1.2.2
+        │   │   │   ├── icu_normalizer v2.3.0
+        │   │   │   │   ├── icu_collections v2.3.0 (*)
+        │   │   │   │   ├── icu_normalizer_data v2.3.0
+        │   │   │   │   ├── icu_provider v2.3.1 (*)
+        │   │   │   │   ├── smallvec v1.16.1
+        │   │   │   │   └── zerovec v0.11.8 (*)
+        │   │   │   └── icu_properties v2.3.0
+        │   │   │       ├── displaydoc v0.2.7 (proc-macro) (*)
+        │   │   │       ├── icu_collections v2.3.0 (*)
+        │   │   │       ├── icu_locale_core v2.3.0 (*)
+        │   │   │       ├── icu_properties_data v2.3.0
+        │   │   │       ├── icu_provider v2.3.1 (*)
+        │   │   │       ├── zerotrie v0.2.5 (*)
+        │   │   │       └── zerovec v0.11.8 (*)
+        │   │   ├── smallvec v1.16.1
+        │   │   └── utf8_iter v1.0.4
+        │   ├── percent-encoding v2.3.2
+        │   ├── serde v1.0.229 (*)
+        │   └── serde_derive v1.0.229 (proc-macro) (*)
+        └── uuid v1.26.1
+            ├── getrandom v0.4.3
+            │   └── cfg-if v1.0.5
+            └── serde_core v1.0.229

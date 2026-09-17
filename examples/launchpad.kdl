@@ -1,0 +1,11 @@
+// Run from the repository root. For another checkout, update the absolute WASM path.
+layout {
+    tab name="Launch" focus=true {
+        pane borderless=true {
+            plugin location="file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm"
+        }
+    }
+    tab name="Shell" {
+        pane name="Shell" command="sh"
+    }
+}

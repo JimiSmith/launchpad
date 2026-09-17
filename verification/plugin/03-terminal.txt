@@ -1,0 +1,24 @@
+  Terminal placeholder                                              SIMULATION  
+                                                                                
+  Claude · simulated launch accepted                                            
+                                                                                
+  cwd  /home/demo/Projects/notes                                                
+  tool Claude · fixture target                                                  
+                                                                                
+  No process was started. No host data was read.                                
+  One launch event was added to in-memory history.                              
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+  Esc back · F5 reset · Ctrl+Q quit                                             

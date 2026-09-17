@@ -117,8 +117,15 @@ pub fn render(f: &mut Frame, app: &App) {
     render_with_hits(f, app);
 }
 fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
-    let full = f.area();
-    f.render_widget(Block::default().style(base()), full);
+    let viewport = f.area();
+    f.render_widget(Block::default().style(base()), viewport);
+    let width = viewport.width.min(160);
+    let full = Rect::new(
+        viewport.x + (viewport.width - width) / 2,
+        viewport.y,
+        width,
+        viewport.height,
+    );
     if full.width < 40 || full.height < 10 {
         f.render_widget(
             Paragraph::new("Resize to at least 40 × 10.\nNo launch at this size.\nCtrl+Q quit")
