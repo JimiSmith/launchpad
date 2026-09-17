@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Zellij Launchpad · interactive prototype</title>
+<style>
+:root{--bg:#101310;--surface:#171b17;--raised:#20261f;--line:#394037;--ink:#e4e8dd;--muted:#a1aa9b;--accent:#c6da83;--on-accent:#19200f;--mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--mono)}button,input,select{font:inherit}button,select{color:inherit}button{cursor:pointer;border:0;border-radius:0;background:none}button:disabled{cursor:wait;opacity:.5}button:hover:not(:disabled){background:var(--raised)}button:focus-visible,summary:focus-visible,select:focus-visible{outline:1px solid var(--accent);outline-offset:3px}button:focus:not(:focus-visible){outline:none}[hidden]{display:none!important}::selection{background:var(--accent);color:var(--on-accent)}
+.page{max-width:1120px;margin:34px auto;padding:0 28px}.eyebrow{display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:13px}.eyebrow strong{font-weight:400;color:var(--ink)}.terminal{border:1px solid var(--line);background:var(--surface)}.tabbar{height:37px;display:flex;align-items:center;border-bottom:1px solid var(--line);font-size:12px;gap:0;background:var(--bg)}.session{padding:0 17px;color:var(--muted)}.tab{align-self:stretch;display:flex;align-items:center;padding:0 18px;gap:12px;color:var(--accent);border-left:1px solid var(--line);border-right:1px solid var(--line);background:var(--surface)}.tab-num{color:var(--muted)}.tab-rest{margin-left:auto;padding:0 17px;color:var(--muted)}.main{padding:27px 32px 0}.heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:27px;gap:16px}h1{font-size:21px;letter-spacing:-.05em;font-weight:500;margin:0}h1 span{color:var(--accent);margin-right:10px}.context{font-size:11px;color:var(--muted)}.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.section-label{font-size:12px;font-weight:400;color:var(--muted);margin:0}.section-label .index{color:var(--muted);margin-right:12px;font-size:11px}.area[data-active="true"] .section-label{color:var(--accent)}.keyhint{color:var(--muted);font-size:11px}kbd{font:inherit;color:var(--ink)}.input-line{display:flex;align-items:center;gap:12px;border:1px solid var(--line);padding:12px 15px;background:var(--bg)}.input-line:focus-within{border-color:var(--accent)}.prompt{color:var(--accent);font-size:18px}.input-line input{width:100%;min-width:0;outline:none;border:0;background:none;color:var(--ink);font-size:19px;line-height:1.5;caret-color:var(--accent)}.path-badge{font-size:10px;color:var(--muted);white-space:nowrap}.completion-region{height:142px;padding:9px 0}.suggestion{width:100%;display:flex;align-items:center;gap:12px;text-align:left;min-height:29px;padding:3px 16px;font-size:13px}.suggestion .arrow{color:var(--muted);width:12px}.suggestion .desc{margin-left:auto;color:var(--muted);font-size:11px}.suggestion.active{background:var(--raised);color:var(--accent)}.suggestion.active .arrow{color:var(--accent)}.completion-note{font-size:12px;color:var(--muted);padding:8px 16px}.inline-message{padding:10px 0;color:var(--accent);font-size:12px;overflow-wrap:anywhere}.inline-message:empty{display:none}.tools-area{padding:10px 0 22px;border-bottom:1px solid var(--line)}.tool-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tools{display:flex;gap:5px;flex-wrap:wrap}.tool{padding:7px 12px;min-height:36px;border:1px solid transparent;font-size:13px}.tool .radio{margin-right:7px;color:var(--muted)}.tool[aria-checked="true"]{color:var(--accent);border-color:var(--accent)}.tool[aria-checked="true"] .radio{color:var(--accent)}.launch{margin-left:auto;padding:8px 14px;background:var(--accent);color:var(--on-accent);min-height:36px;font-size:12px}.launch:hover:not(:disabled){background:#d7e6aa}.launch kbd{color:inherit;opacity:.75;margin-left:13px}.refresh{font-size:11px;color:var(--muted);padding:2px 4px}.recent-area{padding:22px 0 18px}.recent-title{display:flex;gap:12px;align-items:center}.count{font-size:10px;color:var(--muted)}.history-head,.recent{display:grid;grid-template-columns:26px 93px minmax(0,1fr) 108px;gap:8px;align-items:center}.history-head{padding:4px 12px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.history-head span:last-child{text-align:right}.history{max-height:320px;overflow:auto;scrollbar-color:var(--line) var(--surface)}.recent{width:100%;text-align:left;padding:5px 12px;min-height:30px;font-size:12px}.recent .marker{color:var(--muted);font-size:10px}.recent .cwd{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent .age{color:var(--muted);text-align:right;font-size:11px}.recent.selected{background:var(--raised)}.recent-area[data-active="true"] .recent.selected{color:var(--accent);outline:1px solid var(--line);outline-offset:-1px}.recent-area[data-active="true"] .recent.selected .marker{color:var(--accent)}.recent.unavailable .tool-name{text-decoration:line-through;color:var(--muted)}.history-actions{display:flex;align-items:center;gap:16px;margin-top:12px;min-height:24px;font-size:11px}.history-actions button{color:var(--muted);padding:3px 0}.history-actions button:hover{color:var(--ink)}.history-actions .push{margin-left:auto}.empty{padding:25px 12px;color:var(--muted);font-size:12px}.footer{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);padding:12px 18px;background:var(--bg);font-size:11px;color:var(--muted);min-height:44px}.focus-label{color:var(--accent);white-space:nowrap}.footer-help{display:flex;gap:16px;flex-wrap:wrap}.demo{margin-top:17px;color:var(--muted);font-size:11px}.demo-top{display:flex;gap:15px;align-items:center;flex-wrap:wrap}.demo-tag{color:var(--ink);border:1px solid var(--line);padding:2px 6px;font-size:10px}.demo button,.demo select{border:1px solid var(--line);background:var(--bg);padding:4px 8px;font-size:11px}.demo .reset{margin-left:auto}.demo details{margin-top:12px}.demo summary{cursor:pointer;width:fit-content}.demo details p{max-width:92ch;line-height:1.8;margin:10px 0}.demo label{display:flex;align-items:center;gap:7px}.demo input{accent-color:var(--accent)}.demo-notes{border-top:1px solid var(--line);margin-top:12px;padding-top:1px}.terminal-view{padding:32px;min-height:687px}.terminal-meta{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:30px;font-size:11px;color:var(--muted)}.back{color:var(--accent);padding:6px 0}.terminal-output{font-size:13px;line-height:2;overflow-wrap:anywhere}.terminal-output .dim{color:var(--muted)}.terminal-output .accent{color:var(--accent)}.cursor{display:inline-block;width:8px;height:16px;background:var(--accent);vertical-align:middle}.handoff-note{margin-top:35px;max-width:63ch;font-size:12px;color:var(--muted);line-height:1.8}.closed-view{padding:60px 32px;min-height:500px}.closed-view h2{font-size:17px;font-weight:400}.closed-view p{font-size:12px;color:var(--muted)}.compact-notice{display:none;border:1px solid var(--line);padding:24px;font-size:13px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(min-width:900px) and (max-height:860px){.page{margin-top:18px}.main{padding-top:20px}.heading{margin-bottom:20px}.completion-region{height:130px}.recent-area{padding-top:16px}.recent{min-height:27px;padding-top:3px;padding-bottom:3px}.history{max-height:270px}.terminal-view{min-height:635px}}
+@media(max-width:700px){.page{padding:0 14px;margin:18px auto}.main{padding:23px 19px 0}.eyebrow{font-size:9px}.heading{margin-bottom:23px}.context{font-size:10px}.input-line{padding:10px}.input-line input{font-size:16px}.path-badge{display:none}.tool{padding:7px 9px}.launch{margin-left:0}.tool-line{gap:12px}.history-head,.recent{grid-template-columns:19px 66px minmax(0,1fr) 70px;gap:6px}.recent{font-size:11px}.recent .age{font-size:10px}.history{max-height:270px}.keyhint{font-size:10px}.suggestion .desc{display:none}.footer{align-items:flex-start}.footer-help{gap:5px 13px}.history-actions{gap:12px;flex-wrap:wrap}.tab-rest{display:none}.terminal-view{min-height:590px;padding:22px}.terminal-meta{gap:12px}.demo .reset{margin-left:0}}
+@media(pointer:coarse){button,.tool,.recent,.suggestion{min-height:44px}.completion-region{height:190px}.history{max-height:300px}.demo button,.demo select,summary{min-height:44px}.demo summary{display:flex;align-items:center}}
+@media(max-width:359px),(max-height:279px){.terminal{display:none}.compact-notice{display:block}.demo-top>*:not(.demo-tag):not(.reset){display:none}.eyebrow{letter-spacing:0}.page{padding:0 12px}.demo details{display:none}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="eyebrow"><strong>Zellij / new-tab surface</strong><span>Design study · 01</span></div>
+  <div class="compact-notice" role="status">Launchpad needs more room.<br><br>Resize to at least 40 × 10 terminal cells.<br><br>No launch is available at this size.</div>
+  <div class="terminal" aria-label="Simulated Zellij pane">
+    <div class="tabbar"><span class="session">zellij</span><span class="tab"><span class="tab-num">1</span><span id="tab-title">Launchpad</span></span><span class="tab-rest">local · demo session</span></div>
+    <div id="dashboard">
+      <main class="main">
+        <header class="heading"><h1><span aria-hidden="true">›_</span>Launchpad</h1></header>
+        <section id="path-area" class="area" data-active="true" aria-labelledby="directory-label">
+          <div class="section-head"><label class="section-label" id="directory-label" for="directory"><span class="index">01</span>Directory</label><span class="keyhint"><kbd>Ctrl+P</kbd> focus</span></div>
+          <div class="input-line"><span class="prompt" aria-hidden="true">›</span><input id="directory" value="~/Projects/" spellcheck="false" autocomplete="off" autocapitalize="off" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="suggestions" aria-describedby="path-description message"><span class="path-badge">cwd</span></div>
+          <span class="sr-only" id="path-description">Demo fixture directories only. Tab completes; completion never launches. Arrow keys highlight suggestions.</span>
+          <div class="completion-region"><div id="suggestions" role="listbox" aria-label="Directory suggestions"></div><div id="completion-note" class="completion-note" hidden></div></div>
+        </section>
+        <section id="tools-area" class="area tools-area" aria-labelledby="tools-label">
+          <div class="section-head"><h2 class="section-label" id="tools-label"><span class="index">02</span>Launch with</h2><button class="refresh" id="refresh" title="Repeat simulated tool discovery">Refresh tools ↻</button></div>
+          <div class="tool-line"><div id="tools" class="tools" role="radiogroup" aria-label="Available launch tools"></div><button id="launch" class="launch">Launch <kbd>↵</kbd></button></div>
+          <div id="message" class="inline-message" role="status" aria-live="polite"></div>
+        </section>
+        <section id="recent-area" class="area recent-area" aria-labelledby="recent-label">
+          <div class="section-head"><div class="recent-title"><h2 class="section-label" id="recent-label"><span class="index">03</span>Recent launches</h2><span id="history-count" class="count">10 events</span></div><span class="keyhint"><kbd>Ctrl+R</kbd> focus</span></div>
+          <div class="history-head" aria-hidden="true"><span></span><span>Tool</span><span>Directory</span><span>When</span></div>
+          <div id="history" class="history" role="listbox" aria-label="Recent launch events"></div>
+          <div class="history-actions"><button id="relaunch">↵ Relaunch</button><button id="copy-entry">⇥ Copy to form</button><button class="push" id="delete-entry">Delete selected</button><button id="clear-history">Clear</button></div>
+        </section>
+      </main>
+      <footer class="footer"><span id="focus-label" class="focus-label">PATH</span><div id="footer-help" class="footer-help"></div><span aria-hidden="true">esc</span></footer>
+    </div>
+    <section id="terminal-view" class="terminal-view" aria-label="Simulated terminal handoff" hidden>
+      <div class="terminal-meta"><span>Pane 1 / terminal placeholder</span><button id="back" class="back">← Back to Launchpad</button></div>
+      <div id="terminal-output" class="terminal-output"></div>
+      <p class="handoff-note">Simulated handoff accepted. The dashboard has been replaced in this pane; no process was started. This records a launch event, not agent authentication or task completion.</p>
+    </section>
+    <section id="closed-view" class="closed-view" hidden><h2>Dashboard pane closed.</h2><p>Simulated only. The browser tab stays open.</p><button id="reopen" class="back">← Open a new Launchpad</button></section>
+  </div>
+  <aside class="demo" aria-label="Browser prototype controls">
+    <div class="demo-top"><span class="demo-tag">SIMULATION</span><span>Fixture paths & history. No host access.</span><button id="invalid-demo">Try invalid path</button><label><input type="checkbox" id="copilot-available" checked>Copilot installed</label><button id="reset" class="reset">Reset demo</button></div>
+    <details id="notes"><summary>Prototype notes & keyboard differences</summary><div class="demo-notes">
+      <p>This is an HTML UI study, not the Zellij plugin. All five tools are initially marked installed by fixture data, not PATH discovery. Refresh simulates discovery. Paths, relative times, executable labels and ten initial events are fabricated demo fixtures under <code>/home/demo</code>. History is in memory only and resets on reload; duplicates are retained.</p>
+      <p>Path suggestions use a small, static, directory-only fixture list with simple prefix filtering; no fuzzy scoring or real filesystem enumeration runs here. The real single-WASM design selects embedded Frizbee (<code>neo_frizbee</code>), with no external companion binary. Frizbee is not implemented in this page.</p>
+      <p><kbd>Tab / Shift+Tab</kbd> complete; <kbd>↑ / ↓</kbd> highlight suggestions; <kbd>Enter</kbd> accepts a highlighted suggestion without launching. Press Enter again to launch. With no suggestions, ↓ focuses tools. Tools use ← / → to select, ↑ for path, ↓ for history. History uses ↑ / ↓ to select, Enter to relaunch, and Tab to copy to the form. Clicking a tool or history row only selects it; explicit launch buttons submit. Escape dismisses transient UI first; otherwise an untouched dashboard is replaced by a closed-pane placeholder.</p>
+      <p><kbd>Ctrl+P / Ctrl+T / Ctrl+R</kbd> are handled only when the browser delivers them. Some browser or OS shortcuts cannot be intercepted (notably Ctrl+T). Mouse controls are the reliable alternative. Tab is intentionally owned inside the three command areas; click the separate prototype controls to leave the command areas. Tab without a completion moves to tools (a browser-only focus escape); tool-area Tab follows normal browser focus order. Browser focus outlines, scrolling, proportional pixel breakpoints and CSS ellipsis approximate terminal behaviour; they are not terminal-cell or Zellij normal/locked-mode verification.</p>
+      <p>Try <code>~/Projects/</code>, <code>~/Projects/.</code>, <code>./notes</code>, <code>../</code>, <code>~/Projects/team notes/</code>, <code>~/Projects/修理/</code>, <code>~/Projects/it's literal; $HOME/</code>, <code>~/restricted/</code> or <code>~/broken-link/</code>. Input is treated as literal text; no commands, shell expansion, network requests or filesystem access occur. The viewport notice approximates the spec's below-40×10 safeguard.</p>
+    </div></details>
+  </aside>
+</div>
+<script>
+'use strict';
+(() => {
+  const $ = id => document.getElementById(id);
+  const HOME = '/home/demo', CWD = HOME + '/Projects';
+  const ORDER = ['Shell','Claude','Codex','Copilot','Hermes'];
+  const fixtures = [
+    {path:HOME+'/',note:'demo home'},
+    {path:CWD+'/',note:'invoking directory'},
+    {path:CWD+'/launchpad/',note:'project'},
+    {path:CWD+'/notes/',note:'project'},
+    {path:CWD+'/service/',note:'project'},
+    {path:CWD+'/team notes/',note:'spaces are literal'},
+    {path:CWD+'/修理/',note:'Unicode directory'},
+    {path:CWD+"/it's literal; $HOME/",note:'literal filename'},
+    {path:CWD+'/.archive/',note:'hidden directory'},
+    {path:CWD+'/current/',note:'symlink → launchpad'},
+    {path:HOME+'/Documents/',note:'directory'},
+    {path:HOME+'/restricted/',note:'permission denied',error:'Permission denied. Choose an accessible fixture directory; permissions cannot be changed here.'},
+    {path:HOME+'/broken-link/',note:'broken symlink',error:'Broken symlink. Choose another directory or correct the target outside Launchpad.'}
+  ];
+  const initialEvents = [
+    ['Claude','launchpad','12m ago'],['Shell','notes','38m ago'],['Codex','service','1h ago'],['Hermes','team notes','2h ago'],['Claude','launchpad','3h ago'],['Copilot','service','4h ago'],['Shell','current','Yesterday'],['Codex','修理','Yesterday'],['Hermes','notes','Yesterday'],['Shell',"it's literal; $HOME",'2d ago']
+  ].map((e,i)=>({id:'fixture-'+i,tool:e[0],path:CWD+'/'+e[1]+'/',age:e[2]}));
+  let events=[], available=[], tool='Shell', focus='path', recentIndex=0;
+  let suggestions=[], highlighted=-1, dismissed=false, completionCycle=null;
+  let busy=false, checking=false, touched=false, generation=0, launchTimer, discoveryTimer, eventId=0;
+  const compact = () => matchMedia('(max-width:359px),(max-height:279px)').matches;
+  const short = p => p === HOME+'/' ? '~/' : p.startsWith(HOME+'/') ? '~'+p.slice(HOME.length) : p;
+  function normalize(raw) {
+    if (!raw.trim()) return null;
+    if ((raw.startsWith('~') && raw !== '~' && !raw.startsWith('~/')) || raw.startsWith('$')) return null;
+    let p=raw==='~'?HOME:raw.startsWith('~/')?HOME+raw.slice(1):raw;
+    if (!p.startsWith('/')) p=CWD+'/'+p;
+    const parts=[];
+    p.split('/').forEach(part=>{if(part==='..') parts.pop();else if(part && part!=='.') parts.push(part);});
+    return parts.length ? '/'+parts.join('/')+'/' : '/';
+  }
+  function setMessage(text, invalid=false) {
+    $('message').textContent=text;
+    $('directory').setAttribute('aria-invalid',String(invalid));
+  }
+  function footer() {
+    $('focus-label').textContent=focus.toUpperCase();
+    const hints = focus==='path' ? ['Tab complete','↑↓ suggestions','Enter accept / launch'] : focus==='tools' ? ['←→ choose tool','↑ path · ↓ recent','Enter launch'] : ['↑↓ select','Tab copy to form','Enter relaunch'];
+    $('footer-help').replaceChildren(...hints.map(t=>{const s=document.createElement('span');s.textContent=t;return s;}));
+    ['path','tools','recent'].forEach(a=>$(a+'-area').dataset.active=String(a===focus));
+  }
+  function focusArea(area) {
+    focus=area;footer();
+    if(area==='path') $('directory').focus();
+    if(area==='tools') {
+      const target=[...$('tools').children].find(b=>b.dataset.tool===tool)||$('tools').firstElementChild;
+      if(target) target.focus();
+    }
+    if(area==='recent') {
+      if(events.length) {renderHistory();$('history').children[recentIndex].focus();}
+      else {$('directory').focus();focus='path';footer();}
+    }
+  }
+  function updateSuggestions() {
+    highlighted=-1;
+    const raw=$('directory').value;
+    if(dismissed || !raw || !normalize(raw)) {suggestions=[];renderSuggestions();return;}
+    const full=normalize(raw), exact=fixtures.some(f=>f.path===full);
+    let parent, component;
+    if(raw.endsWith('/') || raw==='~' || raw==='.' || raw==='..') {parent=full;component='';}
+    else {const cut=raw.lastIndexOf('/');parent=cut<0?CWD+'/':normalize(raw.slice(0,cut+1));component=raw.slice(cut+1);}
+    suggestions=fixtures.filter(f=>f.path.startsWith(parent) && f.path!==parent && !f.path.slice(parent.length,-1).includes('/') && f.path.slice(parent.length,-1).startsWith(component) && (component.startsWith('.') || !f.path.slice(parent.length).startsWith('.'))).slice(0,4);
+    renderSuggestions(exact);
+  }
+  function renderSuggestions(exact=false) {
+    const list=$('suggestions');list.replaceChildren();
+    suggestions.forEach((f,i)=>{
+      const row=document.createElement('button');row.type='button';row.className='suggestion'+(i===highlighted?' active':'');row.id='suggestion-'+i;row.tabIndex=-1;row.setAttribute('role','option');row.setAttribute('aria-selected',String(i===highlighted));
+      const arrow=document.createElement('span');arrow.className='arrow';arrow.textContent=i===highlighted?'›':'·';
+      const name=document.createElement('span');name.textContent=f.path.split('/').filter(Boolean).at(-1)+'/';
+      const desc=document.createElement('span');desc.className='desc';desc.textContent=f.note;
+      row.append(arrow,name,desc);row.addEventListener('mousedown',e=>e.preventDefault());row.addEventListener('click',()=>accept(f));list.append(row);
+    });
+    $('directory').setAttribute('aria-expanded',String(suggestions.length>0));
+    if(highlighted>=0) $('directory').setAttribute('aria-activedescendant','suggestion-'+highlighted);else $('directory').removeAttribute('aria-activedescendant');
+    $('completion-note').hidden=!!suggestions.length;
+    $('completion-note').textContent=dismissed?'Completion accepted or dismissed. Enter launches · edit to browse again.':exact?'No child directories in this fixture. ↓ Choose a tool.':'No matching fixture directories. Edit the path or launch to validate.';
+  }
+  function accept(candidate) {
+    if(!candidate) return;
+    $('directory').value=short(candidate.path);touched=true;dismissed=true;suggestions=[];highlighted=-1;setMessage('');renderSuggestions();focusArea('path');
+  }
+  function renderTools() {
+    $('tools').replaceChildren();
+    if(checking){const s=document.createElement('span');s.className='completion-note';s.textContent='Checking installed tools…';$('tools').append(s);return;}
+    available.forEach(name=>{
+      const b=document.createElement('button');b.type='button';b.className='tool';b.dataset.tool=name;b.setAttribute('role','radio');b.setAttribute('aria-checked',String(tool===name));b.tabIndex=tool===name?0:-1;
+      const radio=document.createElement('span');radio.className='radio';radio.textContent=tool===name?'●':'○';radio.setAttribute('aria-hidden','true');b.append(radio,document.createTextNode(name));
+      b.addEventListener('focus',()=>{focus='tools';footer();});
+      b.addEventListener('click',()=>{if(busy)return;tool=name;touched=true;setMessage('');renderTools();focusArea('tools');});$('tools').append(b);
+    });
+  }
+  function renderHistory() {
+    const h=$('history');h.replaceChildren();recentIndex=Math.max(0,Math.min(recentIndex,events.length-1));
+    $('history-count').textContent=events.length+' event'+(events.length===1?'':'s');
+    if(!events.length) {const p=document.createElement('div');p.className='empty';p.textContent='No recent launches. Start with a directory above.';h.append(p);}
+    events.forEach((event,i)=>{
+      const b=document.createElement('button');b.type='button';b.className='recent'+(i===recentIndex?' selected':'')+(!available.includes(event.tool)?' unavailable':'');b.setAttribute('role','option');b.setAttribute('aria-selected',String(i===recentIndex));b.tabIndex=i===recentIndex?0:-1;b.title=event.tool+' · '+event.path+(!available.includes(event.tool)?' · tool unavailable':'');
+      [['marker',i===recentIndex&&focus==='recent'?'›':String(i+1).padStart(2,'0')],['tool-name',event.tool],['cwd',short(event.path)],['age',available.includes(event.tool)?event.age:'unavailable']].forEach(([c,t])=>{const s=document.createElement('span');s.className=c;s.textContent=t;b.append(s);});
+      b.addEventListener('focus',()=>{focus='recent';footer();});
+      b.addEventListener('click',()=>{if(busy)return;recentIndex=i;focusArea('recent');});h.append(b);
+    });
+    ['relaunch','copy-entry','delete-entry','clear-history'].forEach(id=>$(id).disabled=!events.length||busy);
+  }
+  function copyEntry() {
+    const e=events[recentIndex];if(!e||busy)return;
+    $('directory').value=short(e.path);tool=e.tool;touched=true;dismissed=true;completionCycle=null;updateSuggestions();renderTools();focusArea('path');
+    setMessage(available.includes(tool)?'Copied to form. Edit freely; nothing launched.':tool+' is unavailable. Directory copied; explicitly choose an available tool before launch.');
+  }
+  function freeze(value) {
+    busy=value;$('directory').readOnly=value;$('launch').disabled=value||checking;$('copilot-available').disabled=value;
+    document.querySelectorAll('#tools button, #refresh, #history button').forEach(b=>b.disabled=value);renderHistory();
+  }
+  function launch(path=$('directory').value, selectedTool=tool) {
+    if(busy||checking||compact()||$('dashboard').hidden)return;
+    $('clear-history').textContent='Clear';
+    const target=normalize(path), fixture=fixtures.find(f=>f.path===target), token=generation;
+    freeze(true);setMessage('Validating directory and tool…');
+    launchTimer=setTimeout(()=>{
+      if(token!==generation)return;
+      let error='';
+      if(!target) error='Enter an absolute path, ~/… or a relative directory. User-home and variable expansion are not supported.';
+      else if(!fixture) error='Directory not found in demo fixtures. Try ~/Projects/ or choose a suggestion. No directory was created.';
+      else if(fixture.error) error=fixture.error;
+      else if(!available.includes(selectedTool)) error=selectedTool+' is unavailable. Copy the directory to the form and explicitly choose an installed tool.';
+      if(error){freeze(false);setMessage('[!] '+error,true);focusArea(focus);return;}
+      setMessage('Launching '+selectedTool+'… simulated pane replacement');
+      launchTimer=setTimeout(()=>{
+        if(token!==generation)return;
+        events.unshift({id:'demo-'+(++eventId),tool:selectedTool,path:target,age:'Just now'});events=events.slice(0,10);recentIndex=0;
+        freeze(false);setMessage('');$('dashboard').hidden=true;$('terminal-view').hidden=false;
+        $('tab-title').textContent=(target.split('/').filter(Boolean).at(-1)||'/')+' · '+selectedTool;
+        const out=$('terminal-output');out.replaceChildren();
+        const lines=[['dim','[simulation] '+selectedTool+' terminal accepted in pane 1'],['dim','cwd  '+target],['dim','target  '+(selectedTool==='Shell'?"Zellij’s configured default shell":selectedTool.toLowerCase()+' · fixture PATH target')],['accent','demo@local '+short(target)+' › ']];
+        lines.forEach(([c,t],i)=>{const p=document.createElement('div');p.className=c;p.textContent=t;if(i===3){const cursor=document.createElement('span');cursor.className='cursor';p.append(cursor);}out.append(p);});
+        $('back').focus();
+      },260);
+    },240);
+  }
+  function relaunch(){const e=events[recentIndex];if(e)launch(e.path,e.tool);}
+  function discover(){
+    if(busy||checking)return;checking=true;renderTools();$('launch').disabled=true;$('refresh').disabled=true;
+    discoveryTimer=setTimeout(()=>{checking=false;available=ORDER.filter(t=>t!=='Copilot'||$('copilot-available').checked);if(!available.includes(tool)){tool='Shell';setMessage('Selected tool disappeared. Reset to Shell; review the selection before launching.');}renderTools();renderHistory();$('launch').disabled=false;$('refresh').disabled=false;},500);
+  }
+  function reset(){
+    generation++;clearTimeout(launchTimer);clearTimeout(discoveryTimer);checking=false;busy=false;touched=false;events=initialEvents.map(e=>({...e}));available=[...ORDER];tool='Shell';recentIndex=0;dismissed=false;completionCycle=null;focus='path';$('copilot-available').checked=true;$('copilot-available').disabled=false;$('directory').value='~/Projects/';$('directory').readOnly=false;$('refresh').disabled=false;$('launch').disabled=false;$('dashboard').hidden=false;$('terminal-view').hidden=true;$('closed-view').hidden=true;$('tab-title').textContent='Launchpad';$('clear-history').textContent='Clear';setMessage('');renderTools();renderHistory();updateSuggestions();focusArea('path');
+  }
+  $('directory').addEventListener('focus',()=>{focus='path';footer();});
+  $('directory').addEventListener('input',()=>{dismissed=false;completionCycle=null;touched=true;setMessage('');updateSuggestions();});
+  $('launch').addEventListener('click',()=>launch());$('relaunch').addEventListener('click',relaunch);$('copy-entry').addEventListener('click',copyEntry);
+  $('refresh').addEventListener('click',discover);$('copilot-available').addEventListener('change',discover);
+  $('delete-entry').addEventListener('click',()=>{if(busy||!events.length)return;events.splice(recentIndex,1);renderHistory();focusArea(events.length?'recent':'path');});
+  $('clear-history').addEventListener('click',()=>{if(busy)return;if($('clear-history').textContent==='Confirm clear?'){events=[];renderHistory();$('clear-history').textContent='Clear';focusArea('path');setMessage('Demo history cleared. Reset demo restores fixtures.');}else{$('clear-history').textContent='Confirm clear?';setMessage('Clear all demo history? Click “Confirm clear?” again, or Esc to cancel.');}});
+  $('invalid-demo').addEventListener('click',()=>{if(busy)return;$('directory').value='~/Projects/missing/';touched=true;dismissed=false;completionCycle=null;updateSuggestions();focusArea('path');launch();});
+  $('reset').addEventListener('click',reset);$('reopen').addEventListener('click',reset);
+  $('back').addEventListener('click',()=>{$('terminal-view').hidden=true;$('dashboard').hidden=false;$('tab-title').textContent='Launchpad';tool='Shell';touched=false;setMessage('Returned to the demo launcher. Shell is the default; history includes the accepted event.');renderTools();renderHistory();focusArea('path');});
+  document.addEventListener('keydown',e=>{
+    if($('dashboard').hidden||compact()||e.isComposing)return;
+    if(e.altKey||e.metaKey)return;
+    const inPane=$('dashboard').contains(document.activeElement);
+    if(!inPane)return;
+    if(busy){if(['Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Escape'].includes(e.key))e.preventDefault();return;}
+    if(e.ctrlKey && ['p','t','r'].includes(e.key.toLowerCase())) {e.preventDefault();focusArea({p:'path',t:'tools',r:'recent'}[e.key.toLowerCase()]);return;}
+    if(e.ctrlKey)return;
+    if(e.key==='Escape'){
+      e.preventDefault();
+      if(suggestions.length){dismissed=true;suggestions=[];highlighted=-1;renderSuggestions();}
+      else if($('message').textContent){setMessage('');$('clear-history').textContent='Clear';}
+      else if(!touched){$('dashboard').hidden=true;$('closed-view').hidden=false;$('reopen').focus();}
+      else setMessage('Form edited. Launchpad stays open; Reset demo starts an untouched pane.');
+      return;
+    }
+    if(document.activeElement===$('directory')){
+      if(e.key==='Tab'){
+        e.preventDefault();
+        if(!completionCycle && suggestions.length)completionCycle={items:[...suggestions],index:highlighted>=0?highlighted: e.shiftKey?0:-1};
+        if(completionCycle){const c=completionCycle;c.index=(c.index+(e.shiftKey?-1:1)+c.items.length)%c.items.length;accept(c.items[c.index]);}
+        else focusArea('tools');
+      }else if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+        e.preventDefault();if(suggestions.length){highlighted=highlighted<0?(e.key==='ArrowDown'?0:suggestions.length-1):(highlighted+(e.key==='ArrowDown'?1:-1)+suggestions.length)%suggestions.length;renderSuggestions();}else if(e.key==='ArrowDown')focusArea('tools');
+      }else if(e.key==='Enter'){
+        e.preventDefault();if(highlighted>=0)accept(suggestions[highlighted]);else launch();
+      }
+    }else if(document.activeElement.closest('#tools')){
+      if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter'].includes(e.key))e.preventDefault();
+      if(e.key==='ArrowLeft'||e.key==='ArrowRight'){const n=available.indexOf(tool);tool=available[(n+(e.key==='ArrowRight'?1:-1)+available.length)%available.length];touched=true;setMessage('');renderTools();focusArea('tools');}
+      else if(e.key==='ArrowUp')focusArea('path');else if(e.key==='ArrowDown')focusArea('recent');else if(e.key==='Enter')launch();
+    }else if(document.activeElement.closest('#history')){
+      if(['ArrowUp','ArrowDown','Enter','Tab'].includes(e.key))e.preventDefault();
+      if(e.key==='ArrowUp'||e.key==='ArrowDown'){recentIndex=Math.max(0,Math.min(events.length-1,recentIndex+(e.key==='ArrowDown'?1:-1)));focusArea('recent');}
+      else if(e.key==='Enter')relaunch();else if(e.key==='Tab')copyEntry();
+    }
+  });
+  reset();
+})();
+</script>
+</body>
+</html>
