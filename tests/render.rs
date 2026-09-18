@@ -13,6 +13,55 @@ fn text(b: &Buffer) -> String {
     b.content.iter().map(|c| c.symbol()).collect()
 }
 #[test]
+fn remote_results_stay_visible_between_edit_and_latest_reply() {
+    use zellij_launchpad_prototype::remote::RemoteRequest;
+    let mut app = App::from_remote("/home/example".into());
+    app.take_remote_request();
+    assert!(app.apply_remote_results(0, vec!["/home/example/notes".into()]));
+    let visible = |app: &App| text(&draw(app, 80, 24)).contains("~/notes/");
+    assert!(visible(&app));
+    let mut generations = Vec::new();
+    for action in [
+        Action::Text("n".into()),
+        Action::Backspace,
+        Action::Delete,
+        Action::Clear,
+    ] {
+        app.update(Action::Down);
+        app.update(action);
+        assert_eq!(app.highlighted, None, "editing must reset active selection");
+        assert!(
+            visible(&app),
+            "existing results must remain rendered while search is pending"
+        );
+        let Some(RemoteRequest::Query { generation, .. }) = app.take_remote_request() else {
+            panic!("editing must still schedule a fresh search")
+        };
+        generations.push(generation);
+    }
+    let latest = generations.pop().unwrap();
+    for generation in generations {
+        assert!(!app.apply_remote_results(generation, Vec::new()));
+        assert!(
+            visible(&app),
+            "stale replies must not clear the displayed results"
+        );
+    }
+    assert!(app.apply_remote_results(latest, vec!["/home/example/projects".into()]));
+    let rendered = text(&draw(&app, 80, 24));
+    assert!(!rendered.contains("~/notes/"));
+    assert!(rendered.contains("~/projects/"));
+    app.update(Action::Text("no-match".into()));
+    let generation = app.take_remote_request().unwrap().generation();
+    assert!(app.apply_remote_results(generation, Vec::new()));
+    assert!(
+        app.suggestions.is_empty(),
+        "a genuine empty reply must clear old results"
+    );
+    assert!(!text(&draw(&app, 80, 24)).contains("~/projects/"));
+}
+
+#[test]
 fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     let mut a = App::demo();
     a.update(Action::Help);

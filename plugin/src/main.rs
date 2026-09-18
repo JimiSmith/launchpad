@@ -29,14 +29,23 @@ mod wasm {
                     return;
                 }
             }
-            if let Ok(request) = serde_json::from_str(&payload) {
-                let reply = self
-                    .engine
-                    .handle(request, &get_plugin_ids().initial_cwd.to_string_lossy());
-                post_message_to_plugin(PluginMessage::new_to_plugin(
-                    "index-reply",
-                    &serde_json::to_string(&reply).unwrap(),
-                ));
+            if let Ok(request) = serde_json::from_str::<Request>(&payload) {
+                // Only Start needs the host handshake (a synchronous host call).
+                let cwd = if matches!(request, Request::Start { .. }) {
+                    get_plugin_ids().initial_cwd.to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                };
+                let (reply, continuation) = self.engine.dispatch(request, &cwd);
+                if let Some(reply) = reply {
+                    post_message_to_plugin(PluginMessage::new_to_plugin(
+                        "index-reply",
+                        &serde_json::to_string(&reply).unwrap(),
+                    ));
+                }
+                if let Some(continuation) = continuation {
+                    send(continuation);
+                }
             }
         }
     }
@@ -167,7 +176,7 @@ mod wasm {
                         Ok(Reply::Ready { epoch, cwd })
                             if epoch == self.epoch && Some(&cwd) == self.home.as_ref() =>
                         {
-                            self.pending = None;
+                            self.pending = Some(Instant::now());
                             self.ready = true;
                             self.scanning = true;
                             self.state.app = App::from_remote(cwd.into());
@@ -184,7 +193,7 @@ mod wasm {
                             status,
                             scanning,
                         }) if epoch == self.epoch => {
-                            self.pending = None;
+                            self.pending = scanning.then(Instant::now);
                             self.scanning = scanning;
                             self.state.app.remote_progress(revision, status);
                         }
@@ -228,9 +237,6 @@ mod wasm {
                     {
                         self.fail("Worker timed out. Reopen the plugin; no scan fallback.".into());
                         changed = true;
-                    } else if self.ready && self.scanning && self.pending.is_none() {
-                        send(Request::Step { epoch: self.epoch });
-                        self.pending = Some(Instant::now());
                     }
                 }
                 Event::HostFolderChanged(_) | Event::PermissionRequestResult(_) => changed = false,
@@ -267,7 +273,8 @@ mod wasm {
             if (self.pending.is_some() || self.scanning || self.work.is_some())
                 && !self.timer_pending
             {
-                set_timeout(0.01);
+                // Watchdog only: worker continuations, not UI timers, drive the scan.
+                set_timeout(1.0);
                 self.timer_pending = true;
             }
             if self.state.app.quit {

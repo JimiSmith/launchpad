@@ -8,7 +8,9 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/search-tests");
+        fs::create_dir_all(&base).unwrap();
+        let path = base.join(format!(
             "launchpad-search-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -25,6 +27,258 @@ impl Drop for Tree {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+#[test]
+fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
+    use zellij_launchpad_prototype::search::{Directory, matches_in};
+    let home = format!("/home/{}", "a".repeat(101));
+    let dirs = [Directory {
+        path: format!("{home}/needle"),
+        note: "directory",
+        error: None,
+    }];
+    assert!(matches_in(&"a".repeat(101), &dirs, &home, &home).is_empty());
+    assert!(matches_in("~/needle", &dirs, &home, &home).is_empty());
+    assert_eq!(matches_in("needle", &dirs, &home, &home), vec![0]);
+}
+
+#[test]
+fn completed_long_path_is_preserved_and_launches_exact_target() {
+    use zellij_launchpad_prototype::app::{Action, App, Screen};
+    let tree = Tree::new();
+    let name = format!("{}-needle", "a".repeat(110));
+    tree.dir(&name);
+    let mut app = App::from_home(tree.0.clone(), tree.0.clone());
+    while app.is_indexing() {
+        app.index_tick();
+    }
+    app.update(Action::Clear);
+    app.update(Action::Text("needle".into()));
+    app.update(Action::Tab);
+    assert_eq!(app.editor.text, format!("~/{name}"));
+    app.update(Action::Text("ignored".into()));
+    assert_eq!(app.editor.text, format!("~/{name}"));
+    app.update(Action::Enter);
+    assert!(matches!(app.screen, Screen::Terminal(_)));
+    assert_eq!(app.history[0].path, tree.0.join(name).to_str().unwrap());
+}
+
+#[test]
+fn ignore_rule_bytes_share_the_index_memory_limit() {
+    let tree = Tree::new();
+    tree.dir("visible");
+    fs::write(tree.0.join(".ignore"), "nonmatching-pattern\n".repeat(1000)).unwrap();
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
+    index.limits.max_bytes = 1024;
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert!(index.status().contains("limit"));
+    assert!(index.dirs.is_empty());
+    assert!(index.validate("~/visible").is_ok());
+}
+
+#[test]
+fn symlinked_ignore_files_do_not_read_or_apply_outside_rules() {
+    use std::os::unix::fs::symlink;
+    let tree = Tree::new();
+    tree.dir("home/visible");
+    fs::write(tree.0.join("outside-rules"), "visible/\n").unwrap();
+    symlink(tree.0.join("outside-rules"), tree.0.join("home/.ignore")).unwrap();
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.join("home")).unwrap();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(index.dirs.len(), 1, "symlinked rules must not apply");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn ignore_discovery_does_not_open_parent_configs_or_pruned_descendants() {
+    use std::{ffi::CString, io::Read, os::fd::FromRawFd};
+    unsafe extern "C" {
+        fn inotify_init1(flags: i32) -> i32;
+        fn inotify_add_watch(fd: i32, path: *const std::ffi::c_char, mask: u32) -> i32;
+    }
+    let tree = Tree::new();
+    tree.dir("home/visible");
+    for name in ["blocked", ".secret", ".git", "node_modules"] {
+        tree.dir(&format!("home/{name}/nested"));
+        fs::write(tree.0.join(format!("home/{name}/.ignore")), "*\n").unwrap();
+    }
+    fs::write(
+        tree.0.join("home/.ignore"),
+        "blocked/\n!blocked/nested/\n!.secret/\n!.git/\n!node_modules/\n",
+    )
+    .unwrap();
+    fs::write(tree.0.join(".ignore"), "visible/\n").unwrap();
+    fs::write(tree.0.join(".gitignore"), "visible/\n").unwrap();
+    fs::write(tree.0.join("external-rules"), "visible/\n").unwrap();
+    std::os::unix::fs::symlink(
+        tree.0.join("external-rules"),
+        tree.0.join("home/.gitignore"),
+    )
+    .unwrap();
+    let fd = unsafe { inotify_init1(0x800) }; // IN_NONBLOCK
+    assert!(fd >= 0);
+    let mut watch = unsafe { fs::File::from_raw_fd(fd) };
+    for relative in [
+        ".ignore",
+        ".gitignore",
+        "external-rules",
+        "home/blocked/.ignore",
+        "home/blocked/nested",
+        "home/.secret/.ignore",
+        "home/.secret/nested",
+        "home/.git/.ignore",
+        "home/.git/nested",
+        "home/node_modules/.ignore",
+        "home/node_modules/nested",
+    ] {
+        let path = CString::new(tree.0.join(relative).as_os_str().as_encoded_bytes()).unwrap();
+        assert!(unsafe { inotify_add_watch(fd, path.as_ptr(), 0x20) } >= 0); // IN_OPEN
+    }
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.join("home")).unwrap();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(index.dirs.len(), 1, "parent rules cannot change results");
+    let mut events = [0; 4096];
+    let result = watch.read(&mut events);
+    assert!(
+        matches!(result, Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "outside config or pruned descendant was opened: {result:?}"
+    );
+}
+
+#[test]
+fn project_ignore_rules_apply_without_git_metadata_with_nested_negation() {
+    let tree = Tree::new();
+    for name in [
+        "project/build/cache",
+        "project/release/keep",
+        "project/release/drop",
+        "project/src/generated",
+        "project/src/handwritten",
+        "project/plain",
+    ] {
+        tree.dir(name);
+    }
+    fs::write(
+        tree.0.join("project/.gitignore"),
+        "build/\nrelease/*\n!release/keep/\nsrc/*\nplain/\n",
+    )
+    .unwrap();
+    fs::write(tree.0.join("project/.ignore"), "!plain/\n**/generated/\n").unwrap();
+    fs::write(
+        tree.0.join("project/src/.gitignore"),
+        "!handwritten/\n!generated/\n",
+    )
+    .unwrap();
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
+    index.limits.max_entries = 7;
+    while index.is_scanning() {
+        index.step(128);
+    }
+    let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            "/logical/home/project",
+            "/logical/home/project/plain",
+            "/logical/home/project/release",
+            "/logical/home/project/release/keep",
+            "/logical/home/project/src",
+            "/logical/home/project/src/handwritten"
+        ]
+    );
+    assert_eq!(index.status(), "HOME indexed · 6 dirs · F5 refresh");
+    assert!(index.validate("~/project/build/cache").is_ok());
+}
+
+#[test]
+fn hidden_subtrees_are_pruned_before_entry_and_memory_budgets() {
+    let tree = Tree::new();
+    for i in 0..100 {
+        tree.dir(&format!(".cache/hidden-{i}/nested"));
+    }
+    tree.dir("visible");
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
+    index.limits.max_entries = 2;
+    index.limits.max_bytes = 200;
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(index.status(), "HOME indexed · 1 dirs · F5 refresh");
+    assert_eq!(index.dirs[0].path, "/logical/home/visible");
+    assert_eq!(
+        index.validate("~/.cache/hidden-0/nested").unwrap(),
+        "/logical/home/.cache/hidden-0/nested"
+    );
+}
+
+#[test]
+fn prunes_git_and_node_modules_subtrees_at_every_depth() {
+    let tree = Tree::new();
+    for prefix in ["", "project/"] {
+        for name in [".git", "node_modules"] {
+            for i in 0..100 {
+                tree.dir(&format!("{prefix}{name}/ignored-{i}/nested"));
+            }
+        }
+    }
+    for name in [
+        "project/src",
+        ".github/workflows",
+        "node_modules_backup/keep",
+        "Node_modules/keep",
+    ] {
+        tree.dir(name);
+    }
+    let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
+    // Excluded trees must not consume the entry budget, not merely be hidden.
+    index.limits.max_entries = 7; // Six retained entries; ignored names cost nothing.
+    for _ in 0..1000 {
+        index.step(128);
+        if !index.is_scanning() {
+            break;
+        }
+    }
+    assert!(!index.is_scanning());
+    assert!(
+        index.status().starts_with("HOME indexed"),
+        "{}",
+        index.status()
+    );
+    let mut paths: Vec<_> = index
+        .dirs
+        .iter()
+        .map(|d| {
+            PathBuf::from(&d.path)
+                .strip_prefix(&tree.0)
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    paths.sort();
+    let mut expected: Vec<_> = [
+        "project",
+        "project/src",
+        "node_modules_backup",
+        "node_modules_backup/keep",
+        "Node_modules",
+        "Node_modules/keep",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    expected.sort();
+    assert_eq!(paths, expected);
+    assert_eq!(index.status(), "HOME indexed · 6 dirs · F5 refresh");
+    // Index exclusions are not a restriction on explicitly selected paths.
+    assert!(index.validate("~/project/node_modules/ignored-0").is_ok());
+}
+
 #[test]
 fn skips_symlinks_and_unrepresentable_names() {
     use std::os::unix::fs::symlink;
@@ -129,7 +383,11 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
             .any(|&i| app.dirs[i].path.contains(".archive"))
     );
     query(&mut app, "~/Projects/.archive");
-    assert!(!app.suggestions.is_empty());
+    assert!(app.suggestions.is_empty());
+    app.update(Action::Enter);
+    assert!(matches!(app.screen, Screen::Terminal(_)));
+    app.update(Action::Escape);
+    app.history.clear();
     query(&mut app, "修理");
     app.update(Action::Tab);
     assert_eq!(app.editor.text, "~/team notes/修理");

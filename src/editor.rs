@@ -1,3 +1,6 @@
+/// Maximum typed/pasted input, counted in Unicode scalar values (not bytes).
+pub const MAX_INPUT_CHARS: usize = 100;
+
 #[derive(Debug, Default, Clone)]
 pub struct Editor {
     pub text: String,
@@ -5,6 +8,8 @@ pub struct Editor {
 }
 impl Editor {
     pub fn set(&mut self, text: &str) {
+        // Completion/history paths are identities: never truncate them into
+        // another target. Only user insertion is capped.
         self.text = text.into();
         self.cursor = text.len();
     }
@@ -35,17 +40,11 @@ impl Editor {
         self.snap_forward(start);
     }
     pub fn insert(&mut self, text: &str) {
-        let mut remaining = 4096usize.saturating_sub(self.text.len());
+        let remaining = MAX_INPUT_CHARS.saturating_sub(self.text.chars().count());
         let text: String = text
             .chars()
             .filter(|c| !c.is_control())
-            .take_while(|c| {
-                if c.len_utf8() > remaining {
-                    return false;
-                }
-                remaining -= c.len_utf8();
-                true
-            })
+            .take(remaining)
             .collect();
         self.text.insert_str(self.cursor, &text);
         let target = self.cursor + text.len();
@@ -75,13 +74,24 @@ impl Editor {
 mod tests {
     use super::*;
     #[test]
-    fn pasted_queries_have_a_utf8_safe_byte_budget() {
+    fn typing_and_paste_stop_at_100_unicode_scalars() {
+        for scalar in ["a", "修", "🦀", "\u{301}"] {
+            let mut e = Editor::default();
+            for _ in 0..99 {
+                e.insert(scalar);
+            }
+            e.home();
+            e.insert(&format!("\n\u{1b}{}", scalar.repeat(4096)));
+            assert_eq!(e.text, scalar.repeat(100));
+            e.insert("more");
+            assert_eq!(e.text, scalar.repeat(100));
+            assert!(e.text.is_char_boundary(e.cursor));
+        }
         let mut e = Editor::default();
-        e.insert(&"修".repeat(5000));
-        assert!(e.text.len() <= 4096);
-        assert!(!e.text.is_empty());
-        e.insert("more");
-        assert!(e.text.len() <= 4096);
+        e.insert(&"a".repeat(100));
+        e.backspace();
+        e.insert("修x");
+        assert_eq!(e.text, format!("{}修", "a".repeat(99)));
     }
     #[test]
     fn deletion_that_joins_neighbors_keeps_cursor_on_grapheme_boundary() {

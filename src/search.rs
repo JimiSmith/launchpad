@@ -1,5 +1,14 @@
 //! Home-only cached directory index. No shell, subprocess, or render-time IO.
-use std::{collections::VecDeque, fs, path::PathBuf};
+use crate::editor::MAX_INPUT_CHARS;
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+mod ignore_rules;
 
 pub fn normalize_in(raw: &str, home: &str, cwd: &str) -> Option<String> {
     if raw.is_empty()
@@ -33,6 +42,9 @@ pub fn normalize_in(raw: &str, home: &str, cwd: &str) -> Option<String> {
 /// Embedded Frizbee ranks basename and full path; path order breaks ties.
 pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<usize> {
     use neo_frizbee::{Config, Matcher};
+    if raw.chars().count() > MAX_INPUT_CHARS {
+        return Vec::new();
+    }
     let config = Config {
         max_typos: Some(0),
         ..Config::default()
@@ -46,6 +58,11 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<u
     } else {
         raw.to_owned()
     };
+    // HOME expansion can exceed the editor limit. Bound Frizbee's scratch
+    // matrices too; never truncate a path into a different search/launch target.
+    if query.chars().count() > MAX_INPUT_CHARS {
+        return Vec::new();
+    }
     let allow_hidden = raw
         .split('/')
         .any(|p| p.starts_with('.') && p != "." && p != "..");
@@ -114,7 +131,6 @@ impl Default for Limits {
         }
     }
 }
-#[derive(Debug)]
 pub struct HomeIndex {
     pub dirs: Vec<Directory>,
     pub home: PathBuf,
@@ -122,11 +138,20 @@ pub struct HomeIndex {
     pub limits: Limits,
     visited: usize,
     retained_bytes: usize,
-    skipped: usize,
+    rule_bytes: Arc<AtomicUsize>,
     limited: bool,
     error: Option<String>,
-    queue: VecDeque<PathBuf>,
-    current: Option<(PathBuf, fs::ReadDir)>,
+    walker: Option<ignore::Walk>,
+    started: bool,
+}
+impl std::fmt::Debug for HomeIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HomeIndex")
+            .field("home", &self.home)
+            .field("limits", &self.limits)
+            .field("status", &self.status())
+            .finish_non_exhaustive()
+    }
 }
 impl HomeIndex {
     /// `home` is the host path; `root` is its filesystem mapping (/host in WASI).
@@ -150,11 +175,11 @@ impl HomeIndex {
             limits: Limits::default(),
             visited: 0,
             retained_bytes: 0,
-            skipped: 0,
+            rule_bytes: Arc::new(AtomicUsize::new(0)),
             limited: false,
             error: None,
-            queue: VecDeque::from([PathBuf::new()]),
-            current: None,
+            walker: None,
+            started: false,
         })
     }
     fn relative(&self, raw: &str) -> Result<PathBuf, String> {
@@ -221,101 +246,128 @@ impl HomeIndex {
         } else {
             "HOME indexed"
         };
-        format!(
-            "{state} · {} dirs · {} skipped · F5 refresh",
-            self.dirs.len(),
-            self.skipped
-        )
+        format!("{state} · {} dirs · F5 refresh", self.dirs.len())
     }
     pub fn restart(&self) -> Self {
         Self::new(self.home.clone(), self.root.clone()).expect("validated HOME")
     }
     pub fn is_scanning(&self) -> bool {
-        self.current.is_some() || !self.queue.is_empty()
+        !self.started || self.walker.is_some()
     }
-    /// Each unit opens one directory or consumes one directory entry.
+    /// Bound returned entries and cooperate between iterator calls. One next()
+    /// can consume many ignored entries or block in IO; this is not a syscall
+    /// or hard time budget. The plugin calls this only inside its serial worker.
     pub fn step(&mut self, budget: usize) {
+        if budget == 0 {
+            return;
+        }
         let started = std::time::Instant::now();
+        if !self.started {
+            self.started = true;
+            if let Err(error) = self.validate("~") {
+                self.error = Some(error);
+                return;
+            }
+            let rules = Mutex::new(ignore_rules::Rules::new(
+                &self.root,
+                self.limits.max_bytes,
+                self.rule_bytes.clone(),
+            ));
+            let mut builder = ignore::WalkBuilder::new(&self.root);
+            builder
+                .standard_filters(false)
+                .follow_links(false)
+                .parents(false)
+                .git_ignore(false)
+                .git_global(false)
+                .git_exclude(false)
+                .max_depth(Some(self.limits.max_depth))
+                .filter_entry(move |entry| {
+                    entry.depth() == 0
+                        || entry.file_name().to_str().is_some_and(|name| {
+                            name != "node_modules"
+                                && !name.starts_with('.')
+                                && !name.chars().any(char::is_control)
+                        }) && rules.lock().expect("serial rule matcher").allows(entry)
+                });
+            self.walker = Some(builder.build());
+        }
         for _ in 0..budget {
             if started.elapsed() >= std::time::Duration::from_millis(5) {
                 break;
             }
             if self.dirs.len() >= self.limits.max_directories
                 || self.visited >= self.limits.max_entries
+                || self
+                    .retained_bytes
+                    .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
+                    > self.limits.max_bytes
             {
                 self.limited = true;
-                self.current = None;
-                self.queue.clear();
+                self.walker = None;
                 break;
             }
-            if let Some((relative, entries)) = self.current.as_mut() {
-                match entries.next() {
-                    Some(Ok(entry)) => {
-                        self.visited += 1;
-                        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                            let relative = relative.join(entry.file_name());
-                            if let Some(path) = self
-                                .home
-                                .join(&relative)
-                                .to_str()
-                                .filter(|p| !p.chars().any(char::is_control))
-                            {
-                                // Bound path bytes as well as counts; leave headroom for
-                                // Frizbee's temporary scoring buffers under the host's
-                                // 16 MiB linear-memory ceiling. Count queue storage even
-                                // after it is released (deliberately conservative).
-                                let cost = path.len() + relative.as_os_str().len() + 128;
-                                if path.len() > 4096
-                                    || self.retained_bytes.saturating_add(cost)
-                                        > self.limits.max_bytes
-                                {
-                                    self.limited = true;
-                                    self.current = None;
-                                    self.queue.clear();
-                                    break;
-                                }
-                                self.retained_bytes += cost;
-                                self.dirs.push(Directory {
-                                    path: path.into(),
-                                    note: "directory",
-                                    error: None,
-                                });
-                                if relative.components().count() < self.limits.max_depth {
-                                    self.queue.push_back(relative);
-                                } else {
-                                    self.limited = true;
-                                }
-                            } else {
-                                self.skipped += 1;
-                            }
-                        }
-                    }
-                    Some(Err(_)) => {
-                        self.skipped += 1;
-                    }
-                    None => self.current = None,
-                }
-            } else if let Some(relative) = self.queue.pop_front() {
-                let raw = self.home.join(&relative);
-                let result = raw
-                    .to_str()
-                    .ok_or_else(|| "Invalid UTF-8 HOME".to_owned())
-                    .and_then(|raw| self.validate(raw))
-                    .and_then(|_| {
-                        fs::read_dir(self.root.join(&relative))
-                            .map_err(|e| format!("Directory unavailable: {e}"))
-                    });
-                match result {
-                    Ok(entries) => self.current = Some((relative, entries)),
-                    Err(error) => {
-                        self.skipped += 1;
-                        if relative.as_os_str().is_empty() {
-                            self.error = Some(error);
-                        }
-                    }
-                }
-            } else {
+            let Some(walker) = self.walker.as_mut() else {
                 break;
+            };
+            let entry = match walker.next() {
+                Some(Ok(entry)) => entry,
+                Some(Err(error)) => {
+                    if error.depth() == Some(0) {
+                        self.error = Some(format!("Directory unavailable: {error}"));
+                        self.walker = None;
+                        break;
+                    }
+                    continue;
+                }
+                None => {
+                    self.walker = None;
+                    break;
+                }
+            };
+            if self
+                .retained_bytes
+                .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
+                > self.limits.max_bytes
+            {
+                self.limited = true;
+                self.walker = None;
+                break;
+            }
+            if entry.depth() == 0 {
+                continue;
+            }
+            self.visited += 1;
+            if !entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            let Ok(relative) = entry.path().strip_prefix(&self.root) else {
+                continue;
+            };
+            if let Some(path) = self.home.join(relative).to_str() {
+                // Keep the conservative path/allocation allowance even though
+                // the serial DFS walker no longer retains a breadth-first queue.
+                let cost = path.len() + relative.as_os_str().len() + 128;
+                if path.len() > 4096
+                    || self
+                        .retained_bytes
+                        .saturating_add(cost)
+                        .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
+                        > self.limits.max_bytes
+                {
+                    self.limited = true;
+                    self.walker = None;
+                    break;
+                }
+                self.retained_bytes += cost;
+                self.dirs.push(Directory {
+                    path: path.into(),
+                    note: "directory",
+                    error: None,
+                });
+                if entry.depth() >= self.limits.max_depth {
+                    self.limited = true;
+                }
             }
         }
     }

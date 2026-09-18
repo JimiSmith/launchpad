@@ -11,7 +11,8 @@ an error, never a fallback to `/host`, process CWD, `/`, or fixture directories.
 Initial input is `~`, history is empty, and all launches/availability remain
 simulated. Only completed simulation actions add in-memory history. F5 clears
 that history/form and rebuilds the index. There is no persistent history, PATH
-probe, subprocess, external search helper, file-content read, or network request.
+probe, subprocess, external search helper, or network request. Indexing reads
+HOME-local `.gitignore` and `.ignore` contents, but not ordinary project files.
 
 ## Host permissions and mapping
 
@@ -38,25 +39,42 @@ retry loops. Reopen after fixing the environment/permissions.
 
 ## Policy and bounds
 
-- Breadth-first directory traversal, no exclusion list, including hidden subtrees.
-- One tick consumes at most 128 open/read-entry units, with a cooperative 5 ms
-  budget. Native polling is cooperative; the plugin keeps traversal, Frizbee and
+- The pinned `ignore = 0.4.33` **serial** depth-first walker replaces the custom
+  breadth-first queue. No thread/parallel walker is used. Hidden directories and
+  exact `node_modules` names (including `.git` through the hidden rule) are pruned
+  at every depth, regardless of ignore-file negations. Similar visible names such
+  as `node_modules_backup` remain eligible. Exclusions affect discovery, not
+  explicit-path validation; a dot in a query does not reveal pruned candidates.
+- HOME-local `.gitignore` and `.ignore` rules support nested patterns and negation,
+  including outside Git repositories. `.ignore` outranks `.gitignore`; within a
+  rule type the nearest matching file wins. An excluded parent cannot be reopened
+  by a descendant rule. No excluded paths or skipped counter are retained.
+- One scan slice requests at most 128 iterator results, checking a cooperative 5 ms
+  budget between calls. `next()` may internally consume many ignored entries;
+  these limits are not exact syscall or wall-clock budgets. Native polling is cooperative; the plugin keeps traversal, Frizbee and
   validation in a persistent WASM worker. Only capped results reach its UI;
   epochs, query generations and revisions reject stale responses. No filesystem
   IO or matching runs on the plugin's input/render path.
+  The worker schedules its next slice immediately, keeping at most one queued
+  continuation so queries/validation/refresh can interleave. Progress is emitted
+  at most every 100 ms, with immediate final status. UI timers only check the
+  watchdog; they do not pace indexing. No persistent index cache is used.
 - Stop at 20,000 directory candidates or 200,000 entries, with maximum depth 64.
-  Also stop at a conservative 6 MiB retained-path/queue budget or a path over
-  4096 bytes. Edited input is capped at 4096 UTF-8 bytes.
-  Limits and skipped-entry counts are visible. This is a partial index when capped;
+  Also stop at a conservative 6 MiB retained-path/rule budget or a path over
+  4096 bytes. Typed/pasted input and fuzzy queries are capped at 100 Unicode
+  scalar values; completed paths are preserved without truncation.
+  Limits are visible; ignored entries are not counted or retained. This is a partial index when capped;
   an explicit valid path can still be entered without being indexed.
 - Keep at most 100 ranked suggestions, ordered by Frizbee score and path tie-break.
-  Dot-prefixed query components reveal hidden results; HOME's own spelling does
-  not classify all descendants as hidden.
+  HOME's own spelling, including a hidden physical fixture/mount root, does not
+  classify its normal descendants as hidden.
 - Symlinks are neither candidates nor traversed, even when pointing inside HOME.
   This deliberately narrower policy avoids cycles/escape; internal symlink support
-  in the draft spec is deferred. Ancestors are checked again before descent and
-  validation. Concurrent hostile filesystem replacement is not an atomic-security
-  guarantee; there is no real process launch at this stage.
+  in the draft spec is deferred. The walker does not follow directory links;
+  acceptance/submission still check every literal path component. The old repeated
+  ancestor revalidation on each scan descent is removed. Concurrent hostile
+  filesystem replacement is not an atomic-security guarantee; there is no real
+  process launch at this stage.
 - Skip invalid UTF-8 and control-character directory names rather than display
   ambiguous/unsafe names. Spaces, Unicode, quotes and shell-looking text are literal.
 - `~`, `~/…`, absolute paths under HOME and HOME-relative paths work. `.`/`..`
@@ -68,7 +86,35 @@ retry loops. Reopen after fixing the environment/permissions.
 
 The cooperative time limit cannot interrupt one slow filesystem syscall (for
 example an unavailable network mount). No hard input-latency SLA is claimed.
-Hidden caches and large build trees count toward the same limits as other folders.
+Hidden/ignored subtrees do not consume catalogue, entry or retained-path limits.
+Visible, non-ignored build trees still do.
+
+### Rule loading and filesystem boundaries
+
+`ignore` 0.4.33's automatic Git discovery opens parent ignore files even when
+`parents(false)` disables their *effects*. A native inotify regression proves this
+upstream behaviour and the boundary fix. All automatic rule discovery is therefore
+disabled. A small DFS-ancestry rule stack uses the released crate's `GitignoreBuilder`
+and matcher, loading only `.ignore`/`.gitignore` in accepted HOME directories. It
+is not a second directory walker. Parent/global Git configs, `.git/info/exclude`,
+Git worktree pointers and repository metadata are not read. Symlinked rule files
+(internal or external), FIFOs and devices are not opened; ordinary rule files are
+read after a no-follow metadata check. As with path validation, replacement races
+between checking and opening are not atomically prevented.
+
+Rules share the existing byte allowance: cumulatively charge 16 times source
+bytes plus 2 KiB per source line for parser/matcher overhead. Each rule file is
+also bounded to 64 KiB before parsing. Exceeding either allowance stops indexing
+with the usual visible limit state, rather than continuing with incomplete rules.
+This is conservative accounting, not a guarantee on allocator/regex peak memory.
+Malformed patterns and unreadable rule files are ignored like the crate's normal
+best-effort loader. Ancestor matchers are released as the serial walker leaves
+their subtree; no list of excluded paths is stored.
+
+The serial walker's underlying `walkdir` may open a pruned directory handle before
+its filter runs. It then skips the subtree: descendants and their ignore files
+are not visited/read, counted or catalogued. Do not interpret pruning as a promise
+of zero metadata/open syscalls for the excluded directory itself.
 
 ## Development verification
 
@@ -84,6 +130,10 @@ PY=target/verification-venv/bin/python
 $PY tools/verify_search.py
 $PY tools/verify_search.py --deny
 $PY tools/verify_search.py --native
+$PY tools/verify_workers.py
+$PY tools/verify_input_limit.py
+$PY tools/verify_input_limit.py --native
+$PY tools/verify_index_benchmark.py --wasm target/wasm32-wasip1/release/launchpad-plugin.wasm
 
 $PY tools/verify_zellij.py
 $PY tools/verify_pty.py
@@ -92,6 +142,10 @@ $PY tools/verify_cleanup.py
 
 `verify_search.py` uses private host state and controlled directories, a CWD outside
 the test HOME, real permission grant/deny, and readback of the closed plugin pane.
+The benchmark accepts an explicit release WASM, constructs the same 18,110-directory
+visible tree for each run, verifies the loaded URL/hash and catalogue count, and
+reports time from first visible indexing to completion separately from edit and
+result latency. These are PTY-observed timings, not cold-disk or pure-walker timings.
 All automated search checks use disposable HOME fixtures beneath `target/`;
 there is no mode that uses the invoking user’s HOME. Unsupported flags are rejected
 before setup. Evidence is ignored under `target/zj-*`.

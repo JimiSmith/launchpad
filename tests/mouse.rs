@@ -156,7 +156,8 @@ fn suggestion_click_accepts_without_launching() {
 #[test]
 fn scrolled_input_maps_visible_origin_and_clipped_tail() {
     use zellij_launchpad_prototype::cells::{input_cursor, input_window};
-    let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(100));
+    // Still wider than both viewports, with room under the input cap to edit.
+    let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(80));
     for (w, h, x, y, budget) in [(80, 24, 6, 3, 70), (40, 10, 4, 2, 34)] {
         let mut app = App::demo();
         app.editor.set(&text);

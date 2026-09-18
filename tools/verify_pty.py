@@ -152,7 +152,8 @@ def verify_mouse():
     send("X")
     # pyte normalizes combining accents to NFC (and does not fully model ZWJ emoji).
     expect("修X理/é", "mouse: Unicode cursor placement respects wide and combining cells")
-    send("\x15" + "a" * 100 + "修理")
+    # Keep the field scrolled while leaving room for the insertion marker.
+    send("\x15" + "a" * 80 + "修理")
     mouse(6, 3)
     send("Z")
     checked("Z" in screen.display[3], "mouse: horizontally scrolled input uses visible origin")

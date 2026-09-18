@@ -63,13 +63,23 @@ persistent worker. This deliberately avoids duplicating the catalogue or sending
 large index deltas between sibling instances under the host's memory ceiling.
 The native adapter retains its cooperative synchronous backend.
 
-`plugin/src/main.rs` allows one outstanding scan step and one outstanding
-query/validation request. `src/remote.rs` and `src/app.rs` keep only the latest
-unsent demand, so edits replace pending queries instead of filling Zellij's
-unbounded queue. Each scan handler consumes at most 128 open/entry units and a
-cooperative 5 ms budget. No handler recursively completes the entire traversal.
-A query can wait behind one bounded scan step, not behind a complete scan.
-The main sends the next step only after acknowledging progress.
+`plugin/src/workers.rs` drives scanning with immediate self-messages, with at
+most one continuation queued. Each handler requests at most 128 iterator results
+within a cooperative 5 ms budget, then yields to the host queue. The worker does
+not wait for a UI timer or progress acknowledgement and does not complete the
+entire traversal in one handler. Refresh replaces the index/epoch without adding
+a second continuation; an already queued old-epoch step only wakes the current
+scan. Queries and validation can interleave between scan slices.
+
+Only periodic progress (at most once per 100 ms) reaches the UI; completion,
+including a limit or IO error, is immediate. The main timer is a one-second
+watchdog check, not scan pacing. Start and progress reset its existing 15-second
+missing-response deadline. The worker asks the host for its CWD only at Start.
+
+`plugin/src/main.rs` permits one outstanding query/validation request.
+`src/remote.rs` and `src/app.rs` keep only the latest unsent demand, so edits
+replace pending queries instead of filling Zellij's unbounded queue. No persistent
+index cache, extra worker, external scanner or artificial scan sleep is used.
 
 - Refresh uses an index epoch; both keyboard and mouse reset start a new epoch.
 - Query/action generations reject obsolete results and validation completions.
@@ -82,9 +92,10 @@ The main sends the next step only after acknowledging progress.
 - UI state contains at most 100 returned paths, not the index. Result path bytes
   are capped at 64 KiB; JSON encoding adds framing/escaping overhead.
 - Directory count/entry/depth limits remain 20,000 / 200,000 / 64. A conservative
-  6 MiB accounting limit includes logical path bytes, queued relative path bytes
-  and 128 bytes per retained candidate. This is not an exact allocator/RSS meter.
-  Paths and edited inputs are limited to 4096 UTF-8 bytes. Limit status is visible.
+  6 MiB accounting limit includes retained paths and HOME-local ignore rules.
+  This is not an exact allocator/RSS meter. Filesystem paths are limited to
+  4096 UTF-8 bytes; typed/pasted input and fuzzy queries to 100 Unicode scalars.
+  Completed paths remain intact. Limit status is visible.
 - Missing worker replies stop further dispatch after 15 seconds. Once initialized,
   the UI stays editable but cannot claim validation success. There is no silent
   synchronous fallback. Reopen to replace a failed worker.

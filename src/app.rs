@@ -733,7 +733,11 @@ impl App {
         self.highlighted = None;
         self.cycle = None;
         self.show_suggestions = true;
-        self.suggestions = self.matches();
+        // Async replies replace the previous results atomically. Clearing here
+        // would render an empty list between every keystroke and its reply.
+        if self.remote.is_none() {
+            self.suggestions = self.matches();
+        }
     }
     fn accept(&mut self, index: usize) {
         if self.remote.is_some() {
