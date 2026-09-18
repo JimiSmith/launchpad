@@ -7,7 +7,7 @@ mod wasm {
     };
     use serde::{Deserialize, Serialize};
     use std::time::{Duration, Instant};
-    use zellij_launchpad_prototype::app::{Action, App};
+    use zellij_launchpad_prototype::app::{Action, App, Tool};
     use zellij_launchpad_prototype::remote::RemoteRequest;
     use zellij_tile::prelude::*;
     register_plugin!(Plugin);
@@ -71,6 +71,9 @@ mod wasm {
         timer_pending: bool,
         remounting: bool,
         failed: bool,
+        simulate_launch: bool,
+        launch_serial: u64,
+        launch_context: Option<std::collections::BTreeMap<String, String>>,
         work: Option<(u64, Instant)>,
         #[cfg(feature = "worker-faults")]
         silence_worker: bool,
@@ -99,6 +102,9 @@ mod wasm {
     }
     impl ZellijPlugin for Plugin {
         fn load(&mut self, configuration: std::collections::BTreeMap<String, String>) {
+            self.simulate_launch = configuration
+                .get("simulate_launch")
+                .is_some_and(|v| v == "true");
             #[cfg(feature = "worker-faults")]
             {
                 self.silence_worker = configuration
@@ -115,16 +121,25 @@ mod wasm {
                 EventType::FailedToChangeHostFolder,
                 EventType::Timer,
                 EventType::CustomMessage,
+                EventType::ActionComplete,
             ]);
             if configuration.get("demo").is_some_and(|v| v == "true") {
                 self.state.app = App::demo();
             } else {
+                self.state.app.host_launch = !self.simulate_launch;
                 self.state.app.search_status = "Waiting for HOME permissions…".into();
-                request_permission(&[
+                let mut permissions = vec![
                     PermissionType::ReadSessionEnvironmentVariables,
                     PermissionType::FullHdAccess,
                     PermissionType::ChangeApplicationState,
-                ]);
+                ];
+                if !self.simulate_launch {
+                    permissions.extend([
+                        PermissionType::OpenTerminalsOrPlugins,
+                        PermissionType::RunActionsAsUser,
+                    ]);
+                }
+                request_permission(&permissions);
             }
         }
         fn update(&mut self, event: Event) -> bool {
@@ -154,9 +169,8 @@ mod wasm {
                         }
                     }
                 }
-                Event::PermissionRequestResult(PermissionStatus::Denied) => {
-                    self.fail("HOME access denied. Reopen and allow its three permissions.".into())
-                }
+                Event::PermissionRequestResult(PermissionStatus::Denied) => self
+                    .fail("Permission denied. Reopen and allow the requested permissions.".into()),
                 Event::HostFolderChanged(path)
                     if self.remounting && path.to_str() == self.home.as_deref() =>
                 {
@@ -180,6 +194,7 @@ mod wasm {
                             self.ready = true;
                             self.scanning = true;
                             self.state.app = App::from_remote(cwd.into());
+                            self.state.app.host_launch = !self.simulate_launch;
                             #[cfg(feature = "worker-faults")]
                             if self.silence_worker {
                                 post_message_to(PluginMessage::new_to_worker(
@@ -239,7 +254,20 @@ mod wasm {
                         changed = true;
                     }
                 }
-                Event::HostFolderChanged(_) | Event::PermissionRequestResult(_) => changed = false,
+                Event::ActionComplete(_, pane_id, context)
+                    if self.launch_context.as_ref() == Some(&context) =>
+                {
+                    self.launch_context = None;
+                    // run_action is asynchronous and returns no acceptance result.
+                    // A successful replacement normally destroys us before this
+                    // event. None means no affected pane, not an agent exit code.
+                    if pane_id.is_none() {
+                        self.state.app.host_launch_rejected();
+                    }
+                }
+                Event::HostFolderChanged(_)
+                | Event::PermissionRequestResult(_)
+                | Event::ActionComplete(..) => changed = false,
                 event => {
                     let quit = matches!(&event, Event::Key(key) if launchpad_plugin::key_action(key.clone()) == Some(Action::Quit));
                     let refresh_before = self.state.app.remote_refresh();
@@ -252,6 +280,55 @@ mod wasm {
                         self.start();
                     }
                 }
+            }
+            if let Some(launch) = self.state.app.take_host_launch() {
+                // Target this plugin explicitly, never the last-focused pane.
+                // Close rather than suppress it: command exit cannot restore it.
+                match launch.tool {
+                    Tool::Shell => {
+                        // Preserve Zellij's configured default shell and its cwd.
+                        if open_terminal_in_place_of_plugin(&launch.path, true).is_none() {
+                            self.state.app.host_launch_rejected();
+                        }
+                    }
+                    tool => {
+                        self.launch_serial += 1;
+                        let context = std::collections::BTreeMap::from([(
+                            "launchpad-launch".into(),
+                            self.launch_serial.to_string(),
+                        )]);
+                        self.launch_context = Some(context.clone());
+                        run_action(
+                            actions::Action::NewInPlacePane {
+                                command: Some(actions::RunCommandAction {
+                                    command: match tool {
+                                        Tool::Claude => "claude",
+                                        Tool::Codex => "codex",
+                                        Tool::Copilot => "copilot",
+                                        Tool::Hermes => "hermes",
+                                        Tool::Shell => unreachable!(),
+                                    }
+                                    .into(),
+                                    args: Vec::new(),
+                                    cwd: Some(launch.path.into()),
+                                    hold_on_close: false,
+                                    hold_on_start: false,
+                                    ..Default::default()
+                                }),
+                                pane_name: None,
+                                near_current_pane: false,
+                                no_focus: false,
+                                pane_id_to_replace: Some(PaneId::Plugin(
+                                    get_plugin_ids().plugin_id,
+                                )),
+                                close_replaced_pane: true,
+                                tab_id: None,
+                            },
+                            context,
+                        );
+                    }
+                }
+                return true;
             }
             if self.ready && !self.failed && self.work.is_none() && !self.state.app.quit {
                 if let Some(request) = self.state.app.take_remote_request() {

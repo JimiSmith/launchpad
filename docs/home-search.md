@@ -8,9 +8,10 @@ through `get_session_environment_variables()` and retains only `HOME`. Changing
 HOME in a later shell does not change the session's HOME. Missing/invalid HOME is
 an error, never a fallback to `/host`, process CWD, `/`, or fixture directories.
 
-Initial input is `~`, history is empty, and all launches/availability remain
+Initial input is `~` and history is empty. Normal plugin launches now
+[replace the originating pane](real-launch.md); native/demo launches remain
 simulated. Only completed simulation actions add in-memory history. F5 clears
-that history/form and rebuilds the index. There is no persistent history, PATH
+that history/form and rebuilds the index. Search uses no persistent history, PATH
 probe, subprocess, external search helper, or network request. Indexing reads
 HOME-local `.gitignore` and `.ignore` contents, but not ordinary project files.
 
@@ -26,7 +27,8 @@ The current website describes `ChangeApplicationState` for `change_host_folder`,
 but the pinned source (`zellij-server/src/plugins/zellij_exports.rs`, permission
 match) and live host reject that combination with `FullHdAccess` denied. The
 filesystem permission is broad; this plugin's implementation only reads HOME.
-It does not ask for command execution or terminal-opening permissions.
+Normal launches additionally request `RunActionsAsUser` and `OpenTerminalsOrPlugins`;
+the explicit `simulate_launch "true"` search harness needs only the three above.
 
 After permission grant, remount `/host` to HOME using `change_host_folder`, then
 wait for the matching `HostFolderChanged` acknowledgement. If the initial mount

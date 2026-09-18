@@ -217,6 +217,12 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         "›_ Launchpad",
         if app.is_demo() {
             if narrow { "DEMO" } else { "DEMO / memory only" }
+        } else if app.host_launch {
+            if narrow {
+                "REPLACE PANE"
+            } else {
+                "HOME / replace this pane"
+            }
         } else if narrow {
             "SIMULATED LAUNCH"
         } else {
@@ -606,13 +612,18 @@ fn help(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         at(area, area.y, 1),
         "Launchpad / help",
-        "SIMULATION",
+        if app.host_launch {
+            "REPLACE PANE"
+        } else {
+            "SIMULATION"
+        },
         accent(),
     );
     let lines: Vec<_> = crate::help::LINES
         .iter()
+        .enumerate()
         .skip(app.help_scroll)
-        .map(|s| Line::raw(*s))
+        .map(|(i, s)| Line::raw(crate::help::line(i, s, app.host_launch)))
         .collect();
     f.render_widget(
         Paragraph::new(lines)

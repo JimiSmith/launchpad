@@ -35,3 +35,19 @@ pub const LINES: &[&str] = &[
     "Directory search is real. No PATH discovery or processes.",
     "Launches, availability and history remain simulated; memory only.",
 ];
+
+pub fn line(index: usize, simulation: &str, host_launch: bool) -> &str {
+    if !host_launch {
+        return simulation;
+    }
+    match index {
+        7 => "Enter without a highlight  Validate and replace this pane",
+        16 => "F5  Refresh HOME / reset form; all five tools are selectable",
+        18 => "The dashboard closes on launch; it does not return on command exit.",
+        23 => "on the selected row. Launch replaces this plugin pane.",
+        29 => "Hidden/ignored directories can still be entered literally.",
+        32 => "Shell uses Zellij's default shell; agents run with no flags.",
+        33 => "No command availability checks. No persistent launch history.",
+        _ => simulation,
+    }
+}

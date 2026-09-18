@@ -8,7 +8,7 @@ parser.add_argument('--fault', action='store_true')
 worker_options = parser.parse_args()
 SEARCH_ARGS = []
 source=Path(__file__).with_name('verify_search.py').read_text().split('success = False')[0]
-source=source.replace("shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)", "layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace('launchpad-plugin.wasm\"', 'launchpad-plugin.wasm\" { test_silence_worker \"true\"; }') if '--fault' in __import__('sys').argv else (ROOT/'examples/launchpad.kdl').read_text())\nfor i in range(2500): (home/f'candidate-{i:04d}-notes').mkdir()\n(home/'freshneedle').mkdir()")
+source=source.replace('master, slave = pty.openpty()', "layout.write_text(layout.read_text().replace('simulate_launch \"true\";', 'simulate_launch \"true\"; test_silence_worker \"true\";') if worker_options.fault else layout.read_text())\nfor i in range(2500): (home/f'candidate-{i:04d}-notes').mkdir()\n(home/'freshneedle').mkdir()\nmaster, slave = pty.openpty()")
 exec(compile(source, str(Path(__file__).with_name('verify_search.py')), 'exec'))
 fault = '--fault' in __import__('sys').argv
 success=False

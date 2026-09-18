@@ -1,7 +1,10 @@
 # Zellij Launchpad — draft product specification
 
-Status: proposed v0.1. HOME-only search is implemented; launches remain simulated.
-Current scope and deviations: [home-search notes](docs/home-search.md).
+Status: draft target product specification, not all implemented. HOME-only search
+and real own-pane launches are implemented. Command availability checks and
+persistent history are not. Native/demo adapters still simulate launches.
+Current scope and deviations: [home-search notes](docs/home-search.md) and
+[real launch behavior](docs/real-launch.md).
 Working name, not checked for uniqueness.
 
 ## 1. Existing solutions and differentiation

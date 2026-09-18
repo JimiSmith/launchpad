@@ -99,6 +99,10 @@ pub struct App {
     index: Option<crate::search::HomeIndex>,
     remote: Option<crate::remote::Remote>,
     pub search_status: String,
+    /// Explicit host-adapter opt-in; native and demo remain simulations.
+    pub host_launch: bool,
+    host_request: Option<Launch>,
+    host_launch_pending: bool,
     show_suggestions: bool,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,11 +141,22 @@ impl Default for App {
             index: None,
             remote: None,
             search_status: "Waiting for HOME access.".into(),
+            host_launch: false,
+            host_request: None,
+            host_launch_pending: false,
             show_suggestions: true,
         }
     }
 }
 impl App {
+    pub fn take_host_launch(&mut self) -> Option<Launch> {
+        self.host_request.take()
+    }
+    pub fn host_launch_rejected(&mut self) {
+        self.host_launch_pending = false;
+        self.message =
+            Some("Zellij did not accept the launch. Check permissions and try again.".into());
+    }
     pub fn from_remote(home: std::path::PathBuf) -> Self {
         let mut app = Self::from_home(home, "/host".into());
         app.remote = Some(crate::remote::Remote {
@@ -368,6 +383,17 @@ impl App {
     }
 
     pub fn update(&mut self, action: Action) {
+        if self.host_launch_pending {
+            return;
+        }
+        // Never turn a pending completion into a launch of the old editor.
+        // Likewise, repeated submit must not replace an in-flight launch request.
+        if self.host_launch
+            && matches!(action, Action::Enter | Action::LaunchForm)
+            && self.remote.as_ref().is_some_and(|r| r.validation.is_some())
+        {
+            return;
+        }
         // Cursor motion keeps the validated path/tool intact. Focus, tool and
         // history changes instead abandon the pending completion or launch.
         let changes_validation_intent = match &action {
@@ -422,6 +448,7 @@ impl App {
         }
         if action == Action::Reset {
             let compact = self.compact;
+            let host_launch = self.host_launch;
             let remote = self.remote.take();
             let index = self.index.as_ref().map(|i| i.restart());
             let status = self.search_status.clone();
@@ -437,6 +464,7 @@ impl App {
                 self.search_status = status;
             }
             self.compact = compact;
+            self.host_launch = host_launch;
             self.remote = remote;
             if let Some(remote) = &mut self.remote {
                 remote.revision = 0;
@@ -492,9 +520,13 @@ impl App {
             } else if self.message.is_some() {
                 self.message = None;
             } else if !self.touched {
-                self.screen = Screen::Closed;
+                if self.host_launch {
+                    self.quit = true;
+                } else {
+                    self.screen = Screen::Closed;
+                }
             } else {
-                self.message = Some("Form kept. Ctrl+Q quits; F5 resets the demo.".into());
+                self.message = Some("Form kept. Ctrl+Q quits; F5 resets the form.".into());
             }
             return;
         }
@@ -503,6 +535,9 @@ impl App {
             self.message = None;
         }
         if action == Action::ToggleCopilot {
+            if self.host_launch {
+                return;
+            }
             self.copilot_available = !self.copilot_available;
             if !self.available(self.tool) {
                 self.tool = Tool::Shell;
@@ -707,7 +742,7 @@ impl App {
             .collect()
     }
     pub fn available(&self, tool: Tool) -> bool {
-        tool != Tool::Copilot || self.copilot_available
+        self.host_launch || tool != Tool::Copilot || self.copilot_available
     }
     fn complete(&mut self, reverse: bool) {
         let (items, i) = if let Some((items, i)) = self.cycle.take() {
@@ -813,6 +848,12 @@ impl App {
             tool,
             age: "Just now".into(),
         };
+        if self.host_launch {
+            self.host_request = Some(event);
+            self.host_launch_pending = true;
+            self.message = Some("Replacing this pane…".into());
+            return;
+        }
         self.history.insert(0, event.clone());
         self.history.truncate(10);
         self.recent = 0;

@@ -76,6 +76,9 @@ config = OUT/'config.kdl'
 layout = OUT/'layout.kdl'
 config.write_text((ROOT/'examples/locked.kdl').read_text() + f'\nsession_name "{NAME}"\n')
 shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)
+# Search assertions intentionally retain the safe simulated terminal. Real OS
+# launch/own-pane assertions are separate in verify_launch.py with an isolated PATH.
+layout.write_text(layout.read_text().replace('.wasm"', '.wasm" { simulate_launch "true"; }'))
 master, slave = pty.openpty()
 original = termios.tcgetattr(slave)
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH',24,80,0,0))

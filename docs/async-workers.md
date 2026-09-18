@@ -88,7 +88,8 @@ index cache, extra worker, external scanner or artificial scan sleep is used.
 - Dismissal, completion cycling, history copy, reset, help, closed/terminal
   screens and quit prevent late work from reopening or overwriting the form.
 - Validation is asynchronous for mouse/keyboard completion, direct submission
-  and history replay. It rechecks tool availability before adding a simulation.
+  and history replay. Simulation checks fixture availability; real launches do
+  not check command availability.
 - UI state contains at most 100 returned paths, not the index. Result path bytes
   are capped at 64 KiB; JSON encoding adds framing/escaping overhead.
 - Directory count/entry/depth limits remain 20,000 / 200,000 / 64. A conservative
@@ -111,7 +112,8 @@ The measured improvement is **key-to-visible-edit latency**, not matcher speed.
 The improved observed index duration also reflects less redundant matching of
 unchanged catalogue revisions, not a faster disk traversal primitive.
 
-All launches remain simulated. Symlink/TOCTOU restrictions remain as documented
+Normal plugin launches now [replace their originating pane](real-launch.md).
+The search/worker harnesses explicitly simulate launches. Symlink/TOCTOU restrictions remain as documented
 in [HOME search policy](home-search.md).
 
 ## Repeatable verification
