@@ -5,7 +5,13 @@ edition = "2021"
 rust-version = "1.98.1"
 publish = false
 
+[features]
+# Development-only fault injection; absent from ordinary release builds.
+worker-faults = []
+
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 zellij-launchpad-prototype = { path = "..", default-features = false }
 zellij-tile = "=0.45.1"
 ratatui = { version = "=0.30.2", default-features = false }

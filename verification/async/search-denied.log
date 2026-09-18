@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "checks": [
+    "host requests permission",
+    "real dashboard loads",
+    "permission denial is visible",
+    "denial never invents history",
+    "denied search cannot launch",
+    "readback confirms plugin pane closed"
+  ],
+  "passed": 6,
+  "native": false,
+  "real_home": false,
+  "denied": true,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-a7b02319"
+}

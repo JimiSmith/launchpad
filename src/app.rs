@@ -97,6 +97,7 @@ pub struct App {
     next_id: u64,
     demo: bool,
     index: Option<crate::search::HomeIndex>,
+    remote: Option<crate::remote::Remote>,
     pub search_status: String,
     show_suggestions: bool,
 }
@@ -134,12 +135,154 @@ impl Default for App {
             next_id: 10,
             demo: false,
             index: None,
+            remote: None,
             search_status: "Waiting for HOME access.".into(),
             show_suggestions: true,
         }
     }
 }
 impl App {
+    pub fn from_remote(home: std::path::PathBuf) -> Self {
+        let mut app = Self::from_home(home, "/host".into());
+        app.remote = Some(crate::remote::Remote {
+            dirty: true,
+            ..Default::default()
+        });
+        app
+    }
+    pub fn remote_refresh(&self) -> u64 {
+        self.remote.as_ref().map_or(0, |r| r.refresh)
+    }
+    pub fn remote_progress(&mut self, revision: u64, status: String) {
+        self.search_status = status;
+        if let Some(remote) = &mut self.remote
+            && revision > remote.revision
+        {
+            remote.dirty = true;
+            remote.revision = revision;
+        }
+    }
+    pub fn accept_remote_revision(&self, revision: u64) -> bool {
+        self.remote
+            .as_ref()
+            .is_some_and(|r| !r.failed && revision >= r.revision)
+    }
+    pub fn take_remote_request(&mut self) -> Option<crate::remote::RemoteRequest> {
+        let remote = self.remote.as_mut()?;
+        if remote.failed {
+            return None;
+        }
+        if remote.outbound.is_some() {
+            return remote.outbound.take();
+        }
+        if !remote.dirty
+            || self.help
+            || !self.show_suggestions
+            || self.cycle.is_some()
+            || self.screen != Screen::Dashboard
+            || self.quit
+        {
+            return None;
+        }
+        remote.dirty = false;
+        Some(crate::remote::RemoteRequest::Query {
+            generation: remote.generation,
+            text: self.editor.text.clone(),
+        })
+    }
+    fn request_validation(&mut self, raw: String, kind: crate::remote::Validation) {
+        let remote = self.remote.as_mut().unwrap();
+        if remote.failed {
+            self.message = Some(self.search_status.clone());
+            return;
+        }
+        remote.validation = Some(kind);
+        remote.outbound = Some(crate::remote::RemoteRequest::Validate {
+            generation: remote.generation,
+            raw,
+        });
+        self.show_suggestions = false;
+        self.suggestions.clear();
+        self.highlighted = None;
+        self.message = Some("Validating directory…".into());
+    }
+    pub fn remote_failed(&mut self, error: String) {
+        if let Some(remote) = &mut self.remote {
+            remote.failed = true;
+            remote.generation += 1;
+            remote.validation = None;
+            remote.outbound = None;
+        }
+        self.search_status = error;
+        self.message = None;
+        self.suggestions.clear();
+        self.highlighted = None;
+        self.cycle = None;
+    }
+    pub fn finish_remote_validation(
+        &mut self,
+        generation: u64,
+        result: Result<String, String>,
+    ) -> bool {
+        let Some(remote) = &mut self.remote else {
+            return false;
+        };
+        if remote.failed
+            || remote.generation != generation
+            || self.screen != Screen::Dashboard
+            || self.quit
+        {
+            return false;
+        }
+        let Some(kind) = remote.validation.take() else {
+            return false;
+        };
+        match result {
+            Err(error) => {
+                self.message = Some(error);
+                self.cycle = None;
+            }
+            Ok(path) => match kind {
+                crate::remote::Validation::Accept => {
+                    self.editor.set(&self.path_label(&path));
+                    self.message = None;
+                    self.touched = true;
+                }
+                crate::remote::Validation::Launch(tool) => self.finish_launch(path, tool),
+            },
+        }
+        true
+    }
+    pub fn apply_remote_results(&mut self, generation: u64, paths: Vec<String>) -> bool {
+        if self
+            .remote
+            .as_ref()
+            .is_none_or(|r| r.generation != generation)
+            || !self.show_suggestions
+            || self.cycle.is_some()
+            || self.screen != Screen::Dashboard
+            || self.quit
+        {
+            return false;
+        }
+        let selected = self
+            .highlighted
+            .and_then(|i| self.suggestions.get(i))
+            .and_then(|&i| self.dirs.get(i))
+            .map(|d| d.path.clone());
+        self.dirs = paths
+            .into_iter()
+            .take(100)
+            .map(|path| Directory {
+                path,
+                note: "directory",
+                error: None,
+            })
+            .collect();
+        self.suggestions = (0..self.dirs.len()).collect();
+        self.highlighted = selected.and_then(|path| self.dirs.iter().position(|d| d.path == path));
+        true
+    }
     pub fn from_home(home: std::path::PathBuf, root: std::path::PathBuf) -> Self {
         let mut app = Self::default();
         match crate::search::HomeIndex::new(home, root) {
@@ -155,9 +298,12 @@ impl App {
         self.demo
     }
     pub fn is_indexing(&self) -> bool {
-        self.index.as_ref().is_some_and(|i| i.is_scanning())
+        self.remote.is_none() && self.index.as_ref().is_some_and(|i| i.is_scanning())
     }
     pub fn index_tick(&mut self) -> bool {
+        if self.remote.is_some() {
+            return false;
+        }
         let Some(index) = self.index.as_mut() else {
             return false;
         };
@@ -179,6 +325,9 @@ impl App {
         true
     }
     fn matches(&self) -> Vec<usize> {
+        if self.remote.is_some() {
+            return Vec::new();
+        }
         if self.demo {
             return fixtures::matches(&self.editor.text, &self.dirs);
         }
@@ -219,12 +368,61 @@ impl App {
     }
 
     pub fn update(&mut self, action: Action) {
+        // Cursor motion keeps the validated path/tool intact. Focus, tool and
+        // history changes instead abandon the pending completion or launch.
+        let changes_validation_intent = match &action {
+            Action::Focus(focus) => *focus != self.focus,
+            Action::PathCursor(_) => self.focus != Focus::Path,
+            Action::Left | Action::Right => self.focus == Focus::Tools,
+            Action::Up => self.focus != Focus::Path,
+            Action::Down => self.focus != Focus::Path || self.suggestions.is_empty(),
+            Action::Home | Action::End => self.focus == Focus::History,
+            Action::SelectTool(_)
+            | Action::SelectHistory(_)
+            | Action::Scroll(ScrollTarget::History, _)
+            | Action::ToggleCopilot
+            | Action::ClearHistory => true,
+            _ => false,
+        };
+        if let Some(remote) = &mut self.remote
+            && ((remote.validation.is_some() && changes_validation_intent)
+                || matches!(
+                    action,
+                    Action::Text(_)
+                        | Action::Clear
+                        | Action::Backspace
+                        | Action::Delete
+                        | Action::Enter
+                        | Action::Tab
+                        | Action::BackTab
+                        | Action::AcceptSuggestion(_)
+                        | Action::LaunchForm
+                        | Action::Escape
+                        | Action::Reset
+                        | Action::Help
+                        | Action::Quit
+                ))
+        {
+            remote.generation += 1;
+            remote.dirty = true;
+            if remote.validation.take().is_some() {
+                self.message = None;
+                self.show_suggestions = true;
+                self.highlighted = None;
+                // Repeated Tab replaces validation but keeps its candidate cycle.
+                if self.focus != Focus::Path || !matches!(action, Action::Tab | Action::BackTab) {
+                    self.cycle = None;
+                }
+            }
+            remote.outbound = None;
+        }
         if action == Action::Quit {
             self.quit = true;
             return;
         }
         if action == Action::Reset {
             let compact = self.compact;
+            let remote = self.remote.take();
             let index = self.index.as_ref().map(|i| i.restart());
             let status = self.search_status.clone();
             *self = if self.demo {
@@ -239,6 +437,12 @@ impl App {
                 self.search_status = status;
             }
             self.compact = compact;
+            self.remote = remote;
+            if let Some(remote) = &mut self.remote {
+                remote.revision = 0;
+                remote.failed = false;
+                remote.refresh += 1;
+            }
             return;
         }
         if self.compact {
@@ -277,7 +481,10 @@ impl App {
             if self.confirm_clear {
                 self.confirm_clear = false;
                 self.message = None;
-            } else if !self.suggestions.is_empty() || self.cycle.is_some() {
+            } else if !self.suggestions.is_empty()
+                || self.cycle.is_some()
+                || (self.remote.is_some() && self.show_suggestions)
+            {
                 self.suggestions.clear();
                 self.show_suggestions = false;
                 self.highlighted = None;
@@ -414,8 +621,8 @@ impl App {
                 Action::Down => self.focus = Focus::Tools,
                 Action::Tab | Action::BackTab => self.complete(action == Action::BackTab),
                 Action::Enter => {
-                    if let Some(i) = self.highlighted {
-                        self.accept(self.suggestions[i]);
+                    if let Some(&index) = self.highlighted.and_then(|i| self.suggestions.get(i)) {
+                        self.accept(index);
                     } else {
                         self.launch(self.editor.text.clone(), self.tool);
                     }
@@ -529,6 +736,13 @@ impl App {
         self.suggestions = self.matches();
     }
     fn accept(&mut self, index: usize) {
+        if self.remote.is_some() {
+            self.request_validation(
+                self.dirs[index].path.clone(),
+                crate::remote::Validation::Accept,
+            );
+            return;
+        }
         if let Some(source) = &self.index
             && let Err(error) = source.validate(&self.dirs[index].path)
         {
@@ -545,6 +759,10 @@ impl App {
         self.touched = true;
     }
     fn launch(&mut self, raw: String, tool: Tool) {
+        if self.remote.is_some() {
+            self.request_validation(raw, crate::remote::Validation::Launch(tool));
+            return;
+        }
         let path = if self.demo {
             let path = fixtures::normalize(&raw);
             let Some(dir) = self
@@ -574,6 +792,9 @@ impl App {
             self.message = Some(self.search_status.clone());
             return;
         };
+        self.finish_launch(path, tool);
+    }
+    fn finish_launch(&mut self, path: String, tool: Tool) {
         if !self.available(tool) {
             self.message = Some(format!(
                 "{} is unavailable. Tab copies; Ctrl+T chooses a tool.",
@@ -601,6 +822,19 @@ mod tests {
     fn query(a: &mut App, text: &str) {
         a.update(Action::Clear);
         a.update(Action::Text(text.into()));
+    }
+    #[test]
+    fn remote_index_keeps_only_returned_rows_without_ui_scanning() {
+        let mut a = App::from_remote("/home/example".into());
+        assert!(!a.is_indexing());
+        assert!(!a.index_tick());
+        a.remote_progress(1, "HOME indexed".into());
+        assert!(a.apply_remote_results(0, vec!["/home/example/research/notes".into()]));
+        assert_eq!(a.suggestions, vec![0]);
+        assert_eq!(a.path_label(&a.dirs[0].path), "~/research/notes");
+        a.update(Action::Escape);
+        a.remote_progress(2, "HOME indexed".into());
+        assert!(a.suggestions.is_empty());
     }
     #[test]
     fn normal_startup_never_contains_demo_data() {

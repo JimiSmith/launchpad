@@ -1,0 +1,52 @@
+{
+  "label": "async-final",
+  "artifact": "/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm",
+  "sha256": "5913d562883b47180e40f949c84eeafe7d3f71586e8fa34c2e091956b02fe3ea",
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-9e79de03",
+  "during_index": {
+    "samples_ms": [
+      33.118,
+      113.211,
+      50.72,
+      34.378,
+      45.24,
+      32.238,
+      31.972,
+      45.831,
+      31.906,
+      37.044,
+      31.826,
+      36.348
+    ],
+    "median_ms": 35.363,
+    "max_ms": 113.211
+  },
+  "index_observed_seconds": 49.364,
+  "cached": {
+    "samples_ms": [
+      33.975,
+      32.46,
+      33.116,
+      34.539,
+      34.904,
+      34.863,
+      32.767,
+      34.483,
+      31.791,
+      31.53,
+      48.629,
+      43.784,
+      34.991,
+      34.58,
+      33.84,
+      31.966,
+      31.961,
+      31.622,
+      34.024,
+      34.972
+    ],
+    "median_ms": 33.9995,
+    "max_ms": 48.629
+  },
+  "success": true
+}

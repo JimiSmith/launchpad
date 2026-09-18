@@ -1,0 +1,52 @@
+{
+  "label": "index-worker",
+  "artifact": "/home/piclaw/Projects/zellij-launchpad/target/perf-index-worker/launchpad-plugin.wasm",
+  "sha256": "5f966779455e94dd7b86cee3a2ef853cd5e1cb49cb8eb6030fe792548350095c",
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-3171ed06",
+  "during_index": {
+    "samples_ms": [
+      102.747,
+      185.395,
+      135.311,
+      191.573,
+      250.075,
+      211.497,
+      241.922,
+      271.152,
+      253.595,
+      278.492,
+      241.838,
+      262.13
+    ],
+    "median_ms": 241.88,
+    "max_ms": 278.492
+  },
+  "index_observed_seconds": 238.577,
+  "cached": {
+    "samples_ms": [
+      5410.24,
+      4150.555,
+      1697.278,
+      1711.897,
+      1696.092,
+      1694.863,
+      1697.203,
+      1696.258,
+      1348.298,
+      1347.114,
+      993.129,
+      993.314,
+      997.486,
+      992.516,
+      991.345,
+      992.645,
+      994.716,
+      1014.191,
+      651.169,
+      651.63
+    ],
+    "median_ms": 1180.6525000000001,
+    "max_ms": 5410.24
+  },
+  "success": true
+}

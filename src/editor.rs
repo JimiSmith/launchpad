@@ -35,7 +35,18 @@ impl Editor {
         self.snap_forward(start);
     }
     pub fn insert(&mut self, text: &str) {
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        let mut remaining = 4096usize.saturating_sub(self.text.len());
+        let text: String = text
+            .chars()
+            .filter(|c| !c.is_control())
+            .take_while(|c| {
+                if c.len_utf8() > remaining {
+                    return false;
+                }
+                remaining -= c.len_utf8();
+                true
+            })
+            .collect();
         self.text.insert_str(self.cursor, &text);
         let target = self.cursor + text.len();
         self.snap_forward(target);
@@ -63,6 +74,15 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pasted_queries_have_a_utf8_safe_byte_budget() {
+        let mut e = Editor::default();
+        e.insert(&"修".repeat(5000));
+        assert!(e.text.len() <= 4096);
+        assert!(!e.text.is_empty());
+        e.insert("more");
+        assert!(e.text.len() <= 4096);
+    }
     #[test]
     fn deletion_that_joins_neighbors_keeps_cursor_on_grapheme_boundary() {
         let mut e = Editor::default();

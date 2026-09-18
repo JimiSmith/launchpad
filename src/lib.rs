@@ -4,6 +4,7 @@ pub mod cells;
 pub mod editor;
 pub mod fixtures;
 pub mod help;
+pub mod remote;
 pub mod search;
 pub mod theme;
 pub mod view;

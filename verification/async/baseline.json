@@ -1,0 +1,52 @@
+{
+  "label": "baseline",
+  "artifact": "/home/piclaw/Projects/zellij-launchpad/target/perf-baseline/launchpad-plugin.wasm",
+  "sha256": "9b2185845f72e8228d77426145c1dff6a5dd1a97b8f0bbca71248f54164af04d",
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-e8d15c47",
+  "during_index": {
+    "samples_ms": [
+      82.246,
+      191.904,
+      137.873,
+      192.62,
+      248.795,
+      304.621,
+      266.762,
+      294.627,
+      270.087,
+      297.615,
+      256.285,
+      275.246
+    ],
+    "median_ms": 261.5235,
+    "max_ms": 304.621
+  },
+  "index_observed_seconds": 234.288,
+  "cached": {
+    "samples_ms": [
+      5381.121,
+      4138.05,
+      1692.619,
+      1695.797,
+      1694.191,
+      1691.893,
+      1701.438,
+      1708.908,
+      1354.607,
+      1346.476,
+      1013.364,
+      992.69,
+      991.241,
+      992.356,
+      991.303,
+      992.732,
+      992.589,
+      993.596,
+      649.916,
+      650.654
+    ],
+    "median_ms": 1179.92,
+    "max_ms": 5381.121
+  },
+  "success": true
+}

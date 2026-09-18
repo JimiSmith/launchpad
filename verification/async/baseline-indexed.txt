@@ -1,0 +1,24 @@
+  ›_ Launchpad                                       HOME / launches simulated  
+  01 Directory                                                          Ctrl+P  
+  ┌──────────────────────────────────────────────────────────────────────────┐  
+  │ ›                                                                        │  
+  └──────────────────────────────────────────────────────────────────────────┘  
+   · ~/group-000/                                                    directory  
+   · ~/group-000/candidate-0000-notes-project/                       directory  
+   · ~/group-000/candidate-0001-notes-project/                       directory  
+  02 Launch with                                                        Ctrl+T  
+  [ Shell ]   Claude     Codex     Copilot     Hermes              Enter ↵      
+  HOME indexed · 18110 dirs · 1 skipped · F5 refresh                            
+  03 Recent launches · 0 events                                         Ctrl+R  
+     TOOL     DIRECTORY                                                   WHEN  
+  No recent launches. Choose a directory.                                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+  PATH Tab complete · ↑↓ select               F1 help · F5 reset · Ctrl+Q quit  

@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "checks": [
+    "host requests permission",
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "real HOME fuzzy index finds disposable probe",
+    "real HOME path validates independent of CWD",
+    "readback confirms plugin pane closed"
+  ],
+  "passed": 7,
+  "native": false,
+  "real_home": true,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-3ac8c1f1"
+}

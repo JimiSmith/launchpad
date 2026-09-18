@@ -1,0 +1,22 @@
+{
+  "success": true,
+  "checks": [
+    "host permission",
+    "worker mapping ready",
+    "cold index active before burst",
+    "latest query wins after rapid edits and backspaces",
+    "dismissed suggestions stay dismissed during progress",
+    "F5 starts a new worker epoch",
+    "new epoch yields fresh results",
+    "large controlled index completes",
+    "mouse reset refreshes the worker catalogue",
+    "async literal validation completes",
+    "history copy not overwritten by late replies",
+    "history copy keeps suggestions closed",
+    "exact pane readback confirms unload during work"
+  ],
+  "passed": 13,
+  "fault": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-e2f04a6f",
+  "sha256": "58882c902a75fc6df07727bdc148edb866651717cfa2219f71d3a361d2c7bf79"
+}

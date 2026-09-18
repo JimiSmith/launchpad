@@ -19,6 +19,7 @@ Pinned SDK/verified host: Zellij 0.45.1. Request:
 
 - `ReadSessionEnvironmentVariables`: obtain the host session's HOME.
 - `FullHdAccess`: required by this host for `ChangeHostFolder`.
+- `ChangeApplicationState`: reload once during boot so workers inherit HOME.
 
 The current website describes `ChangeApplicationState` for `change_host_folder`,
 but the pinned source (`zellij-server/src/plugins/zellij_exports.rs`, permission
@@ -27,7 +28,9 @@ filesystem permission is broad; this plugin's implementation only reads HOME.
 It does not ask for command execution or terminal-opening permissions.
 
 After permission grant, remount `/host` to HOME using `change_host_folder`, then
-wait for the matching `HostFolderChanged` acknowledgement **before** indexing.
+wait for the matching `HostFolderChanged` acknowledgement. If the initial mount
+was not HOME, reload once before accepting input, then require the worker's
+`initial_cwd` handshake to equal HOME **before** indexing. See [worker details](async-workers.md).
 The default `/host` is an invoking-terminal CWD, not necessarily HOME. Host paths
 are kept separate from WASI paths; `/host` is never presented as a user path.
 Denial, missing HOME, remount failure, and root read failure stay visible without
@@ -37,10 +40,13 @@ retry loops. Reopen after fixing the environment/permissions.
 
 - Breadth-first directory traversal, no exclusion list, including hidden subtrees.
 - One tick consumes at most 128 open/read-entry units, with a cooperative 5 ms
-  budget; native polling and plugin timers schedule subsequent ticks. No recursive
-  walk on a keystroke and no filesystem IO in rendering. Input queries use cached
-  candidates, so there are no asynchronous query responses to apply out of order.
+  budget. Native polling is cooperative; the plugin keeps traversal, Frizbee and
+  validation in a persistent WASM worker. Only capped results reach its UI;
+  epochs, query generations and revisions reject stale responses. No filesystem
+  IO or matching runs on the plugin's input/render path.
 - Stop at 20,000 directory candidates or 200,000 entries, with maximum depth 64.
+  Also stop at a conservative 6 MiB retained-path/queue budget or a path over
+  4096 bytes. Edited input is capped at 4096 UTF-8 bytes.
   Limits and skipped-entry counts are visible. This is a partial index when capped;
   an explicit valid path can still be entered without being indexed.
 - Keep at most 100 ranked suggestions, ordered by Frizbee score and path tie-break.
@@ -78,8 +84,7 @@ PY=target/verification-venv/bin/python
 $PY tools/verify_search.py
 $PY tools/verify_search.py --deny
 $PY tools/verify_search.py --native
-$PY tools/verify_search.py --real-home
-$PY tools/verify_search.py --native --real-home
+
 $PY tools/verify_zellij.py
 $PY tools/verify_pty.py
 $PY tools/verify_cleanup.py
@@ -87,7 +92,8 @@ $PY tools/verify_cleanup.py
 
 `verify_search.py` uses private host state and controlled directories, a CWD outside
 the test HOME, real permission grant/deny, and readback of the closed plugin pane.
-`--real-home` creates/removes only a uniquely named probe and saves checks, not
-screens or real directory listings. Evidence is ignored under `target/zj-*`.
+All automated search checks use disposable HOME fixtures beneath `target/`;
+there is no mode that uses the invoking user’s HOME. Unsupported flags are rejected
+before setup. Evidence is ignored under `target/zj-*`.
 The older UI/mouse regression harnesses explicitly select demo mode (`--demo` for
 native, plugin configuration `demo=true`); production startup never uses it.

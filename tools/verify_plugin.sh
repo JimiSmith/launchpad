@@ -9,6 +9,7 @@ run() {
     printf '\n$'; printf ' %q' "$@"; printf '\n'
     "$@" 2>&1 | tee "target/plugin-verification/$name.log"
 }
+
 run fmt cargo fmt --all --check
 run tests cargo test --workspace --locked
 run clippy-native cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -22,8 +23,6 @@ run native-cleanup "$PYTHON" tools/verify_cleanup.py
 run search-native "$PYTHON" tools/verify_search.py --native
 run search-plugin "$PYTHON" tools/verify_search.py
 run search-denied "$PYTHON" tools/verify_search.py --deny
-run search-real-home "$PYTHON" tools/verify_search.py --real-home
-run search-native-real-home "$PYTHON" tools/verify_search.py --native --real-home
 run live-1 "$PYTHON" tools/verify_zellij.py
 run live-2 "$PYTHON" tools/verify_zellij.py
 OUT=$("$PYTHON" -c 'import json;print(json.load(open("target/plugin-verification/live-2.log"))["evidence"])')

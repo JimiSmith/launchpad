@@ -98,6 +98,8 @@ pub struct Directory {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
+    /// Conservative retained path/queue/allocation accounting, not RSS.
+    pub max_bytes: usize,
     pub max_directories: usize,
     pub max_entries: usize,
     pub max_depth: usize,
@@ -105,6 +107,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            max_bytes: 6 * 1024 * 1024,
             max_directories: 20_000,
             max_entries: 200_000,
             max_depth: 64,
@@ -118,6 +121,7 @@ pub struct HomeIndex {
     root: PathBuf,
     pub limits: Limits,
     visited: usize,
+    retained_bytes: usize,
     skipped: usize,
     limited: bool,
     error: Option<String>,
@@ -145,6 +149,7 @@ impl HomeIndex {
             root,
             limits: Limits::default(),
             visited: 0,
+            retained_bytes: 0,
             skipped: 0,
             limited: false,
             error: None,
@@ -255,6 +260,21 @@ impl HomeIndex {
                                 .to_str()
                                 .filter(|p| !p.chars().any(char::is_control))
                             {
+                                // Bound path bytes as well as counts; leave headroom for
+                                // Frizbee's temporary scoring buffers under the host's
+                                // 16 MiB linear-memory ceiling. Count queue storage even
+                                // after it is released (deliberately conservative).
+                                let cost = path.len() + relative.as_os_str().len() + 128;
+                                if path.len() > 4096
+                                    || self.retained_bytes.saturating_add(cost)
+                                        > self.limits.max_bytes
+                                {
+                                    self.limited = true;
+                                    self.current = None;
+                                    self.queue.clear();
+                                    break;
+                                }
+                                self.retained_bytes += cost;
                                 self.dirs.push(Directory {
                                     path: path.into(),
                                     note: "directory",

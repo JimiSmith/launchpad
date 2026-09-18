@@ -294,3 +294,16 @@ fn indexes_nested_directories_incrementally_not_files() {
     assert!(paths.iter().any(|p| p.ends_with("team notes/修理")));
     assert!(!paths.iter().any(|p| p.ends_with("not-a-directory")));
 }
+#[test]
+fn byte_budget_stops_before_retaining_long_paths() {
+    let tree = Tree::new();
+    tree.dir("a-long-directory-name");
+    let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
+    index.limits.max_bytes = 1;
+    for _ in 0..100 {
+        index.step(100);
+    }
+    assert!(!index.is_scanning());
+    assert!(index.dirs.is_empty());
+    assert!(index.status().contains("limit"));
+}

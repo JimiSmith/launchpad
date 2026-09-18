@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Bounded live Zellij 0.45.1 PTY verification; pyte is development-only.
-Run: target/verification-venv/bin/python tools/verify_zellij.py
+Run: target/verification-venv/bin/python tools/verify_search.py
 All host state and evidence live under target/zj-<unique id>. No global cleanup.
 """
+import argparse
 import codecs
 import fcntl
 import hashlib
@@ -19,12 +20,17 @@ import termios
 import time
 import uuid
 
+parser = argparse.ArgumentParser(description='Verify search using an isolated HOME fixture.')
+parser.add_argument('--native', action='store_true')
+parser.add_argument('--deny', action='store_true')
+# Wrappers validate their own CLI before supplying explicit search options.
+options = parser.parse_args(globals().get('SEARCH_ARGS'))
+
 import pyte
 
 ROOT = Path(__file__).resolve().parents[1]
-NATIVE = '--native' in __import__('sys').argv
-DENY = '--deny' in __import__('sys').argv
-REAL = '--real-home' in __import__('sys').argv
+NATIVE = options.native
+DENY = options.deny
 NAME = 'search-' + uuid.uuid4().hex[:8]
 OUT = ROOT / 'target' / ('zj-' + NAME[3:])
 OUT.mkdir(parents=True)
@@ -38,7 +44,7 @@ env.update(TERM='xterm-256color', COLORTERM='truecolor', HOME=str(OUT/'home'),
            XDG_DATA_HOME=str(OUT/'data'), XDG_RUNTIME_DIR=str(OUT/'runtime'),
            ZELLIJ_SOCKET_DIR=str(OUT/'sock'), TMPDIR=str(OUT/'tmp'), SHELL='/bin/sh',
            TERM_PROGRAM='launchpad-verification')
-home = Path(os.environ['HOME']) if REAL else OUT/'home'
+home = OUT/'home'
 env['HOME'] = str(home)
 probe = home / ('launchpad-search-probe-' + uuid.uuid4().hex[:8])
 (probe/'Projects/research/notes').mkdir(parents=True)
@@ -185,53 +191,46 @@ try:
         send('\r')
         expect('simulated launch accepted', 'real Unicode directory validates')
         send('\x1b')
-        if REAL:
-            # Query within our disposable probe, never persist real directory listings.
-            send('\x15' + probe.name)
-            expect(probe.name + '/', 'real HOME fuzzy index finds disposable probe', timeout=45)
-            send('\x15~/' + probe.name + '/Projects/research/notes\r')
-            expect('simulated launch accepted', 'real HOME path validates independent of CWD')
-        else:
-            expect('HOME indexed', 'controlled index completes')
-            send('\x15nts')
-            expect('research/notes/', 'bare fuzzy query finds nested real directories')
-            snapshot('01-search')
-            click('research/notes/')
-            check('Terminal placeholder' not in display(), 'real directory mouse completion never launches')
-            send('\r')
-            expect('simulated launch accepted', 'accepted directory revalidates')
-            send('\x1b')
-            send('\x15hiddenneedle')
-            check('hiddenneedle/' not in display(), 'hidden directories omitted by default')
-            send('\x15.archive/hiddenneedle')
-            expect('hiddenneedle/', 'dot component enables hidden results')
-            send('\x15fileneedle')
-            check('fileneedle/' not in display(), 'files never become candidates')
-            send('\x15~/' + probe.name + '/escape\r')
-            expect('symlinks', 'symlink escape rejected')
-            send('\x15~/' + probe.name + '/deniedneedle\r')
-            expect('unavailable', 'unreadable directory rejected')
-            send('\x15deletedneedle')
-            expect('deletedneedle/', 'deletable candidate found')
-            (probe/'deletedneedle').rmdir()
-            send('\t')
-            expect('unavailable', 'stale completion revalidated')
-            send('\x15/etc\r')
-            expect('under HOME', 'absolute outside path rejected')
-            snapshot('02-error')
-            send('\x1b[15~')
-            expect('0 events', 'F5 clears simulated history and refreshes HOME')
-            send('\x15nts')
-            expect('research/notes/', 'F5 searches real HOME again')
-            resize(200,36)
-            check(all(not line[:20].strip() and not line[180:].strip() for line in screen.display),
-                  'UI stays centered at 160 columns')
-            resize(30,8)
-            expect('Resize to at least', 'compact guard preserved')
-            send('\r')
-            check('No launch' in display(), 'compact mode blocks launch')
-            resize(80,24)
-            snapshot('03-final')
+        expect('HOME indexed', 'controlled index completes')
+        send('\x15nts')
+        expect('research/notes/', 'bare fuzzy query finds nested real directories')
+        snapshot('01-search')
+        click('research/notes/')
+        check('Terminal placeholder' not in display(), 'real directory mouse completion never launches')
+        send('\r')
+        expect('simulated launch accepted', 'accepted directory revalidates')
+        send('\x1b')
+        send('\x15hiddenneedle')
+        check('hiddenneedle/' not in display(), 'hidden directories omitted by default')
+        send('\x15.archive/hiddenneedle')
+        expect('hiddenneedle/', 'dot component enables hidden results')
+        send('\x15fileneedle')
+        check('fileneedle/' not in display(), 'files never become candidates')
+        send('\x15~/' + probe.name + '/escape\r')
+        expect('symlinks', 'symlink escape rejected')
+        send('\x15~/' + probe.name + '/deniedneedle\r')
+        expect('unavailable', 'unreadable directory rejected')
+        send('\x15deletedneedle')
+        expect('deletedneedle/', 'deletable candidate found')
+        (probe/'deletedneedle').rmdir()
+        send('\t')
+        expect('unavailable', 'stale completion revalidated')
+        send('\x15/etc\r')
+        expect('under HOME', 'absolute outside path rejected')
+        snapshot('02-error')
+        send('\x1b[15~')
+        expect('0 events', 'F5 clears simulated history and refreshes HOME')
+        send('\x15nts')
+        expect('research/notes/', 'F5 searches real HOME again')
+        resize(200,36)
+        check(all(not line[:20].strip() and not line[180:].strip() for line in screen.display),
+              'UI stays centered at 160 columns')
+        resize(30,8)
+        expect('Resize to at least', 'compact guard preserved')
+        send('\r')
+        check('No launch' in display(), 'compact mode blocks launch')
+        resize(80,24)
+        snapshot('03-final')
     send('\x11')
     if not NATIVE:
         records=json.loads(cli('action','list-panes','--all','--json'))
@@ -243,10 +242,8 @@ try:
         check(child.poll()==0, 'native exits cleanly')
     success=True
 finally:
-    # Real-home runs retain only checks, no screens/raw/listings or environment.
-    if not REAL:
-        snapshot('last')
-        (OUT/'session.ansi').write_bytes(raw)
+    snapshot('last')
+    (OUT/'session.ansi').write_bytes(raw)
     if not NATIVE:
         subprocess.run(['zellij','--session',NAME,'kill-session',NAME],env=env,
                        capture_output=True,timeout=10)
@@ -258,6 +255,6 @@ finally:
     (probe/'deniedneedle').chmod(0o700)
     shutil.rmtree(probe)
     report={'success':success, 'checks':checks, 'passed':len(checks),
-            'native':NATIVE, 'real_home':REAL, 'denied':DENY, 'evidence':str(OUT)}
+            'native':NATIVE, 'denied':DENY, 'evidence':str(OUT)}
     (OUT/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))

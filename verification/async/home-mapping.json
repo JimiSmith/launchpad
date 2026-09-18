@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "checks": [
+    "host permissions",
+    "workers see actual HOME despite invocation CWD",
+    "no reload loop"
+  ],
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-528f6203"
+}

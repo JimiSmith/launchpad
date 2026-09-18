@@ -1,0 +1,542 @@
+
+$ cargo fmt --all --check
+
+$ cargo test --workspace --locked
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+   Compiling launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.96s
+     Running unittests src/lib.rs (target/debug/deps/launchpad_plugin-27a429fa89fc8bc1)
+
+running 8 tests
+test tests::missing_home_and_failed_remount_stay_restricted ... ok
+test tests::home_access_waits_for_ack_and_denial_is_not_demo ... ok
+test tests::sdk_keys_preserve_control_focus_shift_tab_and_literal_text ... ok
+test tests::renders_shared_ui_caret_hits_and_resizes_to_guard ... ok
+test tests::queued_mouse_is_quarantined_after_resize ... ok
+test tests::sdk_click_hold_release_and_paste_obey_domain_contract ... ok
+test workers::tests::real_frizbee_results_are_byte_and_row_bounded ... ok
+test tests::wheel_uses_last_known_section_and_forgets_it_on_resize ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/main.rs (target/debug/deps/launchpad_plugin-15eb01795cd51d53)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/worker-probe.rs (target/debug/deps/worker_probe-2d74ba2efe805a13)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/layout.rs (target/debug/deps/layout-1dd0b9ef5dae06ed)
+
+running 1 test
+test sample_layout_parses_in_exact_host_sdk ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workers.rs (target/debug/deps/workers-892fe2e70d91364d)
+
+running 2 tests
+test worker_refuses_wrong_mapping_and_steps_only_current_epoch ... ok
+test worker_search_is_capped_and_carries_epoch_and_generation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/zellij_launchpad_prototype-17c4b1a945828c1c)
+
+running 16 tests
+test ansi::tests::styled_spaces_survive_but_covered_styles_never_leak ... ok
+test ansi::tests::zellij_scalar_grid_gets_nfc_and_width_safe_emoji_fallback ... ok
+test ansi::tests::wide_continuations_and_exact_fit_rows_do_not_add_columns ... ok
+test app::tests::escape_cancels_history_clear_with_default_suggestions ... ok
+test app::tests::hidden_controls_never_launch_and_escape_help_quit_are_safe ... ok
+test app::tests::completion_accepts_only_then_validated_enter_simulates_launch ... ok
+test app::tests::focus_navigation_completion_cycle_and_path_keys_are_distinct ... ok
+test app::tests::normal_startup_never_contains_demo_data ... ok
+test app::tests::remote_index_keeps_only_returned_rows_without_ui_scanning ... ok
+test editor::tests::deletion_that_joins_neighbors_keeps_cursor_on_grapheme_boundary ... ok
+test editor::tests::edits_whole_graphemes_and_keeps_literal_text ... ok
+test cells::tests::clipping_keeps_graphemes_and_reserves_ellipsis_cells ... ok
+test app::tests::history_replays_copies_prunes_duplicates_and_revalidates_tools ... ok
+test editor::tests::pasted_queries_have_a_utf8_safe_byte_budget ... ok
+test fixtures::tests::frizbee_finds_bare_nested_and_noncontiguous_names ... ok
+test app::tests::invalid_paths_preserve_form_and_literal_paths_launch_all_five_tools ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/zellij_launchpad_prototype-0095519010f72703)
+
+running 4 tests
+test terminal::tests::indexing_keeps_resize_mouse_quarantine_at_one_hundred_ms ... ok
+test terminal::tests::session_cleanup_probe ... ignored, requires an isolated PTY; run tools/verify_cleanup.py
+test terminal::tests::maps_shortcuts_without_stealing_printable_q_or_repeated_enter ... ok
+test terminal::tests::mouse_adapter_only_accepts_left_down_and_vertical_wheel ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/async_search.rs (target/debug/deps/async_search-e4b73145e5d23185)
+
+running 5 tests
+test old_index_revision_cannot_replace_newer_results ... ok
+test navigating_results_never_resubmits_search_or_loses_selection ... ok
+test async_search_coalesces_edits_and_rejects_dismissed_or_stale_results ... ok
+test validation_runs_off_ui_and_late_selection_or_launch_cannot_win ... ok
+test reset_close_quit_failure_and_history_copy_invalidate_pending_work ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/home_search.rs (target/debug/deps/home_search-cc68b730c75834e5)
+
+running 12 tests
+test byte_budget_stops_before_retaining_long_paths ... ok
+test bounded_scan_reports_limits_and_read_errors ... ok
+test directory_entry_and_depth_caps_remain_explicit ... ok
+test hidden_home_spelling_does_not_hide_normal_descendants ... ok
+test logical_home_is_distinct_from_filesystem_mapping ... ok
+test indexes_nested_directories_incrementally_not_files ... ok
+test restricted_state_is_visible_at_minimum_size ... ok
+test skips_symlinks_and_unrepresentable_names ... ok
+test validates_literal_home_paths_not_files_or_escapes ... ok
+test app_searches_real_home_accepts_then_revalidates_without_invented_history ... ok
+test search_status_uses_readable_text_color_not_separator_color ... ok
+test background_indexing_respects_dismissal_and_history_copy ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/mouse.rs (target/debug/deps/mouse-8a47e9d4adc9362a)
+
+running 10 tests
+test path_click_uses_cells_graphemes_padding_and_focus ... ok
+test scrolled_input_maps_visible_origin_and_clipped_tail ... ok
+test scrolled_suggestions_click_the_visible_result ... ok
+test suggestion_click_accepts_without_launching ... ok
+test stale_resize_blank_and_tiny_hit_maps_are_inert ... ok
+test tool_click_selects_and_focuses_without_launch_even_when_wrapped ... ok
+test unavailable_history_and_empty_lists_do_not_launch_or_fall_back ... ok
+test history_click_selects_only_then_copy_or_replay_is_explicit ... ok
+test explicit_launch_back_help_reset_and_quit_controls ... ok
+test wheel_is_section_local_and_clamped ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/non_tty.rs (target/debug/deps/non_tty-15ec2dabd58b2ad9)
+
+running 1 test
+test rejects_non_tty_without_escape_sequences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/render.rs (target/debug/deps/render-13aa14482525e91f)
+
+running 6 tests
+test minimum_usable_view_keeps_selected_history_visible ... ok
+test narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls ... ok
+test roomy_layout_uses_spare_rows_for_history_rhythm ... ok
+test dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes ... ok
+test help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors ... ok
+test wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
+
+   Doc-tests launchpad_plugin
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zellij_launchpad_prototype
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Checking isahc v1.8.3
+    Checking zellij-utils v0.45.1
+    Checking zellij-tile v0.45.1
+    Checking launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.19s
+
+$ cargo clippy -p launchpad-plugin --target wasm32-wasip1 --locked -- -D warnings
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.151
+    Checking zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Checking url v2.5.8
+    Checking zellij-utils v0.45.1
+    Checking zellij-tile v0.45.1
+    Checking launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.63s
+
+$ cargo build --release --locked
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Finished `release` profile [optimized] target(s) in 10.85s
+
+$ cargo build -p launchpad-plugin --target wasm32-wasip1 --release --locked
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+   Compiling launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `release` profile [optimized] target(s) in 29.74s
+
+$ target/verification-venv/bin/python tools/verify_pty.py
+{
+  "passed": 51,
+  "checks": [
+    "startup in real PTY",
+    "all ten initial events visible at 80x24",
+    "bare notes fuzzy search",
+    "ambiguous nested result has full path",
+    "Enter accepts highlighted completion only",
+    "Ctrl+T and tool arrows",
+    "simulated launch",
+    "completion resolves actual cwd",
+    "duplicate Enter remains frozen",
+    "return from placeholder",
+    "history replay retains tool",
+    "history Tab copies without launch",
+    "invalid directory inline error",
+    "unavailable recent never falls back",
+    "explicit available replacement",
+    "shell-looking filename kept literal",
+    "literal fixture launch",
+    "Unicode input in real terminal stream",
+    "expanded 120x36 layout",
+    "40x12 scroll reaches last history entry",
+    "help scroll reaches last line at 40x12",
+    "compact guard",
+    "restore from compact never launched",
+    "mouse: capture and SGR reporting enabled",
+    "mouse: suggestion accepts only",
+    "mouse: suggestion did not launch",
+    "mouse: tool selects only",
+    "mouse: release/right/middle/drag/move/modifier/blank/out-of-bounds ignored",
+    "mouse: explicit launch",
+    "mouse: terminal back",
+    "mouse: history row selects without launch",
+    "mouse: history copy",
+    "mouse: explicit history replay",
+    "mouse: Unicode cursor placement respects wide and combining cells",
+    "mouse: horizontally scrolled input uses visible origin",
+    "mouse: help wheel scrolls",
+    "mouse: help close",
+    "mouse: suggestion wheel highlights",
+    "mouse: suggestion wheel clamps at end",
+    "mouse: wheel-highlighted suggestion click accepts",
+    "mouse: compact history wheel reaches last entry",
+    "mouse: unrelated wheel does not steal focus",
+    "mouse: compact history copy",
+    "mouse: wrapped tool selection",
+    "mouse: compact explicit launch",
+    "mouse: roomy tool geometry",
+    "mouse: queued click during resize ignored",
+    "mouse: tiny layout has no active mouse targets",
+    "mouse: reset restores fixtures",
+    "Ctrl+Q exits zero and restores termios, alternate screen and bracketed paste",
+    "mouse: capture disabled at exit"
+  ],
+  "exit_code": 0,
+  "keyboard_checks": 24,
+  "mouse_checks": 27,
+  "mouse_capture_restored": true,
+  "termios_restored": true,
+  "raw_bytes": 150470,
+  "binary": "/home/piclaw/Projects/zellij-launchpad/target/release/zellij-launchpad-prototype"
+}
+
+$ target/verification-venv/bin/python tools/verify_cleanup.py
+{
+  "passed": 3,
+  "checks": [
+    {
+      "mode": "error",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 291
+    },
+    {
+      "mode": "panic",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 560
+    },
+    {
+      "mode": "mouse-quit",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 4591
+    }
+  ]
+}
+
+$ target/verification-venv/bin/python tools/verify_search.py --native
+{
+  "success": true,
+  "checks": [
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "controlled index completes",
+    "bare fuzzy query finds nested real directories",
+    "real directory mouse completion never launches",
+    "accepted directory revalidates",
+    "hidden directories omitted by default",
+    "dot component enables hidden results",
+    "files never become candidates",
+    "symlink escape rejected",
+    "unreadable directory rejected",
+    "deletable candidate found",
+    "stale completion revalidated",
+    "absolute outside path rejected",
+    "F5 clears simulated history and refreshes HOME",
+    "F5 searches real HOME again",
+    "UI stays centered at 160 columns",
+    "compact guard preserved",
+    "compact mode blocks launch",
+    "native exits cleanly"
+  ],
+  "passed": 21,
+  "native": true,
+  "real_home": false,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-24dd3fc1"
+}
+
+$ target/verification-venv/bin/python tools/verify_search.py
+{
+  "success": true,
+  "checks": [
+    "host requests permission",
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "controlled index completes",
+    "bare fuzzy query finds nested real directories",
+    "real directory mouse completion never launches",
+    "accepted directory revalidates",
+    "hidden directories omitted by default",
+    "dot component enables hidden results",
+    "files never become candidates",
+    "symlink escape rejected",
+    "unreadable directory rejected",
+    "deletable candidate found",
+    "stale completion revalidated",
+    "absolute outside path rejected",
+    "F5 clears simulated history and refreshes HOME",
+    "F5 searches real HOME again",
+    "UI stays centered at 160 columns",
+    "compact guard preserved",
+    "compact mode blocks launch",
+    "readback confirms plugin pane closed"
+  ],
+  "passed": 22,
+  "native": false,
+  "real_home": false,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-21820ef5"
+}
+
+$ target/verification-venv/bin/python tools/verify_search.py --deny
+{
+  "success": true,
+  "checks": [
+    "host requests permission",
+    "real dashboard loads",
+    "permission denial is visible",
+    "denial never invents history",
+    "denied search cannot launch",
+    "readback confirms plugin pane closed"
+  ],
+  "passed": 6,
+  "native": false,
+  "real_home": false,
+  "denied": true,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-a7b02319"
+}
+
+$ target/verification-venv/bin/python tools/verify_search.py --real-home
+{
+  "success": true,
+  "checks": [
+    "host requests permission",
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "real HOME fuzzy index finds disposable probe",
+    "real HOME path validates independent of CWD",
+    "readback confirms plugin pane closed"
+  ],
+  "passed": 7,
+  "native": false,
+  "real_home": true,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-3ac8c1f1"
+}
+
+$ target/verification-venv/bin/python tools/verify_search.py --native --real-home
+{
+  "success": true,
+  "checks": [
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "real HOME fuzzy index finds disposable probe",
+    "real HOME path validates independent of CWD",
+    "native exits cleanly"
+  ],
+  "passed": 6,
+  "native": true,
+  "real_home": true,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-2c02a18e"
+}
+
+$ target/verification-venv/bin/python tools/verify_zellij.py
+{
+  "success": true,
+  "checks": [
+    "actual WASM loads with no permission prompt",
+    "embedded fuzzy results",
+    "completion is separate from launch",
+    "completion never launches",
+    "locked mode delivers Ctrl+T and arrows",
+    "selected tool simulation",
+    "keyboard back",
+    "history copy without launch",
+    "history replay",
+    "F1 help",
+    "invalid path preserved",
+    "F5 fixture reset",
+    "noncontiguous fuzzy matching in WASM",
+    "mouse suggestion completes without launch",
+    "suggestion click is completion only",
+    "mouse tool selection",
+    "mouse hold/release cannot launch",
+    "explicit mouse form launch",
+    "mouse back",
+    "repeated Enter in simulation adds no extra history events",
+    "mouse history selection without launch",
+    "mouse copy into form",
+    "explicit mouse history replay",
+    "bracketed Unicode paste is literal",
+    "Unicode preserves input right border at column 78",
+    "mouse CJK continuation places grapheme-safe caret",
+    "wide resize preserves state",
+    "wide layout right border stays aligned",
+    "wheel on heading does not change focus",
+    "wheel over history focuses only that section",
+    "help wheel scroll",
+    "mouse exits scrolled help",
+    "narrow interactive layout",
+    "small guard",
+    "small guard blocks launch",
+    "availability fixture toggle",
+    "normal mode host shortcut does not select tools",
+    "locked mode restores domain shortcut delivery",
+    "host manifest confirms exact WASM and surviving shell identity",
+    "Quit closes only the plugin, session survives",
+    "host readback confirms plugin removed and same ordinary pane survives",
+    "ordinary shell pane remains usable",
+    "WASM reloads in split alongside surviving ordinary pane",
+    "Ctrl+Q closes only own split plugin pane, preserving shell in same tab",
+    "Ctrl+G then Ctrl+Q exits the host normally"
+  ],
+  "passed": 45,
+  "host": "zellij 0.45.1",
+  "wasm": "/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm",
+  "sha256": "5913d562883b47180e40f949c84eeafe7d3f71586e8fa34c2e091956b02fe3ea",
+  "command": [
+    "zellij",
+    "--config",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-2e6bc632/config.kdl",
+    "--layout-string",
+    "// Run from the repository root. For another checkout, update the absolute WASM path.\nlayout {\n    tab name=\"Launch\" focus=true {\n        pane borderless=true {\n            plugin location=\"file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm\" { demo \"true\"; }\n        }\n    }\n    tab name=\"Shell\" {\n        pane name=\"Shell\" command=\"sh\"\n    }\n}\n"
+  ],
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-2e6bc632",
+  "termios_restored": true
+}
+
+$ target/verification-venv/bin/python tools/verify_zellij.py
+{
+  "success": true,
+  "checks": [
+    "actual WASM loads with no permission prompt",
+    "embedded fuzzy results",
+    "completion is separate from launch",
+    "completion never launches",
+    "locked mode delivers Ctrl+T and arrows",
+    "selected tool simulation",
+    "keyboard back",
+    "history copy without launch",
+    "history replay",
+    "F1 help",
+    "invalid path preserved",
+    "F5 fixture reset",
+    "noncontiguous fuzzy matching in WASM",
+    "mouse suggestion completes without launch",
+    "suggestion click is completion only",
+    "mouse tool selection",
+    "mouse hold/release cannot launch",
+    "explicit mouse form launch",
+    "mouse back",
+    "repeated Enter in simulation adds no extra history events",
+    "mouse history selection without launch",
+    "mouse copy into form",
+    "explicit mouse history replay",
+    "bracketed Unicode paste is literal",
+    "Unicode preserves input right border at column 78",
+    "mouse CJK continuation places grapheme-safe caret",
+    "wide resize preserves state",
+    "wide layout right border stays aligned",
+    "wheel on heading does not change focus",
+    "wheel over history focuses only that section",
+    "help wheel scroll",
+    "mouse exits scrolled help",
+    "narrow interactive layout",
+    "small guard",
+    "small guard blocks launch",
+    "availability fixture toggle",
+    "normal mode host shortcut does not select tools",
+    "locked mode restores domain shortcut delivery",
+    "host manifest confirms exact WASM and surviving shell identity",
+    "Quit closes only the plugin, session survives",
+    "host readback confirms plugin removed and same ordinary pane survives",
+    "ordinary shell pane remains usable",
+    "WASM reloads in split alongside surviving ordinary pane",
+    "Ctrl+Q closes only own split plugin pane, preserving shell in same tab",
+    "Ctrl+G then Ctrl+Q exits the host normally"
+  ],
+  "passed": 45,
+  "host": "zellij 0.45.1",
+  "wasm": "/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm",
+  "sha256": "5913d562883b47180e40f949c84eeafe7d3f71586e8fa34c2e091956b02fe3ea",
+  "command": [
+    "zellij",
+    "--config",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/config.kdl",
+    "--layout-string",
+    "// Run from the repository root. For another checkout, update the absolute WASM path.\nlayout {\n    tab name=\"Launch\" focus=true {\n        pane borderless=true {\n            plugin location=\"file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm\" { demo \"true\"; }\n        }\n    }\n    tab name=\"Shell\" {\n        pane name=\"Shell\" command=\"sh\"\n    }\n}\n"
+  ],
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22",
+  "termios_restored": true
+}
+
+$ target/verification-venv/bin/python tools/capture_zellij.py /home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22
+{
+  "screenshots": [
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/01-initial-80x24.png",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/06-unicode-80x24.png",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/07-wide-120x36.png",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/09-narrow-40x10.png",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/10-guard-30x8.png",
+    "/home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22/13-split-before-key-quit.png"
+  ]
+}
+
+Verified. Final PTY records, host logs and screenshots: /home/piclaw/Projects/zellij-launchpad/target/zj-990d9f22

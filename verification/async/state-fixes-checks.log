@@ -1,0 +1,171 @@
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+   Compiling launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.98s
+     Running unittests src/lib.rs (target/debug/deps/launchpad_plugin-27a429fa89fc8bc1)
+
+running 8 tests
+test tests::missing_home_and_failed_remount_stay_restricted ... ok
+test tests::home_access_waits_for_ack_and_denial_is_not_demo ... ok
+test tests::sdk_keys_preserve_control_focus_shift_tab_and_literal_text ... ok
+test tests::sdk_click_hold_release_and_paste_obey_domain_contract ... ok
+test tests::renders_shared_ui_caret_hits_and_resizes_to_guard ... ok
+test workers::tests::real_frizbee_results_are_byte_and_row_bounded ... ok
+test tests::wheel_uses_last_known_section_and_forgets_it_on_resize ... ok
+test tests::queued_mouse_is_quarantined_after_resize ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/main.rs (target/debug/deps/launchpad_plugin-15eb01795cd51d53)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/worker-probe.rs (target/debug/deps/worker_probe-2d74ba2efe805a13)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/layout.rs (target/debug/deps/layout-1dd0b9ef5dae06ed)
+
+running 1 test
+test sample_layout_parses_in_exact_host_sdk ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workers.rs (target/debug/deps/workers-892fe2e70d91364d)
+
+running 2 tests
+test worker_refuses_wrong_mapping_and_steps_only_current_epoch ... ok
+test worker_search_is_capped_and_carries_epoch_and_generation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/zellij_launchpad_prototype-17c4b1a945828c1c)
+
+running 16 tests
+test ansi::tests::styled_spaces_survive_but_covered_styles_never_leak ... ok
+test ansi::tests::wide_continuations_and_exact_fit_rows_do_not_add_columns ... ok
+test ansi::tests::zellij_scalar_grid_gets_nfc_and_width_safe_emoji_fallback ... ok
+test app::tests::escape_cancels_history_clear_with_default_suggestions ... ok
+test app::tests::completion_accepts_only_then_validated_enter_simulates_launch ... ok
+test app::tests::hidden_controls_never_launch_and_escape_help_quit_are_safe ... ok
+test app::tests::normal_startup_never_contains_demo_data ... ok
+test app::tests::remote_index_keeps_only_returned_rows_without_ui_scanning ... ok
+test app::tests::history_replays_copies_prunes_duplicates_and_revalidates_tools ... ok
+test app::tests::focus_navigation_completion_cycle_and_path_keys_are_distinct ... ok
+test editor::tests::deletion_that_joins_neighbors_keeps_cursor_on_grapheme_boundary ... ok
+test editor::tests::edits_whole_graphemes_and_keeps_literal_text ... ok
+test fixtures::tests::frizbee_finds_bare_nested_and_noncontiguous_names ... ok
+test editor::tests::pasted_queries_have_a_utf8_safe_byte_budget ... ok
+test cells::tests::clipping_keeps_graphemes_and_reserves_ellipsis_cells ... ok
+test app::tests::invalid_paths_preserve_form_and_literal_paths_launch_all_five_tools ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (target/debug/deps/zellij_launchpad_prototype-0095519010f72703)
+
+running 4 tests
+test terminal::tests::indexing_keeps_resize_mouse_quarantine_at_one_hundred_ms ... ok
+test terminal::tests::session_cleanup_probe ... ignored, requires an isolated PTY; run tools/verify_cleanup.py
+test terminal::tests::maps_shortcuts_without_stealing_printable_q_or_repeated_enter ... ok
+test terminal::tests::mouse_adapter_only_accepts_left_down_and_vertical_wheel ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/async_search.rs (target/debug/deps/async_search-e4b73145e5d23185)
+
+running 13 tests
+test async_search_coalesces_edits_and_rejects_dismissed_or_stale_results ... ok
+test delayed_completion_survives_path_cursor_navigation ... ok
+test dismissing_delayed_validation_cannot_accept_or_launch_late ... ok
+test enter_with_stale_highlight_does_not_index_missing_result ... ok
+test cancelling_delayed_validation_clears_status_and_restores_search ... ok
+test navigating_results_never_resubmits_search_or_loses_selection ... ok
+test old_index_revision_cannot_replace_newer_results ... ok
+test repeated_tab_replaces_delayed_validation_without_losing_cycle ... ok
+test queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes ... ok
+test timeout_after_selected_result_keeps_enter_safe ... ok
+test reset_close_quit_failure_and_history_copy_invalidate_pending_work ... ok
+test timeout_during_completion_discards_cycle_and_delayed_reply ... ok
+test validation_runs_off_ui_and_late_selection_or_launch_cannot_win ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/home_search.rs (target/debug/deps/home_search-cc68b730c75834e5)
+
+running 12 tests
+test byte_budget_stops_before_retaining_long_paths ... ok
+test bounded_scan_reports_limits_and_read_errors ... ok
+test directory_entry_and_depth_caps_remain_explicit ... ok
+test indexes_nested_directories_incrementally_not_files ... ok
+test logical_home_is_distinct_from_filesystem_mapping ... ok
+test hidden_home_spelling_does_not_hide_normal_descendants ... ok
+test restricted_state_is_visible_at_minimum_size ... ok
+test skips_symlinks_and_unrepresentable_names ... ok
+test validates_literal_home_paths_not_files_or_escapes ... ok
+test search_status_uses_readable_text_color_not_separator_color ... ok
+test app_searches_real_home_accepts_then_revalidates_without_invented_history ... ok
+test background_indexing_respects_dismissal_and_history_copy ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/mouse.rs (target/debug/deps/mouse-8a47e9d4adc9362a)
+
+running 10 tests
+test path_click_uses_cells_graphemes_padding_and_focus ... ok
+test scrolled_input_maps_visible_origin_and_clipped_tail ... ok
+test scrolled_suggestions_click_the_visible_result ... ok
+test suggestion_click_accepts_without_launching ... ok
+test stale_resize_blank_and_tiny_hit_maps_are_inert ... ok
+test tool_click_selects_and_focuses_without_launch_even_when_wrapped ... ok
+test unavailable_history_and_empty_lists_do_not_launch_or_fall_back ... ok
+test history_click_selects_only_then_copy_or_replay_is_explicit ... ok
+test explicit_launch_back_help_reset_and_quit_controls ... ok
+test wheel_is_section_local_and_clamped ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+     Running tests/non_tty.rs (target/debug/deps/non_tty-15ec2dabd58b2ad9)
+
+running 1 test
+test rejects_non_tty_without_escape_sequences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/render.rs (target/debug/deps/render-13aa14482525e91f)
+
+running 6 tests
+test minimum_usable_view_keeps_selected_history_visible ... ok
+test narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls ... ok
+test roomy_layout_uses_spare_rows_for_history_rhythm ... ok
+test dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes ... ok
+test help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors ... ok
+test wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
+
+   Doc-tests launchpad_plugin
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests zellij_launchpad_prototype
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Checking launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.63s
+    Checking zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Checking launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+    Finished `release` profile [optimized] target(s) in 11.20s
+   Compiling zellij-launchpad-prototype v0.1.0 (/home/piclaw/Projects/zellij-launchpad)
+   Compiling launchpad-plugin v0.1.0 (/home/piclaw/Projects/zellij-launchpad/plugin)
+    Finished `release` profile [optimized] target(s) in 30.28s

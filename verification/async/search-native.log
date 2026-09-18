@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "checks": [
+    "real dashboard loads",
+    "real startup history is empty",
+    "real Unicode directory validates",
+    "controlled index completes",
+    "bare fuzzy query finds nested real directories",
+    "real directory mouse completion never launches",
+    "accepted directory revalidates",
+    "hidden directories omitted by default",
+    "dot component enables hidden results",
+    "files never become candidates",
+    "symlink escape rejected",
+    "unreadable directory rejected",
+    "deletable candidate found",
+    "stale completion revalidated",
+    "absolute outside path rejected",
+    "F5 clears simulated history and refreshes HOME",
+    "F5 searches real HOME again",
+    "UI stays centered at 160 columns",
+    "compact guard preserved",
+    "compact mode blocks launch",
+    "native exits cleanly"
+  ],
+  "passed": 21,
+  "native": true,
+  "real_home": false,
+  "denied": false,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-24dd3fc1"
+}

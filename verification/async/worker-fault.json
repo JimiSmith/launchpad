@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "checks": [
+    "host permission",
+    "worker mapping ready",
+    "missing response produces visible failure",
+    "failed worker does not freeze editing",
+    "failed worker never validates a launch",
+    "exact pane readback confirms unload during work"
+  ],
+  "passed": 6,
+  "fault": true,
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-39f2a6c8",
+  "sha256": "c679b9fb979398272cb9165ddeeda0c3e077a9e152863d4216d19094eb7495e0"
+}

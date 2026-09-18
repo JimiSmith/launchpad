@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "checks": [
+    "host permissions",
+    "denied without scanning"
+  ],
+  "evidence": "/home/piclaw/Projects/zellij-launchpad/target/zj-rch-ff4a3acb"
+}

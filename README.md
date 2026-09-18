@@ -27,8 +27,9 @@ zellij action launch-plugin --skip-plugin-cache -- \
 
 The plugin is a single `.wasm` file with no companion executable. After rebuilding,
 close the old plugin pane and launch it again with the command above.
-Zellij 0.45.1 requires session-environment access and **Full disk access** to
-resolve HOME and mount it. Launchpad searches only HOME and executes no commands.
+Zellij 0.45.1 requires session-environment access, **Full disk access**, and
+**Change application state** (one startup reload to map workers to HOME).
+Indexing, matching, and validation run off the UI; no commands are executed.
 
 Use Zellij's locked mode (normally `Ctrl+G`) so shortcuts reach the plugin.
 `Ctrl+Q` closes the plugin pane, not the session.

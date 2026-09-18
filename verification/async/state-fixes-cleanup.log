@@ -1,0 +1,26 @@
+{
+  "passed": 3,
+  "checks": [
+    {
+      "mode": "error",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 291
+    },
+    {
+      "mode": "panic",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 560
+    },
+    {
+      "mode": "mouse-quit",
+      "passed": true,
+      "termios_restored": true,
+      "capture_restored": true,
+      "raw_bytes": 4591
+    }
+  ]
+}

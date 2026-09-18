@@ -1,4 +1,5 @@
 //! Zellij 0.45.1 event adapter; UI and fixtures remain in the shared crate.
+pub mod workers;
 use zellij_launchpad_prototype::app::{Action, Focus};
 use zellij_tile::prelude::{BareKey, KeyModifier, KeyWithModifier};
 
