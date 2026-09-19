@@ -38,6 +38,7 @@ run launch-shell-race "$PYTHON" tools/verify_launch.py --layout tiled --race
 run launch-remount "$PYTHON" tools/verify_launch.py --tool Hermes --different-cwd
 run launch-denied "$PYTHON" tools/verify_launch.py --layout tiled --deny
 run launch-missing "$PYTHON" tools/verify_launch.py --tool Copilot --layout tiled --missing
+run history "$PYTHON" tools/verify_history.py
 run live-1 "$PYTHON" tools/verify_zellij.py
 run live-2 "$PYTHON" tools/verify_zellij.py
 OUT=$("$PYTHON" -c 'import json;print(json.load(open("target/plugin-verification/live-2.log"))["evidence"])')

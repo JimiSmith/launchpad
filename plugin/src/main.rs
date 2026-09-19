@@ -73,12 +73,118 @@ mod wasm {
         failed: bool,
         simulate_launch: bool,
         launch_serial: u64,
+        history_serial: u64,
+        history_attempt: Option<String>,
+        history_rows: Vec<launchpad_plugin::history::Entry>,
         launch_context: Option<std::collections::BTreeMap<String, String>>,
         work: Option<(u64, Instant)>,
         #[cfg(feature = "worker-faults")]
         silence_worker: bool,
     }
     impl Plugin {
+        fn reject_launch(&mut self) {
+            self.state.app.host_launch_rejected();
+            if let Some(attempt) = self.history_attempt.take() {
+                let (token, _) = self.history_token();
+                match launchpad_plugin::history::Store::new(std::path::Path::new("/cache"))
+                    .remove(&attempt, &token)
+                {
+                    Ok(()) => self.load_history(),
+                    Err(error) => {
+                        self.state.app.message = Some(format!(
+                            "Zellij did not accept the launch. History rollback failed: {error}"
+                        ));
+                    }
+                }
+            }
+        }
+        fn load_history(&mut self) {
+            if self.simulate_launch || self.state.app.is_demo() {
+                return;
+            }
+            let (token, _) = self.history_token();
+            let rows = match launchpad_plugin::history::Store::new(std::path::Path::new("/cache"))
+                .refresh(&token)
+            {
+                Ok(rows) => rows,
+                Err(error) => {
+                    self.state.app.message = Some(format!("History unavailable: {error}"));
+                    // F5's worker handshake recreates App before reaching here.
+                    // Restore the last successful rows, not that empty App's list.
+                    self.history_rows.clone()
+                }
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            self.state.app.history = rows
+                .iter()
+                .enumerate()
+                .map(|(id, row)| zellij_launchpad_prototype::app::Launch {
+                    id: id as u64,
+                    path: row.path.clone(),
+                    tool: row.tool,
+                    age: launchpad_plugin::history::age(row.opened_at, now),
+                })
+                .collect();
+            self.state.app.recent = self.state.app.recent.min(rows.len().saturating_sub(1));
+            self.history_rows = rows;
+        }
+        fn mutate_history(&mut self, mutation: zellij_launchpad_prototype::app::HistoryMutation) {
+            use zellij_launchpad_prototype::app::HistoryMutation;
+            let (token, _) = self.history_token();
+            let store = launchpad_plugin::history::Store::new(std::path::Path::new("/cache"));
+            let result = match mutation {
+                HistoryMutation::Clear => store.clear(&token),
+                HistoryMutation::Remove(id) => self
+                    .history_rows
+                    .get(id as usize)
+                    .ok_or_else(|| "History selection changed; refresh and retry".to_string())
+                    .and_then(|row| store.remove(&row.id, &token)),
+            };
+            match result {
+                Ok(()) => {
+                    self.state.app.message = None;
+                    self.load_history();
+                }
+                Err(error) => {
+                    self.state.app.message = Some(format!("History change failed: {error}"))
+                }
+            }
+        }
+        fn history_token(&mut self) -> (String, u64) {
+            self.history_serial += 1;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let ids = get_plugin_ids();
+            (
+                format!(
+                    "{:039}-{}-{}-{}",
+                    now.as_nanos(),
+                    ids.zellij_pid,
+                    ids.plugin_id,
+                    self.history_serial
+                ),
+                now.as_secs(),
+            )
+        }
+        fn record_history(&mut self, launch: &zellij_launchpad_prototype::app::Launch) {
+            let (id, opened_at) = self.history_token();
+            self.history_attempt = Some(id.clone());
+            let entry = launchpad_plugin::history::Entry {
+                id,
+                path: launch.path.clone(),
+                tool: launch.tool,
+                opened_at,
+            };
+            if let Err(error) =
+                launchpad_plugin::history::Store::new(std::path::Path::new("/cache")).record(entry)
+            {
+                eprintln!("Launchpad: history not saved: {error}");
+            }
+        }
         fn start(&mut self) {
             self.epoch += 1;
             self.ready = false;
@@ -195,6 +301,7 @@ mod wasm {
                             self.scanning = true;
                             self.state.app = App::from_remote(cwd.into());
                             self.state.app.host_launch = !self.simulate_launch;
+                            self.load_history();
                             #[cfg(feature = "worker-faults")]
                             if self.silence_worker {
                                 post_message_to(PluginMessage::new_to_worker(
@@ -262,7 +369,7 @@ mod wasm {
                     // A successful replacement normally destroys us before this
                     // event. None means no affected pane, not an agent exit code.
                     if pane_id.is_none() {
-                        self.state.app.host_launch_rejected();
+                        self.reject_launch();
                     }
                 }
                 Event::HostFolderChanged(_)
@@ -281,14 +388,18 @@ mod wasm {
                     }
                 }
             }
+            if let Some(mutation) = self.state.app.take_history_mutation() {
+                self.mutate_history(mutation);
+            }
             if let Some(launch) = self.state.app.take_host_launch() {
+                self.record_history(&launch);
                 // Target this plugin explicitly, never the last-focused pane.
                 // Close rather than suppress it: command exit cannot restore it.
                 match launch.tool {
                     Tool::Shell => {
                         // Preserve Zellij's configured default shell and its cwd.
                         if open_terminal_in_place_of_plugin(&launch.path, true).is_none() {
-                            self.state.app.host_launch_rejected();
+                            self.reject_launch();
                         }
                     }
                     tool => {

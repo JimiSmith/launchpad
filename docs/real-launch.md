@@ -48,13 +48,14 @@ replacement normally destroys the plugin before any callback can be consumed.
 Unrelated or stale completions cannot unlock a pending request.
 
 Submitted requests are one-shot, lock further form input, and never enter the
-simulated terminal screen or invent history entries. No timeout auto-retry is
+simulated terminal screen. A validated attempt is persisted before replacement;
+known rejection removes only its exact record, preserving concurrent updates. No timeout auto-retry is
 used: an unacknowledged action might still execute. If the host never completes
 an action, close/reopen the plugin rather than assuming it failed. The startup
 permission grant gates all submissions; permission denial at the host command
 boundary is logged by Zellij and does not itself deliver `ActionComplete`.
 Directory failures retain the existing form and never reach the launch API.
-No persistent history or cache is added.
+Shared history and its failure/consistency contract are described in [history.md](history.md).
 
 The existing HOME directory/symlink policy, ignore rules and input limits remain.
 Filesystem validation and OS spawn are separate operations: this does not promise

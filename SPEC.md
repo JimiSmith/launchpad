@@ -1,8 +1,10 @@
 # Zellij Launchpad — draft product specification
 
 Status: draft target product specification, not all implemented. HOME-only search
-and real own-pane launches are implemented. Command availability checks and
-persistent history are not. Native/demo adapters still simulate launches.
+and real own-pane launches plus shared persistent history are implemented.
+Command availability checks are not. Native/demo adapters still simulate launches
+and do not access persistent history. History's implemented contract supersedes
+older event-log proposals below: see [persistence details](docs/history.md).
 Current scope and deviations: [home-search notes](docs/home-search.md) and
 [real launch behavior](docs/real-launch.md).
 Working name, not checked for uniqueness.
@@ -28,8 +30,9 @@ Proposed v0.1 defaults:
 - Initial directory: invoking terminal's working directory, falling back to configured starting directory, then home.
 - Initial tool: default shell. Do not silently start a remembered agent.
 - Tool order: Shell, Claude, Codex, Copilot, Hermes.
-- Recent list: ten most recent launch events, newest first; repeated path/tool combinations remain separate entries.
-- History persists across new tabs, Zellij sessions, and host restarts for the same OS user.
+- Recent list: ten unique absolute directories, newest first, remembering the last tool.
+- History persists across panes and Zellij sessions sharing the same plugin URL and
+  Zellij cache. Changing the URL or deleting that cache starts separate history.
 - No required fzf, zoxide, Python, or shell framework.
 
 Interpretation of “exist on the path”: executable command on the launch environment's `PATH`, not a file inside the chosen directory. The selected directory is the working directory. A project-local executable counts only if normal PATH resolution includes it.
@@ -140,26 +143,39 @@ States: booting → permission check → ready → validating → launching → 
 - Keep the dashboard recoverable until launch acceptance is known; prove exact suppression/close ordering in the API spike.
 - On accepted launch, optionally rename the tab to `<directory basename> · <tool>`. Do not rename other tabs.
 - Shell exits normally; agent commands retain native Zellij exit/error/re-run behaviour. Do not automatically respawn agents or fall back into another program.
-- A launch record means the terminal/command pane was accepted/created, not that an agent authenticated or completed a task. A later nonzero exit remains a launch event. Pre-validation failures and rejected spawn requests do not count.
+- History records validated launch attempts **before** replacement, because successful
+  replacement normally destroys the plugin before acknowledgement. Known spawn
+  rejection removes that exact attempt without overwriting concurrent updates;
+  it does not restore entries already displaced by the ten-directory cap.
+  Pre-validation failures do not create records; unknown outcomes may remain.
 - Failure to save history must not kill or roll back a successfully launched tool; display a warning when feasible.
 
 ## 8. Recent history
 
-Store a versioned document with ten events, each containing:
+The real plugin stores a version-1 JSON projection at `/cache/history.json`,
+with up to ten entries: unique operation ID, UTC Unix timestamp in seconds,
+absolute validated cwd, and a fixed launcher ID. Replay uses the current trusted
+launcher mapping, never executable data from history. All replay/copy-to-form
+launches use ordinary directory validation; deleted/out-of-HOME paths cannot launch.
 
-- unique event ID;
-- timestamp in UTC;
-- absolute logical cwd;
-- stable launcher ID;
-- resolved executable and argument array used (Shell can omit executable metadata).
+`/cache/history.d/` contains immutable versioned operation records and the newest
+clear watermark. These coordinate concurrent panes/sessions without WASI flock,
+blocking sleeps, or expiring lock ownership. Records are atomically published;
+readers merge the journal instead of trusting a potentially stale JSON projection.
+Refresh/reopen repairs the projection. This is convergent history, not a
+linearizable live feed. See [the algorithm and limits](docs/history.md).
 
-Use the current trusted launcher definition on replay, not arbitrary executable data read from history. Stored executable metadata is informational. Revalidate every replay and visibly flag unavailable tool/directory combinations.
+Bounds: ten distinct directory records plus one clear watermark after quiescent
+compaction; transient concurrent records are allowed; scans stop at 128 files,
+each record is read through a 32 KiB limit, and paths are limited to 4096 UTF-8
+bytes. Missing/corrupt/unknown-version records are ignored. Unsafe paths and
+I/O/quota failures show errors when the dashboard remains visible; launches are
+still attempted. Clear/delete update the UI only after persistence succeeds.
 
-No prompts, credentials, environment dumps, conversation content, or terminal output are recorded.
-
-Proposed location: `${XDG_STATE_HOME:-~/.local/state}/zellij-launchpad/history.json`. Use private user permissions, a schema version, locked read-modify-write, and atomic replacement. Simultaneous launches in different tabs/sessions must not overwrite one another. Timestamp ties use a deterministic secondary ordering. Reject malformed records, preserve corrupt files for diagnosis, and recover to a usable empty history with a warning. Provide delete-selected and clear-history actions, with confirmation for clearing everything.
-
-Zellij documents `/data` as shared plugin storage that is deleted on unload, so it is not the durable history store.[15]
+No prompts, credentials, environment dumps, conversation content, or terminal
+output are recorded. Permissions are inherited from Zellij's host-managed cache.
+Cache cleanup is allowed to remove history; it is not a durable backup.
+On pinned 0.45.1, `/data` is per instance and `/cache` is shared by plugin URL.
 
 ## 9. Architecture and integration
 
@@ -193,7 +209,7 @@ The live documentation is not proof of support in the user's installed release. 
 - Invalid/unreadable directories, stale completions, broken symlinks, missing executables, denied permissions, and failed launches preserve a usable form.
 - Launch replaces only the dashboard pane, in the same tab, and never creates an accidental split or affects the currently focused unrelated tab.
 - Enter-repeat/double-click cannot create duplicate launches.
-- History shows exactly the latest ten accepted launch events, retaining duplicates, surviving restart, and respecting concurrent writes.
+- History shows up to ten distinct recently opened directories with the last tool, survives plugin/session reopening at the same URL/cache, and merges concurrent writes.
 - Stale history entries cannot silently launch a different tool.
 - Corrupt or unwritable history does not prevent ordinary launch.
 - Tests cover 80×24, 40×12, and very small viewports; long paths and wide Unicode do not corrupt layout.

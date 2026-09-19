@@ -15,6 +15,40 @@ fn validate(app: &mut App, result: Result<String, String>) {
     assert!(app.finish_remote_validation(generation, result));
 }
 #[test]
+fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
+    use zellij_launchpad_prototype::app::{Focus, Launch};
+    let mut app = app();
+    app.history.push(Launch {
+        id: 1,
+        path: "/home/fixture/a".into(),
+        tool: Tool::Codex,
+        age: "Yesterday".into(),
+    });
+    app.update(Action::Focus(Focus::History));
+    app.update(Action::ClearHistory);
+    assert_eq!(app.history.len(), 1);
+    app.update(Action::Escape);
+    assert_eq!(app.history.len(), 1);
+    app.update(Action::ClearHistory);
+    app.update(Action::ClearHistory);
+    assert_eq!(
+        app.history.len(),
+        1,
+        "do not pretend clearing succeeded before persistence"
+    );
+    assert_eq!(
+        app.take_history_mutation(),
+        Some(zellij_launchpad_prototype::app::HistoryMutation::Clear)
+    );
+    assert!(app.take_history_mutation().is_none());
+    app.update(Action::Delete);
+    assert_eq!(app.history.len(), 1, "delete also waits for persistence");
+    assert_eq!(
+        app.take_history_mutation(),
+        Some(zellij_launchpad_prototype::app::HistoryMutation::Remove(1))
+    );
+}
+#[test]
 fn real_launch_is_one_shot_not_a_simulated_terminal_or_history_event() {
     for tool in Tool::ALL {
         let mut app = app();

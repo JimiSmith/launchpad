@@ -8,7 +8,12 @@ shell; Claude, Codex, Copilot and Hermes run `claude`, `codex`, `copilot` and
 `hermes` respectively, with no flags and the selected directory as their literal
 working directory. There are no command availability checks. Missing commands
 are handled by Zellij. Launch closes the dashboard; agent panes also close on
-zero or nonzero exit without returning to it. History is not persisted.
+zero or nonzero exit without returning to it.
+
+The ten most recently opened directories remember their last tool across panes
+and sessions using Zellij's URL-shared `/cache/history.json` plus a small recovery
+journal. History records launch attempts, not agent success. Changing the plugin
+URL or deleting its cache starts fresh. [Persistence details](docs/history.md).
 
 ![Launchpad](verification/plugin/01-initial-80x24.png)
 
@@ -54,7 +59,9 @@ Use Zellij's locked mode (normally `Ctrl+G`) so shortcuts reach the plugin.
 - Click to select directories, tools, or history; click the launch/replay action
   to launch. Scroll to browse lists.
 - `Esc`: go back or dismiss suggestions. `F1`: full keyboard help.
-- `F5`: refresh HOME and reset the form/history. All five tools remain selectable.
+- `F5`: refresh HOME and shared history; reset the form. All five tools remain selectable.
+- In history, `Tab` copies, `Enter` revalidates/replays, `Delete` removes the selected
+  entry, and `Ctrl+L` twice clears shared history (`Esc` cancels).
 
 The UI is centered and capped at 160 terminal columns. Relative paths start at
 HOME. The index respects `.gitignore` and `.ignore`, and prunes hidden directories,

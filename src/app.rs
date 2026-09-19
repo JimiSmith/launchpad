@@ -74,6 +74,11 @@ pub enum Action {
     ClearHistory,
     Quit,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryMutation {
+    Clear,
+    Remove(u64),
+}
 #[derive(Debug)]
 pub struct App {
     pub editor: Editor,
@@ -102,6 +107,7 @@ pub struct App {
     /// Explicit host-adapter opt-in; native and demo remain simulations.
     pub host_launch: bool,
     host_request: Option<Launch>,
+    history_request: Option<HistoryMutation>,
     host_launch_pending: bool,
     show_suggestions: bool,
 }
@@ -143,12 +149,16 @@ impl Default for App {
             search_status: "Waiting for HOME access.".into(),
             host_launch: false,
             host_request: None,
+            history_request: None,
             host_launch_pending: false,
             show_suggestions: true,
         }
     }
 }
 impl App {
+    pub fn take_history_mutation(&mut self) -> Option<HistoryMutation> {
+        self.history_request.take()
+    }
     pub fn take_host_launch(&mut self) -> Option<Launch> {
         self.host_request.take()
     }
@@ -714,15 +724,23 @@ impl App {
                     }
                 }
                 Action::Delete => {
-                    if !self.history.is_empty() {
-                        self.history.remove(self.recent);
+                    if let Some(row) = self.history.get(self.recent) {
+                        if self.host_launch {
+                            self.history_request = Some(HistoryMutation::Remove(row.id));
+                        } else {
+                            self.history.remove(self.recent);
+                        }
                     }
                     self.recent = self.recent.min(self.history.len().saturating_sub(1));
                 }
                 Action::ClearHistory => {
                     if self.confirm_clear {
-                        self.history.clear();
-                        self.recent = 0;
+                        if self.host_launch {
+                            self.history_request = Some(HistoryMutation::Clear);
+                        } else {
+                            self.history.clear();
+                            self.recent = 0;
+                        }
                         self.confirm_clear = false;
                         self.message = None;
                     } else {
