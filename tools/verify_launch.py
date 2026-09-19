@@ -34,6 +34,9 @@ parser.add_argument('--deny', action='store_true')
 parser.add_argument('--missing', action='store_true')
 parser.add_argument('--race', action='store_true')
 parser.add_argument('--different-cwd', action='store_true')
+parser.add_argument('--commands-case', choices=['fixtures', 'shell-only', 'agreed', 'literals', 'invalid', 'many', 'review-ui'], default='fixtures')
+parser.add_argument('--refresh', action='store_true')
+parser.add_argument('--startup-redraw', action='store_true', help='One recorded viewport redraw before the unchanged permission assertion')
 parser.add_argument('--exit-code', type=int, choices=[0, 17], default=0)
 args = parser.parse_args()
 if args.race and args.layout == 'only': parser.error('--race requires a neighbor')
@@ -74,10 +77,58 @@ env.update(HOME=str(home), PATH=str(OUT/'bin'), SHELL='/bin/false', TERM='xterm-
 config = OUT/'config.kdl'
 config.write_text((ROOT/'examples/locked.kdl').read_text() +
                   f'\nsession_name "{NAME}"\ndefault_shell "{OUT}/bin/default-shell"\n')
-plugin = f'pane name="launchpad" focus=true {{ plugin location="file:{WASM}"; }}'
+configuration = {}
+order = ['Shell', 'Claude', 'Codex', 'Copilot', 'Hermes']
+labels = {name: name for name in order}
+expected_argv = []
+expected_exe = 'default-shell' if args.tool == 'Shell' else args.tool.lower()
+if args.commands_case != 'shell-only':
+    configuration['commands'] = 'claude,codex,copilot,hermes'
+    for name in order[1:]:
+        configuration['command_'+name.lower()] = name.lower()
+        configuration['label_'+name.lower()] = name
+if args.commands_case == 'shell-only':
+    assert args.tool == 'Shell'
+    order = ['Shell']
+if args.commands_case == 'agreed':
+    configuration['commands'] = 'claude,hermes,codex'
+    configuration['arguments_claude'] = '-w'
+    configuration['label_claude'] = labels['Claude'] = 'Claude in Worktree'
+    order = ['Shell', 'Claude', 'Hermes', 'Codex']
+    if args.tool == 'Claude': expected_argv = ['-w']
+if args.commands_case == 'literals':
+    assert args.tool == 'Claude'
+    configuration = {'commands': 'Variant_2.worktree,second', 'command_Variant_2.worktree': 'claude',
+                     'label_Variant_2.worktree': 'Literal 修理 é', 'command_second': 'claude',
+                     'arguments_Variant_2.worktree': r"-w --model \"some model\" '' \"\" a\ b '$HOME' ; '$(touch NO_EXPANSION)' ~ *.rs | >".replace('\\"', '"')}
+    labels['Claude'] = 'Literal 修理 é'
+    order = ['Shell', 'Claude']
+    expected_argv = ['-w','--model','some model','','','a b','$HOME',';','$(touch NO_EXPANSION)','~','*.rs','|','>']
+if args.commands_case == 'invalid':
+    configuration = {'commands': 'bad,missing,claude', 'command_bad': 'claude', 'arguments_bad': "'unterminated", 'command_claude': 'claude', 'label_claude': 'Claude'}
+    order = ['Shell','Claude']
+if args.commands_case == 'many':
+    assert args.tool == 'Claude'
+    configuration = {'commands': ','.join(f'variant{n}' for n in range(64))}
+    for n in range(64):
+        configuration[f'command_variant{n}'] = 'claude'
+        configuration[f'label_variant{n}'] = f'Command {n:02} 修理 é '+('long label '*12)
+        configuration[f'arguments_variant{n}'] = f'--variant {n}'
+    labels['Claude'] = 'Command 63 修理'
+    expected_argv = ['--variant', '63']
+if args.commands_case == 'review-ui':
+    assert args.tool == 'Claude' and args.layout == 'only'
+    long_id = 'i'*64
+    configuration = {'commands': long_id+',unicode', 'command_'+long_id: 'claude',
+                     'label_'+long_id: 'x'*243+' END_OF_LABEL',
+                     'command_unicode': 'claude', 'label_unicode': ('界é👩🏽‍💻🇬🇧✈️ '*5)+' UNICODE_END'}
+    order = ['Shell', 'Claude']
+config_kdl = '; '.join(k+' '+json.dumps(v, ensure_ascii=False) for k,v in configuration.items())
+if config_kdl: config_kdl += ';'
+plugin = f'pane name="launchpad" focus=true {{ plugin location="file:{WASM}" {{ {config_kdl} }}; }}'
 neighbor = f'pane name="neighbor" command="{OUT}/bin/neighbor"'
 if args.layout == 'only':
-    layout = f'layout {{ pane {{ plugin location="file:{WASM}"; }}; }}'
+    layout = f'layout {{ {plugin}; }}'
 elif args.layout == 'tiled':
     layout = f'layout {{ pane split_direction="vertical" {{ {neighbor}; {plugin}; }}; }}'
 else:
@@ -158,6 +209,16 @@ def snapshot(name):
     (OUT/(name+'.json')).write_text(json.dumps(events))
 success=False
 try:
+    if args.startup_redraw:
+        pump(1)
+        snapshot('startup-before-redraw')
+        panes('startup-panes-before-redraw')
+        for rows in [35,36]:
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH',rows,160,0,0))
+            screen.resize(lines=rows, columns=160)
+            events.append({'resize':[160,rows]})
+            pump(.3)
+        snapshot('startup-after-redraw')
     expect('permission','permission prompt')
     expect('Execute actions as the user', 'host asks for run-action permission')
     expect('Start new terminals and plugins', 'host asks for terminal opening')
@@ -173,11 +234,117 @@ try:
         check(all(r['exe']=='neighbor' for r in records()),'denial executes no launch')
         check('Terminal placeholder' not in display(),'denial never simulates success')
     else:
-        expect('HOME indexed','real worker ready')
+        expect('~/space' if args.commands_case == 'invalid' else 'HOME indexed','real worker ready')
+        if args.commands_case == 'shell-only':
+            check('[ Shell ]' in display() and all(n not in display() for n in ['Claude','Codex','Hermes','Copilot']), 'unconfigured production is Shell-only')
+        elif args.commands_case not in ['many', 'review-ui']:
+            expect(labels[args.tool], 'configured label loaded through plugin config')
+        if args.commands_case == 'invalid':
+            expect('Config error', 'invalid arguments produce visible config error')
+            send('\x1bOP')
+            send('\x1b[F')
+            expect('command_missing', 'missing executable field diagnostic in help')
+            send('\x1b')
+        if args.commands_case == 'many':
+            def resize(columns, rows):
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH',rows,columns,0,0))
+                screen.resize(lines=rows, columns=columns)
+                events.append({'resize':[columns,rows]})
+                pump(.3)
+            def mouse(x,y):
+                send(f'\x1b[<0;{x+1};{y+1}M')
+                send(f'\x1b[<0;{x+1};{y+1}m')
+            for columns,rows in [(80,24),(40,12),(40,10),(200,36)]:
+                resize(columns,rows)
+                send('\x1b[15~')
+                expect('[ Shell ]',f'initial Shell after reset at {columns}x{rows}')
+                send('\x14')
+                for n in range(64):
+                    os.write(master,b'\x1b[C'); pump(.025)
+                    if n in [0,31,63]: expect(f'[ Command {n:02}',f'keyboard reaches configured entry {n} at {columns}x{rows}')
+                expect('65/65',f'overflow position at {columns}x{rows}')
+                check('03 Recent' in display(),f'many commands retain history heading at {columns}x{rows}')
+                row = next(y for y,line in enumerate(screen.display) if '‹ 65/65 ›' in line)
+                x = screen.display[row].index('‹ 65/65 ›')
+                mouse(x,row)
+                expect('[ Command 62',f'mouse previous overflow control at {columns}x{rows}')
+                mouse(x+8,row)
+                expect('[ Command 63',f'mouse next overflow control at {columns}x{rows}')
+                row = next(y for y,line in enumerate(screen.display) if '[ Command 63' in line)
+                mouse(screen.display[row].index('[ Command 63')+3,row)
+                check(not records(),f'mouse selection does not launch at {columns}x{rows}')
+                if columns == 200:
+                    check(all(not line[:20].strip() and not line[180:].strip() for line in screen.display),'200-column host frame preserves blank 160-column UI gutters')
+                snapshot(f'configured-many-{columns}x{rows}')
+            resize(160,36)
+            send('\x1b[15~')
+            expect('HOME indexed','ready after configured size/reset checks')
+        if args.commands_case == 'review-ui':
+            def resize(columns, rows):
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH',rows,columns,0,0))
+                screen.resize(lines=rows, columns=columns)
+                events.append({'resize':[columns,rows]})
+                pump(.4)
+            resize(40,10)
+            send('\x1bOP')
+            send('\x1b[H')
+            for _ in range(180):
+                if 'END_OF_LABEL' in display(): break
+                os.write(master,b'\x1b[B'); pump(.04)
+            check('END_OF_LABEL' in display(), '40x10 keyboard scrolling reaches maximum ID/label tail')
+            snapshot('review-help-ascii-tail-40x10')
+            send('\x1b[F')
+            expect('UNICODE_END', '40x10 End reaches Unicode label tail', timeout=5)
+            snapshot('review-help-unicode-tail-40x10')
+            end_screen = display()
+            send('\x1b[A')
+            check(display() != end_screen, 'Up after End moves immediately')
+            # Pinned SDK wheel has no coordinates; establish last pointer first.
+            send('\x1b[<0;6;4M')
+            send('\x1b[<0;6;4m')
+            send('\x1b[<65;6;4M')
+            check(display() == end_screen, 'help wheel down returns one rendered row to End')
+            resize(200,36)
+            send('\x1b[F')
+            expect('UNICODE_END', 'resized help still reaches final tail', timeout=5)
+            check(all(not line[:20].strip() and not line[180:].strip() for line in screen.display), 'help retains max160 gutters')
+            snapshot('review-help-200x36')
+            resize(40,10)
+            send('\x1b')
+            history_files = list((OUT/'cache').rglob('history.json'))
+            check(len(history_files) == 1, 'review uses only owned URL cache')
+            journal = history_files[0].parent/'history.d'
+            journal.mkdir(exist_ok=True)
+            token = '00000000000000000001-review'
+            row = {'id': token, 'path':str(cwd), 'tool':'removed-long-id', 'opened_at':int(time.time())}
+            (journal/(token+'.json')).write_text(json.dumps({'version':2,'id':token,'entry':row}))
+            send('\x1b[15~')
+            expect('!removed', '40x10 unavailable marker survives clipped long ID', timeout=8)
+            y = next(y for y,line in enumerate(screen.display) if '!removed' in line)
+            x = screen.display[y].index('!removed')
+            check('unavailable' not in screen.display[y], 'marker is visible with age/status column hidden')
+            send(f'\x1b[<0;{x+1};{y+1}M')
+            send(f'\x1b[<0;{x+1};{y+1}m')
+            check(not records(), 'narrow history mouse selection starts no process')
+            snapshot('review-unavailable-40x10')
+            send('\r')
+            expect('unavailable', 'removed long ID cannot replay', timeout=8)
+            send('\t')
+            send('\r')
+            expect('unavailable', 'copied unavailable ID cannot launch', timeout=8)
+            check(not records(), 'removed replay/copy never substitutes an executable')
+            snapshot('review-unavailable-rejected-40x10')
+            resize(160,36)
+            send('\x1b[15~')
+            expect('HOME indexed', 'review ready for explicit configured launch')
+        if args.refresh:
+            send('\x1b[15~')
+            expect('~/space' if args.commands_case == 'invalid' else 'HOME indexed','configured F5 refresh ready')
+            expect(labels[args.tool], 'configured label survives F5 app recreation')
         send('\x15')
         send("\x1b[200~~/space 修理 it's literal; $HOME\x1b[201~")
         send('\x14')
-        for _ in range(['Shell','Claude','Codex','Copilot','Hermes'].index(args.tool)):
+        for _ in range(64 if args.commands_case == 'many' else order.index(args.tool)):
             send('\x1b[C')
         before=panes('panes-before')
         plugin_before=next(p for p in before if p.get('plugin_url') == 'file:'+str(WASM))
@@ -195,7 +362,7 @@ try:
             cli('action','send-keys','--pane-id','plugin_'+str(plugin_before['id']),'Enter')
         else:
             send('\r')
-        expected='default-shell' if args.tool=='Shell' else args.tool.lower()
+        expected=expected_exe
         if args.missing:
             expect('did not accept', 'asynchronous spawn failure is visible on original dashboard', timeout=8)
             missing=panes('panes-missing')
@@ -221,7 +388,7 @@ try:
         check(len(before)==len(after),'pane count unchanged')
         old_ids={(p['is_plugin'],p['id']) for p in before}
         replacement=next(p for p in after if (p['is_plugin'],p['id']) not in old_ids)
-        check(replacement['terminal_command']==(str(OUT/'bin/default-shell') if args.tool=='Shell' else expected),
+        check(replacement['terminal_command']==(str(OUT/'bin/default-shell') if args.tool=='Shell' else ' '.join([expected, *expected_argv])),
               'host command readback matches selected launch mapping')
         geometry=['pane_x','pane_y','pane_rows','pane_columns','is_floating','tab_id','tab_position']
         check(all(replacement[k]==plugin_before[k] for k in geometry),'replacement preserves pane geometry and tab')
@@ -233,7 +400,8 @@ try:
         check('Terminal placeholder' not in display(),'real request never renders a fake terminal')
         launched=[r for r in records() if r['exe']==expected]
         check(len(launched)==1,'exactly one OS launch')
-        check(launched[0]['argv']==[],'no command flags')
+        check(launched[0]['argv']==expected_argv,'exact configured literal argv including empty arguments')
+        check(not (cwd/'NO_EXPANSION').exists(),'no command substitution side effect')
         check(launched[0]['cwd']==str(cwd),'literal Unicode and metacharacter cwd')
         check(replacement['pane_cwd']==str(cwd),'host readback confirms literal cwd')
         if not replacement['is_focused'] or (args.layout=='floating' and args.race):

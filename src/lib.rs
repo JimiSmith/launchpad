@@ -1,6 +1,7 @@
 pub mod ansi;
 pub mod app;
 pub mod cells;
+pub mod commands;
 pub mod editor;
 pub mod fixtures;
 pub mod help;

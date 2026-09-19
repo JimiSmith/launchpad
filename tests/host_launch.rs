@@ -6,6 +6,13 @@ use zellij_launchpad_prototype::{
 fn app() -> App {
     let mut app = App::from_remote("/home/fixture".into());
     app.host_launch = true;
+    app.configure(&std::collections::BTreeMap::from([
+        ("commands".into(), "claude,codex,copilot,hermes".into()),
+        ("command_claude".into(), "claude".into()),
+        ("command_codex".into(), "codex".into()),
+        ("command_copilot".into(), "copilot".into()),
+        ("command_hermes".into(), "hermes".into()),
+    ]));
     app
 }
 fn validate(app: &mut App, result: Result<String, String>) {

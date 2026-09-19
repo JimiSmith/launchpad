@@ -55,6 +55,11 @@ pub struct State {
     pending_home: Option<std::path::PathBuf>,
 }
 impl State {
+    pub fn replace_app(&mut self, mut app: zellij_launchpad_prototype::app::App) {
+        app.commands = self.app.commands.clone();
+        app.host_launch = self.app.host_launch;
+        self.app = app;
+    }
     pub fn prepare_home(&mut self, home: Option<String>) -> bool {
         self.pending_home = None;
         let Some(home) = home else {
@@ -97,8 +102,10 @@ impl State {
             Event::HostFolderChanged(home) => {
                 if self.pending_home.as_ref() == Some(&home) {
                     self.pending_home = None;
-                    self.app =
-                        zellij_launchpad_prototype::app::App::from_home(home, "/host".into());
+                    self.replace_app(zellij_launchpad_prototype::app::App::from_home(
+                        home,
+                        "/host".into(),
+                    ));
                     return true;
                 }
                 return false;

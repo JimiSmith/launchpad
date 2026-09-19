@@ -10,17 +10,15 @@ Tiled/floating geometry and other panes are left to Zellij's in-place operation.
 | Choice | Host operation | Arguments |
 |---|---|---|
 | Shell | `open_terminal_in_place_of_plugin(cwd, true)` | Zellij's configured default shell |
-| Claude | `run_action(Action::NewInPlacePane { … }, context)` | `claude`, no flags |
-| Codex | same | `codex`, no flags |
-| Copilot | same | `copilot`, no flags |
-| Hermes | same | `hermes`, no flags |
+| Configured ID | `run_action(Action::NewInPlacePane { … }, context)` | configured executable + parsed literal argv |
 
-Agents use `RunCommandAction { command, args: [], cwd: Some(validated_path),
+Configured commands use `RunCommandAction { command, args, cwd: Some(validated_path),
 hold_on_close: false, hold_on_start: false, … }`. The action explicitly targets
 `PaneId::Plugin(get_plugin_ids().plugin_id)`, with `close_replaced_pane: true`.
 There is no `which`, PATH scan, executable probe, authentication check, shell
-interpolation, or command injection via terminal input. All five tools remain
-selectable; F6 does nothing in real launch mode. A missing command is passed to
+interpolation, or command injection via terminal input. Shell is the sole
+unconfigured choice; other choices come only from [plugin configuration](configured-commands.md).
+F6 does nothing in real launch mode. A missing command is passed to
 Zellij without prevalidation. With close-on-exit, 0.45.1 logs the spawn failure
 instead of replacing the dashboard with a held error pane. The original form
 shows a generic rejection; fix PATH/install the command and explicitly resubmit.
@@ -142,7 +140,8 @@ rejection and explicit retry. `full-verification.log` records the complete suite
 ## Reload after rebuilding
 
 Existing panes do not hot-reload. Close the old Launchpad pane, then run from a
-shell inside Zellij at the repository root:
+shell inside Zellij at the repository root (this direct launch is **Shell only**;
+use the [configured layout](../examples/configured.kdl) for additional commands):
 
 ```sh
 zellij action launch-plugin --skip-plugin-cache -- \

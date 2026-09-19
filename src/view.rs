@@ -156,10 +156,10 @@ fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
                 accent(),
             );
             let lines = [
-                format!("{} · simulated launch accepted", event.tool.label()),
+                format!("{} · simulated launch accepted", app.tool_label(event.tool)),
                 String::new(),
                 format!("cwd  {}", event.path),
-                format!("tool {} · fixture target", event.tool.label()),
+                format!("tool {} · fixture target", app.tool_label(event.tool)),
                 String::new(),
                 if app.is_demo() {
                     "No process was started. No host data was read.".into()
@@ -316,18 +316,41 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         app.focus == Focus::Tools,
     );
     y += 1;
-    let mut x = area.x;
-    for tool in app.visible_tools() {
+    let tools = app.visible_tools();
+    let selected = tools.iter().position(|&t| t == app.tool).unwrap_or(0);
+    let mut positions = Vec::new();
+    let (mut column, mut tool_row) = (0u16, 0u16);
+    for &tool in &tools {
+        let label = clip(&app.tool_label(tool), area.width.saturating_sub(4) as usize);
         let label = if app.tool == tool {
-            format!("[ {} ]", tool.label())
+            format!("[ {label} ]")
         } else {
-            format!("  {}  ", tool.label())
+            format!("  {label}  ")
         };
         let w = width(&label) as u16;
-        if x + w > area.right() {
-            x = area.x;
-            y += 1;
+        if column > 0 && column + w > area.width {
+            column = 0;
+            tool_row += 1;
         }
+        positions.push((tool_row, column, w, label));
+        column += w + 1;
+    }
+    let max_rows = if short
+        && (app.focus == Focus::History || app.message.is_some() || !app.commands.errors.is_empty())
+    {
+        1
+    } else {
+        2
+    };
+    let start = positions[selected].0.saturating_sub(max_rows - 1);
+    let visible_rows = (tool_row + 1).min(max_rows);
+    let mut x = area.x;
+    for (&tool, (r, col, w, label)) in tools.iter().zip(&positions) {
+        if *r < start || *r >= start + visible_rows {
+            continue;
+        }
+        let row_y = y + r - start;
+        x = area.x + col;
         let style = if app.tool == tool {
             if app.focus == Focus::Tools {
                 base().fg(ON_ACCENT).bg(ACCENT).add_modifier(Modifier::BOLD)
@@ -337,9 +360,27 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         } else {
             muted()
         };
-        row(f, Rect::new(x, y, w, 1), &label, style);
-        hits.add(Rect::new(x, y, w, 1), Action::SelectTool(tool));
+        row(f, Rect::new(x, row_y, *w, 1), label, style);
+        hits.add(Rect::new(x, row_y, *w, 1), Action::SelectTool(tool));
         x += w + 1;
+    }
+    y += visible_rows - 1;
+    if tool_row + 1 > visible_rows {
+        let heading = Rect::new(area.right() - 22, tools_heading, 14, 1);
+        row(
+            f,
+            heading,
+            &format!("‹ {:02}/{:02} ›", selected + 1, tools.len()),
+            accent(),
+        );
+        hits.add(
+            Rect::new(heading.x, heading.y, 2, 1),
+            Action::SelectTool(tools[(selected + tools.len() - 1) % tools.len()]),
+        );
+        hits.add(
+            Rect::new(heading.x + 8, heading.y, 2, 1),
+            Action::SelectTool(tools[(selected + 1) % tools.len()]),
+        );
     }
     if !narrow && x + 12 <= area.right() {
         row(
@@ -358,7 +399,13 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         );
     }
     y += 1;
-    let status_height = if let Some(message) = &app.message {
+    let config_error = app.commands.errors.first().map(|e| {
+        format!(
+            "Config error: {e} (F1: all {} errors)",
+            app.commands.errors.len()
+        )
+    });
+    let status_height = if let Some(message) = app.message.as_ref().or(config_error.as_ref()) {
         let max_height = if short && app.focus == Focus::History {
             area.bottom().saturating_sub(y + 3).clamp(1, 3)
         } else {
@@ -471,7 +518,11 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
             format!("{:02}", i + 1)
         };
         let available = app.available(event.tool);
-        let tool = format!("{}{}", event.tool.label(), if available { "" } else { "!" });
+        let tool = format!(
+            "{}{}",
+            if available { "" } else { "!" },
+            app.tool_label(event.tool)
+        );
         history_row(
             f,
             a,
@@ -619,17 +670,19 @@ fn help(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         },
         accent(),
     );
-    let lines: Vec<_> = crate::help::LINES
-        .iter()
-        .enumerate()
-        .skip(app.help_scroll)
-        .map(|(i, s)| Line::raw(crate::help::line(i, s, app.host_launch)))
-        .collect();
+    let lines: Vec<_> = crate::help::lines(app).into_iter().map(Line::raw).collect();
+    let content = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
+    let paragraph = Paragraph::new(lines)
+        .style(base())
+        .wrap(Wrap { trim: false });
+    // Use the same Ratatui cell/grapheme wrapper for measuring and painting.
+    let max = paragraph
+        .line_count(content.width)
+        .saturating_sub(content.height as usize);
+    app.help_scroll_max.set(max);
     f.render_widget(
-        Paragraph::new(lines)
-            .style(base())
-            .wrap(Wrap { trim: false }),
-        Rect::new(area.x, area.y + 2, area.width, area.height - 3),
+        paragraph.scroll((app.help_scroll.min(max) as u16, 0)),
+        content,
     );
     let foot = at(area, area.bottom() - 1, 1);
     row(f, foot, "↑↓ / wheel scroll · Home/End", accent());

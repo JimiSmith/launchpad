@@ -38,6 +38,12 @@ run launch-shell-race "$PYTHON" tools/verify_launch.py --layout tiled --race
 run launch-remount "$PYTHON" tools/verify_launch.py --tool Hermes --different-cwd
 run launch-denied "$PYTHON" tools/verify_launch.py --layout tiled --deny
 run launch-missing "$PYTHON" tools/verify_launch.py --tool Copilot --layout tiled --missing
+run configured-shell "$PYTHON" tools/verify_launch.py --commands-case shell-only
+run configured-agreed "$PYTHON" tools/verify_launch.py --commands-case agreed --tool Claude --different-cwd --refresh
+run configured-literals "$PYTHON" tools/verify_launch.py --commands-case literals --tool Claude --layout tiled --race --exit-code 17
+run configured-invalid "$PYTHON" tools/verify_launch.py --commands-case invalid --tool Claude --refresh
+run configured-many "$PYTHON" tools/verify_launch.py --commands-case many --tool Claude
+run configured-review-ui "$PYTHON" tools/verify_launch.py --commands-case review-ui --tool Claude
 run history "$PYTHON" tools/verify_history.py
 run live-1 "$PYTHON" tools/verify_zellij.py
 run live-2 "$PYTHON" tools/verify_zellij.py

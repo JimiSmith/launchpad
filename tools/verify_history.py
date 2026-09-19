@@ -63,13 +63,32 @@ env.update(HOME=str(home), PATH=str(OUT/'bin'), SHELL='/bin/false', TERM='xterm-
            COLORTERM='truecolor', XDG_CACHE_HOME=str(OUT/'cache'), XDG_CONFIG_HOME=str(OUT/'config'),
            XDG_DATA_HOME=str(OUT/'data'), XDG_RUNTIME_DIR=str(OUT/'runtime'),
            ZELLIJ_SOCKET_DIR=str(ROOT/'target/hp-sock'/NAME), TMPDIR=str(OUT/'tmp'))
+fixture_config = {'commands': 'claude,codex,copilot,hermes'}
+for name in ['Claude','Codex','Copilot','Hermes']:
+    fixture_config['command_'+name.lower()] = name.lower()
+    fixture_config['label_'+name.lower()] = name
+
+def kdl_config(configuration):
+    return '; '.join(k+' '+json.dumps(v, ensure_ascii=False) for k,v in configuration.items())+(';' if configuration else '')
+
+aliases = {
+    'fixture-commands': fixture_config,
+    'renamed-commands': {'commands': 'hermes', 'command_hermes': 'claude', 'arguments_hermes': "--changed ''", 'label_hermes': 'Renamed Worktree'},
+    'removed-commands': {},
+    'invalid-commands': {'commands': 'hermes', 'command_hermes': 'hermes', 'arguments_hermes': "'bad"},
+}
 config = OUT/'config.kdl'
 config.write_text((ROOT/'examples/locked.kdl').read_text() +
                   f'\nsession_name "{NAME}"\ndefault_shell "{OUT}/bin/default-shell"\n')
-plugin = f'pane name="launchpad" focus=true {{ plugin location="file:{WASM}"; }}'
+with config.open('a') as f:
+    f.write('\nplugins {\n')
+    for alias, values in aliases.items():
+        f.write(f'  {alias} location="file:{WASM}" {{ {kdl_config(values)} }}\n')
+    f.write('}\n')
+plugin = f'pane name="launchpad" focus=true {{ plugin location="file:{WASM}" {{ {kdl_config(fixture_config)} }}; }}'
 neighbor = f'pane name="neighbor" command="{OUT}/bin/neighbor"'
 if args.layout == 'only':
-    layout = f'layout {{ pane {{ plugin location="file:{WASM}"; }}; }}'
+    layout = f'layout {{ pane {{ plugin location="file:{WASM}" {{ {kdl_config(fixture_config)} }}; }}; }}'
 elif args.layout == 'tiled':
     layout = f'layout {{ pane split_direction="vertical" {{ {neighbor}; {plugin}; }}; }}'
 else:
@@ -135,6 +154,8 @@ def send(text):
     os.write(master,text.encode())
     pump(.2)
 def cli(*command):
+    if command[:2] == ('action','launch-plugin') and command[-1] in aliases:
+        command = ('action','launch-or-focus-plugin', *command[2:])
     result = subprocess.run([ZELLIJ,'--session',NAME,*command],env=env,cwd=home,
                             capture_output=True,text=True,timeout=10)
     assert result.returncode == 0, f'{command}: {result.stderr} {result.stdout}'
@@ -152,7 +173,11 @@ def reopen(configuration=None, wasm=WASM):
     screen.reset()
     command = ['action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache']
     if configuration: command += ['--configuration', configuration]
-    cli(*command, 'file:'+str(wasm))
+    cli(*command, 'file:'+str(wasm) if configuration or wasm != WASM else 'fixture-commands')
+    if not configuration and wasm == WASM:
+        # An alias can focus an existing rejected dashboard; reset before waiting
+        # for status text hidden by its transient rejection message.
+        send('\x1b[15~')
     target = 'Launchpad' if configuration == 'demo=true' else 'HOME indexed'
     deadline = time.monotonic()+45
     approvals = 0
@@ -160,7 +185,9 @@ def reopen(configuration=None, wasm=WASM):
         pump()
         if 'Allow? (y/n)' in display() and approvals < 2:
             send('y'); approvals += 1
-    check(target in display(), 'fresh dashboard '+str(configuration))
+    check(target in display(), 'dashboard ready '+str(configuration))
+    if not configuration and wasm == WASM:
+        check('[ Shell ]' in display(), 'alias dashboard reset preserves initial Shell')
 
 def launch(path, tool='Shell'):
     old_count = len(records())
@@ -179,6 +206,8 @@ second_fds = None
 second_raw = bytearray()
 second_name = NAME+'b'
 def cli_second(*command):
+    if command[:2] == ('action','launch-plugin') and command[-1] in aliases:
+        command = ('action','launch-or-focus-plugin', *command[2:])
     result = subprocess.run([ZELLIJ,'--session',second_name,*command],env=env,cwd=home,
                             capture_output=True,text=True,timeout=10)
     assert result.returncode == 0, result.stderr
@@ -213,9 +242,53 @@ try:
     check(len(history_files) == 1, 'one URL-shared history.json exists after replacement')
     history_file = history_files[0]
     data = json.loads(history_file.read_text())
-    check(data['version'] == 1 and len(data['entries']) == 1, 'versioned history contains launch')
-    check(data['entries'][0]['path'] == str(cwd) and data['entries'][0]['tool'] == 'Hermes', 'literal path and last tool persisted')
-    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache', 'file:'+str(WASM))
+    check(data['version'] == 2 and len(data['entries']) == 1, 'versioned history contains launch')
+    check(data['entries'][0]['path'] == str(cwd) and data['entries'][0]['tool'] == 'hermes', 'literal path and last tool persisted')
+    # Same URL, different actual plugin configuration: ID, not label/exe, binds replay.
+    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache','renamed-commands')
+    expect('HOME indexed','renamed config ready at same URL')
+    expect('Renamed Worktree','current configured label displayed')
+    send('\x12\r')
+    expect('FIXTURE_READY claude','history ID resolves to current executable')
+    check(records()[-1]['argv'] == ['--changed',''] and records()[-1]['cwd'] == str(cwd), 'current args and exact historical cwd used on replay')
+    check(json.loads(history_file.read_text())['entries'][0]['tool'] == 'hermes','history stores ID, not new label or executable')
+    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache','removed-commands')
+    expect('HOME indexed','removed config ready at same URL')
+    count = len(records())
+    send('\x12\r')
+    expect('unavailable','removed historical command cannot replay')
+    send('\t')
+    expect('Choose a tool','removed history directory is copied without substituting Shell')
+    send('\r')
+    expect('unavailable','copied unavailable ID still cannot launch')
+    check(len(records()) == count,'unavailable replay and copy start no process')
+    snapshot('configured-removed')
+    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache','invalid-commands')
+    expect('~/space','invalid config still has working directory search')
+    expect('Config error','invalid current command definition is visible')
+    send('\x12\r')
+    expect('unavailable','invalid current definition cannot replay saved ID')
+    check(len(records()) == count,'invalid config never falls back')
+    # Unsupported old cache is disposable, never imported or executed.
+    data = json.loads(history_file.read_text())
+    old_row = dict(data['entries'][0], tool='Hermes')
+    journal = history_file.parent/'history.d'
+    authoritative = journal/(old_row['id']+'.json')
+    authoritative.write_text(json.dumps({'version':1,'id':old_row['id'],'entry':old_row}))
+    reopen()
+    check(json.loads(history_file.read_text())['entries'] == [], 'WASI ignores old journal records')
+    check(len(records()) == count, 'old records start no process')
+    shutil.rmtree(journal)  # Owned harness cache only.
+    history_file.write_text(json.dumps({'version':1,'entries':[old_row]}))
+    reopen()
+    check(json.loads(history_file.read_text())['entries'] == [], 'WASI ignores old projection without a journal')
+    check(len(records()) == count, 'old projection starts no process')
+    launch("~/space 修理 it's literal; $HOME", 'Hermes')
+    data = json.loads(history_file.read_text())
+    check(data['version'] == 2 and data['entries'][0]['tool'] == 'hermes', 'real launch writes v2 after unsupported cache')
+    check(json.loads((journal/(data['entries'][0]['id']+'.json')).read_text())['version'] == 2, 'new journal is v2')
+    snapshot('configured-v2-only')
+    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache', 'fixture-commands')
     expect('HOME indexed', 'reopened plugin worker ready')
     expect('1 events', 'history is visible before inducing journal read failure', timeout=5)
     # An unreadable authoritative record is an I/O failure, not empty history.
@@ -241,11 +314,12 @@ try:
     send('\x12\t')
     expect('Copied to form', 'reopened history is selectable and copied using existing UI', timeout=5)
     snapshot('02-reopened-history')
+    replay_count = len([r for r in records() if r['exe']=='hermes' and r['cwd']==str(cwd)])
     send('\r')
     expect('FIXTURE_READY hermes', 'saved tool replays through real host launch')
-    check(len([r for r in records() if r['exe']=='hermes' and r['cwd']==str(cwd)]) == 2, 'replay validates and launches exact saved cwd')
+    check(len([r for r in records() if r['exe']=='hermes' and r['cwd']==str(cwd)]) == replay_count + 1, 'replay validates and launches exact saved cwd')
     check(len(json.loads(history_file.read_text())['entries']) == 1, 'replaying same directory does not duplicate history')
-    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache', 'file:'+str(WASM))
+    cli('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache', 'fixture-commands')
     expect('HOME indexed', 'reopened for clear')
     send('\x12\x0c')
     expect('Clear history?', 'clear requires confirmation')
@@ -274,7 +348,7 @@ try:
     rows = json.loads(history_file.read_text())['entries']
     expected_paths = [str(home/f'project-{n:02}') for n in [6,11,10,9,8,7,5,4,3,2]]
     check([r['path'] for r in rows] == expected_paths, 'ten unique directories in newest-first order')
-    check(rows[0]['tool'] == 'Codex', 'duplicate directory remembers latest tool')
+    check(rows[0]['tool'] == 'codex', 'duplicate directory remembers latest tool')
     journal = history_file.parent/'history.d'
     check(len(list(journal.iterdir())) <= 11, 'journal compacts to ten rows plus clear watermark')
     first_event = journal/(rows[0]['id']+'.json')
@@ -333,7 +407,7 @@ try:
     fcntl.ioctl(second_slave, termios.TIOCSWINSZ, struct.pack('HHHH',36,120,0,0))
     config2 = OUT/'config-second.kdl'
     config2.write_text(config.read_text().replace('session_name "'+NAME+'"', 'session_name "'+second_name+'"'))
-    layout2 = f'layout {{ pane {{ plugin location="file:{WASM}"; }}; }}'
+    layout2 = f'layout {{ pane {{ plugin location="file:{WASM}" {{ {kdl_config(fixture_config)} }}; }}; }}'
     second = subprocess.Popen([ZELLIJ,'--config',str(config2),'--layout-string',layout2],
                               stdin=second_slave,stdout=second_slave,stderr=second_slave,
                               env=env,cwd=home,preexec_fn=setup)
@@ -354,12 +428,12 @@ try:
     send('\x1b[200~~/project-00\x1b[201~')
     send('\x14')
     second_panes = json.loads(cli_second('action','list-panes','--all','--json'))
-    second_id = 'plugin_'+str(next(p for p in second_panes if p.get('plugin_url') == 'file:'+str(WASM) and not p['is_suppressed'])['id'])
+    second_id = 'plugin_'+str(next(p for p in second_panes if p.get('plugin_url') in {'file:'+str(WASM), 'fixture-commands'} and not p['is_suppressed'])['id'])
     cli_second('action','send-keys','--pane-id',second_id,'Ctrl p','Ctrl u')
     cli_second('action','write-chars','--pane-id',second_id,'~/project-01')
     cli_second('action','send-keys','--pane-id',second_id,'Ctrl t')
     check('~/project-01' in cli_second('action','dump-screen'), 'second pane literal launch prepared')
-    first_id = 'plugin_'+str(next(p for p in panes('concurrent-before') if p.get('plugin_url') == 'file:'+str(WASM) and not p['is_suppressed'])['id'])
+    first_id = 'plugin_'+str(next(p for p in panes('concurrent-before') if p.get('plugin_url') in {'file:'+str(WASM), 'fixture-commands'} and not p['is_suppressed'])['id'])
     count_before = len(records())
     from concurrent.futures import ThreadPoolExecutor
     gate = threading.Barrier(2)
@@ -381,7 +455,7 @@ try:
     snapshot('08-concurrent-merged')
     send('\x12\x0c\x0c')
     expect('No recent launches', 'concurrent history cleared')
-    cli_second('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache','file:'+str(WASM))
+    cli_second('action','launch-plugin','--in-place','--close-replaced-pane','--skip-plugin-cache','fixture-commands')
     check('No recent launches' in second_ready(), 'clear persists across sessions')
     launch('~/project-00')
     # Remove only this disposable URL cache while no first-session plugin holds it.
@@ -394,7 +468,7 @@ try:
     journal.mkdir(exist_ok=True)
     (journal/'bad.json').write_text('{')
     (journal/'oversized.json').write_bytes(b'x'*33000)
-    (journal/'future.json').write_text('{"version":2,"id":"future","entry":null}')
+    (journal/'future.json').write_text('{"version":99,"id":"future","entry":null}')
     stale_temp = history_file.parent/'history-abandoned.tmp'
     stale_temp.write_text('incomplete')
     os.utime(stale_temp,(time.time()-120,time.time()-120))
@@ -423,7 +497,9 @@ finally:
     if second is not None:
         subprocess.run([ZELLIJ,'--session',second_name,'kill-session',second_name],env=env,capture_output=True,timeout=10)
         if second.poll() is None: second.terminate()
-        second.wait(timeout=5)
+        try: second.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            second.kill(); second.wait(timeout=5)
         reader.join(timeout=2)
         (OUT/'second-session.ansi').write_bytes(second_raw)
     if second_fds:
@@ -433,7 +509,9 @@ finally:
     subprocess.run([ZELLIJ,'--session',NAME,'kill-session',NAME],env=env,capture_output=True,timeout=10)
     pump(.2)
     if child.poll() is None: child.terminate()
-    child.wait(timeout=5)
+    try: child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        child.kill(); child.wait(timeout=5)
     os.close(master);os.close(slave)
     report={'success':success,'checks':checks,'passed':len(checks),'case':vars(args),
             'evidence':str(OUT),'sha256':ARTIFACT_HASH}

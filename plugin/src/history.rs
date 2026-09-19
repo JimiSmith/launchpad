@@ -6,14 +6,11 @@ use std::path::{Path, PathBuf};
 mod tool {
     use super::*;
     pub fn serialize<S: serde::Serializer>(value: &Tool, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(value.label())
+        serializer.serialize_str(value.as_str())
     }
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Tool, D::Error> {
         let value = String::deserialize(d)?;
-        Tool::ALL
-            .into_iter()
-            .find(|t| t.label() == value)
-            .ok_or_else(|| serde::de::Error::custom("unknown tool"))
+        Tool::new(&value).ok_or_else(|| serde::de::Error::custom("invalid command ID"))
     }
 }
 #[derive(Serialize, Deserialize)]
@@ -88,7 +85,7 @@ impl Store {
             &journal.join(format!("{}.json", entry.id)),
             &entry.id,
             &serde_json::to_vec(&Event {
-                version: 1,
+                version: 2,
                 id: entry.id.clone(),
                 entry: Some(entry.clone()),
             })
@@ -157,7 +154,7 @@ impl Store {
             &self.root.join("history.json"),
             token,
             &serde_json::to_vec(&Snapshot {
-                version: 1,
+                version: 2,
                 entries: kept.iter().filter_map(|e| e.entry.clone()).collect(),
             })
             .unwrap(),
@@ -200,7 +197,7 @@ impl Store {
             &journal.join(format!("{token}.json")),
             token,
             &serde_json::to_vec(&Event {
-                version: 1,
+                version: 2,
                 id: token.into(),
                 entry: None,
             })
@@ -251,7 +248,7 @@ impl Store {
                 .map_err(|e| e.to_string())?;
             if bytes.len() <= 32768 {
                 if let Ok(event) = serde_json::from_slice::<Event>(&bytes) {
-                    if event.version == 1
+                    if event.version == 2
                         && valid_token(&event.id)
                         && path.file_name().and_then(|s| s.to_str())
                             == Some(&format!("{}.json", event.id))
@@ -302,6 +299,75 @@ mod tests {
             path: path.into(),
             tool,
             opened_at: n,
+        }
+    }
+    #[test]
+    fn arbitrary_stable_command_identity_roundtrips_without_executable_data() {
+        let store = fixture("configured-id");
+        let row = entry(1, "/fixture/a", Tool::new("Variant_2.worktree").unwrap());
+        store.record(row.clone()).unwrap();
+        assert_eq!(Store::new(&store.root).read().unwrap(), vec![row]);
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap()).unwrap();
+        assert_eq!(json["version"], 2);
+        assert_eq!(json["entries"][0]["tool"], "Variant_2.worktree");
+        assert!(json["entries"][0].get("executable").is_none());
+    }
+    #[test]
+    fn unsupported_history_is_ignored_and_current_writes_work() {
+        for version in [1, 99] {
+            for journal in [false, true] {
+                let store = fixture(&format!("unsupported-{version}-{journal}"));
+                let old = entry(1, "/fixture/old", Tool::new("Hermes").unwrap());
+                fs::write(
+                    store.root.join("history.json"),
+                    serde_json::to_vec(&Snapshot {
+                        version,
+                        entries: vec![old.clone()],
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+                if journal {
+                    fs::create_dir(store.root.join("history.d")).unwrap();
+                    fs::write(
+                        store
+                            .root
+                            .join("history.d")
+                            .join(format!("{}.json", old.id)),
+                        serde_json::to_vec(&Event {
+                            version,
+                            id: old.id.clone(),
+                            entry: Some(old.clone()),
+                        })
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    fs::write(
+                        store.root.join("history.d/zz-unsupported.json"),
+                        serde_json::to_vec(&Event {
+                            version,
+                            id: "zz-unsupported".into(),
+                            entry: None,
+                        })
+                        .unwrap(),
+                    )
+                    .unwrap();
+                }
+                assert!(
+                    store.refresh("ignore-unsupported").unwrap().is_empty(),
+                    "version {version}, journal {journal}"
+                );
+                let current = entry(2, "/fixture/new", Tool::new("Hermes").unwrap());
+                store.record(current.clone()).unwrap();
+                assert_eq!(Store::new(&store.root).read().unwrap(), vec![current]);
+                let projection: Snapshot =
+                    serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap())
+                        .unwrap();
+                assert_eq!(projection.version, 2);
+                assert_eq!(projection.entries.len(), 1);
+                assert_eq!(projection.entries[0].tool.as_str(), "Hermes");
+            }
         }
     }
     #[test]
@@ -395,7 +461,7 @@ mod tests {
         fs::write(
             &obsolete,
             serde_json::to_vec(&Event {
-                version: 1,
+                version: 2,
                 id: old.id.clone(),
                 entry: Some(old),
             })
@@ -495,7 +561,7 @@ mod tests {
             ("big.json", vec![b'x'; 33000]),
             (
                 "future.json",
-                br#"{"version":2,"id":"future","entry":null}"#.to_vec(),
+                br#"{"version":99,"id":"future","entry":null}"#.to_vec(),
             ),
         ] {
             fs::write(journal.join(name), bytes).unwrap();
@@ -618,7 +684,7 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(store.root.join("history.json")).unwrap())
                 .unwrap();
-        assert_eq!(json["version"], 1);
+        assert_eq!(json["version"], 2);
         assert_eq!(json["entries"][0]["opened_at"], 100);
     }
 }

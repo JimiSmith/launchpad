@@ -102,10 +102,11 @@ fn wheel_is_section_local_and_clamped() {
     assert_eq!(app.help_scroll, 1);
     app.update(Action::End);
     wheel(&mut app, 40, 10, 5, 3, true);
-    assert_eq!(
-        app.help_scroll,
-        zellij_launchpad_prototype::help::LINES.len() - 1
-    );
+    let end = app.help_scroll;
+    wheel(&mut app, 40, 10, 5, 3, true);
+    assert_eq!(app.help_scroll, end, "wheel stops at the rendered end");
+    wheel(&mut app, 40, 10, 5, 3, false);
+    assert_eq!(app.help_scroll, end - 1, "wheel up moves one rendered row");
     app.update(Action::Home);
     wheel(&mut app, 40, 10, 5, 3, false);
     assert_eq!(app.help_scroll, 0);

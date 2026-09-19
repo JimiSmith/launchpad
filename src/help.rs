@@ -36,18 +36,36 @@ pub const LINES: &[&str] = &[
     "Launches, availability and history remain simulated; memory only.",
 ];
 
+pub fn lines(app: &crate::app::App) -> Vec<String> {
+    let mut lines: Vec<String> = LINES
+        .iter()
+        .enumerate()
+        .map(|(i, s)| line(i, s, app.host_launch).into())
+        .collect();
+    if !app.is_demo() {
+        lines.push("Configured commands (Shell first):".into());
+        for c in &app.commands.entries {
+            lines.push(format!("{}: {}", c.id.as_str(), c.label));
+        }
+        for error in &app.commands.errors {
+            lines.push(format!("Config error: {error}"));
+        }
+    }
+    lines
+}
+
 pub fn line(index: usize, simulation: &str, host_launch: bool) -> &str {
     if !host_launch {
         return simulation;
     }
     match index {
         7 => "Enter without a highlight  Validate and replace this pane",
-        16 => "F5  Refresh HOME / reset form; all five tools are selectable",
+        16 => "F5  Refresh HOME / reset form; command configuration is preserved",
         18 => "The dashboard closes on launch; it does not return on command exit.",
         23 => "on the selected row. Launch replaces this plugin pane.",
         29 => "Hidden/ignored directories can still be entered literally.",
-        32 => "Shell uses Zellij's default shell; agents run with no flags.",
-        33 => "No command availability checks. No persistent launch history.",
+        32 => "Shell uses Zellij's default shell; configured commands use literal argv.",
+        33 => "No command availability checks. Recent validated attempts persist in cache.",
         _ => simulation,
     }
 }

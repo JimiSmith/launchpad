@@ -2,7 +2,9 @@
 
 Status: draft target product specification, not all implemented. HOME-only search
 and real own-pane launches plus shared persistent history are implemented.
-Command availability checks are not. Native/demo adapters still simulate launches
+Configurable commands are implemented from Zellij plugin configuration; they replace
+the fixed launcher list and earlier installed-tool discovery proposal. No executable
+availability checks are required. Native/demo adapters still simulate launches
 and do not access persistent history. History's implemented contract supersedes
 older event-log proposals below: see [persistence details](docs/history.md).
 Current scope and deviations: [home-search notes](docs/home-search.md) and
@@ -21,7 +23,7 @@ The community catalogue describes **zellij-newtab-plus** as named-tab creation w
 
 ## 2. Product contract
 
-Opening a dashboard tab gives the user an immediately focused directory input, an installed-tool selector, and recent launch history. Selecting a tool launches it in the chosen directory and replaces the dashboard pane in the same tab.
+Opening a dashboard tab gives the user an immediately focused directory input, a configured-command selector, and recent launch history. Selecting a command launches it in the chosen directory and replaces the dashboard pane in the same tab.
 
 Proposed v0.1 defaults:
 
@@ -29,17 +31,17 @@ Proposed v0.1 defaults:
 - Exactly one launch per activation; no automatic agent resume.
 - Initial directory: invoking terminal's working directory, falling back to configured starting directory, then home.
 - Initial tool: default shell. Do not silently start a remembered agent.
-- Tool order: Shell, Claude, Codex, Copilot, Hermes.
+- Command order: built-in Shell first, followed by the IDs listed in `commands`, in user-specified order. There are no built-in agent commands.
 - Recent list: ten unique absolute directories, newest first, remembering the last tool.
 - History persists across panes and Zellij sessions sharing the same plugin URL and
   Zellij cache. Changing the URL or deleting that cache starts separate history.
 - No required fzf, zoxide, Python, or shell framework.
 
-Interpretation of “exist on the path”: executable command on the launch environment's `PATH`, not a file inside the chosen directory. The selected directory is the working directory. A project-local executable counts only if normal PATH resolution includes it.
+The selected directory is the working directory. Executable resolution is left to Zellij's normal launch environment; Launchpad does not probe PATH, run availability checks, or hide commands because an executable is missing.
 
 ## 3. Screen
 
-Illustrative only; installed tools and history vary:
+Illustrative only; configured labels and history vary:
 
 ```text
   Launchpad
@@ -59,7 +61,7 @@ Illustrative only; installed tools and history vary:
   Tab complete · ↓ tools · Ctrl+R recent · Enter launch
 ```
 
-The input is the primary visual element. Suggestions occupy a capped region immediately below it; tools stay below that region and history below tools. Hide unavailable tools rather than rendering disabled choices. Show “Checking installed tools…” during discovery, not a misleading empty result.
+The input is the primary visual element. Suggestions occupy a capped region immediately below it; commands stay below that region and history below commands. Display configured labels in the configured order after Shell. Configuration errors must be visible without making Shell unusable; there is no installed-tool discovery phase.
 
 Responsive behaviour:
 
@@ -111,27 +113,67 @@ History unavailable: show an empty state; history shortcuts are harmless. If an 
 
 Key delivery must be tested against Zellij normal and locked modes. Installation documents conflicts and a compatible binding set rather than globally stealing terminal input. Global shortcuts remain subject to revision after the compatibility spike.
 
-## 6. Launch targets and discovery
+## 6. Configured commands
 
-| Label | Resolution | Launch |
-|---|---|---|
-| Shell | Zellij's configured default shell | Native terminal-opening API at chosen cwd |
-| Claude | `claude` | Resolved executable, no default arguments |
-| Codex | `codex` | Resolved executable, no default arguments |
-| Copilot | `copilot` | Resolved executable, no default arguments |
-| Hermes | `hermes` | Resolved executable, no default arguments |
+The user's Zellij plugin configuration is the only command-definition source.
+No settings editor, preference file, config rewriting, or automatic agent defaults
+are required. Layouts and plugin aliases can supply different lists. Launching the
+WASM directly without command configuration provides Shell only.
 
-Bare command names are the proposed launcher defaults. Confirm their interactive entrypoints during implementation; overrides use a command path plus an argument array, not an arbitrary shell string. Do not treat legacy `gh copilot` as equivalent to standalone `copilot`.
+Example settings inside the plugin configuration block (KDL uses spaces, not `=`):
 
-Discovery rules:
+```kdl
+commands "claude,hermes,codex"
 
-1. Use the same host environment context as launch; do not assume the WASM environment is the host environment.
-2. Resolve each fixed executable name according to PATH order, including execute permission checks; resolve relative/empty PATH components against the selected directory.
-3. Record the absolute resolved executable; recheck on submit to catch uninstall/replacement and avoid discovery/launch disagreement.
-4. Do not launch tools to detect them: no `--version`, login checks, network calls, or project scripts.
-5. Refresh on opening the dashboard and via an explicit refresh action. Invalidate cwd-sensitive results after directory changes.
-6. Shell aliases and functions are not executable targets. Shell-initialization changes, direnv, and version-manager activation are not automatically sourced in v0.1. Explain this when discovery differs from an interactive shell; support trusted explicit executable overrides.
-7. If a selected tool disappears, reset to Shell with a visible notice, never a silent fallback on submit.
+command_claude "claude"
+arguments_claude "-w"
+label_claude "Claude in Worktree"
+
+command_hermes "hermes"
+label_hermes "Hermes"
+
+command_codex "codex"
+label_codex "Codex"
+```
+
+Configuration contract:
+
+1. Shell is always first and initially selected. It uses Zellij's configured
+   default-shell API, not a configured executable or a hard-coded shell.
+2. `commands` is a comma-separated, ordered list of stable command IDs. Missing
+   or empty means Shell only. Trim whitespace around IDs and retain only the
+   first occurrence of a duplicate. Ignore empty list segments.
+3. For each listed ID, `command_<id>` is required and specifies one executable
+   name or path, not a command line. `arguments_<id>` is optional and defaults to
+   no arguments. `label_<id>` is optional and defaults to the ID. Unlisted command
+   definitions do not appear in the selector.
+4. The ID is independent of its label and executable. Different IDs may launch
+   the same executable with different arguments. Reserve `shell` for the built-in
+   entry; it cannot be overridden or duplicated by user configuration.
+5. Parse `arguments_<id>` with shell-style quoting and escaping into an argument
+   vector, preserving quoted empty arguments. Do not execute a shell or expand
+   variables, tilde, globs, pipes, redirections, or command substitutions.
+   For example, `arguments_claude "-w --model \"some model\""` in KDL passes
+   three literal arguments: `-w`, `--model`, and `some model`.
+6. Users needing shell interpretation must explicitly configure a shell executable
+   and its arguments, such as `sh` with `-c`. Launchpad never introduces this
+   wrapper implicitly. The selected directory is always the structured cwd.
+7. Invalid definitions (including missing/empty executables or malformed argument
+   quoting) produce a visible configuration error and exclude the affected entry;
+   Shell and other valid entries remain usable. Do not probe executables or filter
+   entries by installation status. Missing executables follow normal host rejection.
+8. Preserve the parsed configuration through HOME remount/reload, F5, and form reset.
+   A changed Zellij configuration is applied when opening a newly configured plugin
+   instance; live config editing/reload watching is out of scope.
+
+History stores the stable command ID, not executable data. Resolve replay against
+that instance's current configured command definition. Label changes keep the
+association; executable/argument changes under the same ID apply to future replay.
+Removed or invalid command IDs remain visible as unavailable history entries:
+replay must not silently substitute another command, but copying the directory
+remains possible. History is disposable cache: ignore unsupported old schemas,
+with no migration or backward compatibility. Never execute a command definition
+read from history.
 
 ## 7. Launch lifecycle
 
@@ -142,7 +184,7 @@ States: booting → permission check → ready → validating → launching → 
 - Launch into the dashboard's own pane identity, even if the user switches tabs during asynchronous work.
 - Keep the dashboard recoverable until launch acceptance is known; prove exact suppression/close ordering in the API spike.
 - On accepted launch, optionally rename the tab to `<directory basename> · <tool>`. Do not rename other tabs.
-- Shell exits normally; agent commands retain native Zellij exit/error/re-run behaviour. Do not automatically respawn agents or fall back into another program.
+- Shell uses Zellij's default-shell lifecycle. Configured command panes close on process exit, including nonzero exits; Launchpad does not return. Preserve the explicit own-pane action and existing asynchronous rejection handling. Do not respawn commands or fall back into another program.
 - History records validated launch attempts **before** replacement, because successful
   replacement normally destroys the plugin before acknowledgement. Known spawn
   rejection removes that exact attempt without overwriting concurrent updates;
@@ -152,9 +194,13 @@ States: booting → permission check → ready → validating → launching → 
 
 ## 8. Recent history
 
-The real plugin stores a version-1 JSON projection at `/cache/history.json`,
+The real plugin stores a version-2 JSON projection at `/cache/history.json`,
 with up to ten entries: unique operation ID, UTC Unix timestamp in seconds,
-absolute validated cwd, and a fixed launcher ID. Replay uses the current trusted
+absolute validated cwd, and a stable configured-command ID (or built-in Shell ID).
+Only version-2 journal records are supported; IDs remain case-sensitive.
+Unsupported old-format cache is ignored, not migrated. See [configured command details](docs/configured-commands.md)
+for exact bounds, lexical parsing, UI overflow and pinned-host CLI limitations.
+Replay uses the current trusted
 launcher mapping, never executable data from history. All replay/copy-to-form
 launches use ordinary directory validation; deleted/out-of-HOME paths cannot launch.
 
@@ -195,7 +241,7 @@ The live documentation is not proof of support in the user's installed release. 
 
 1. Capturing invoking cwd and the host PATH/home/XDG environment reliably.
 2. Filesystem mapping outside `/host`; safe access to durable state without confusing host paths and WASI paths.
-3. Discovery matching the environment inherited by command panes.
+3. Configured executable/argument forwarding in the environment inherited by command panes, without availability probing or implicit shell interpretation.
 4. Own-pane replacement, acknowledgement events, error recovery, and history write ordering for both Shell and agents.
 5. Cross-instance/cross-session file locking from WASI. A single WASM artifact is a product constraint. If reliable host discovery or durable locking cannot be implemented through Zellij/WASI, report the limitation and revisit the affected requirement; do not introduce an external binary.
 6. Key delivery, default-layout integration, focus races, plugin cleanup, and narrow-terminal rendering.
@@ -203,8 +249,10 @@ The live documentation is not proof of support in the user's installed release. 
 ## 10. Acceptance criteria
 
 - A new dashboard opens with editable path focus and the expected invoking cwd/fallback.
-- Only executable installed agents appear, in fixed order; Shell uses Zellij's default shell rather than hard-coded bash.
-- All five launch targets are covered by tests; deterministic fixtures stand in for tools not installed on a test host, without claiming real-agent verification.
+- Shell appears first and uses Zellij's default shell rather than hard-coded bash. Other entries appear only from `commands`, in configured order with configured labels; absent/empty configuration gives Shell only.
+- Tests cover arbitrary command IDs, multiple variants of one executable, optional fields, whitespace/deduplication, malformed definitions, and unavailable history IDs. Invalid entries show errors without disabling Shell or valid entries.
+- Actual harmless fixture executables verify exact argument vectors (including quoted spaces and empty arguments), literal metacharacters without expansion, and selected cwd; tests do not run actual coding agents.
+- Configured commands survive bootstrap remount/reload, F5, and reset. Dynamic selector keyboard/mouse behaviour and long labels/many entries remain usable at supported sizes.
 - Unicode, spaces, apostrophes, semicolons, dollar signs, and shell-looking directory names are passed literally and cannot execute injected commands.
 - Invalid/unreadable directories, stale completions, broken symlinks, missing executables, denied permissions, and failed launches preserve a usable form.
 - Launch replaces only the dashboard pane, in the same tab, and never creates an accidental split or affects the currently focused unrelated tab.
@@ -217,7 +265,7 @@ The live documentation is not proof of support in the user's installed release. 
 
 ## 11. Explicitly out of scope
 
-Conversation resume, agent status monitoring, worktree creation, git-aware dashboards, remote host selection, per-project scripts, automatic trust/permission flags, arbitrary command entry, and project environment auto-activation. Optional future additions: zoxide ranking, pinned projects, custom launchers, and an alternative deduplicated recent-target view.
+Conversation resume, agent status monitoring, built-in worktree management, git-aware dashboards, remote host selection, automatic trust/permission flags, ad-hoc command entry in the launch form, a settings editor, and project environment auto-activation. Users may explicitly configure command arguments that request a tool's own worktree mode or other behaviour. Optional future additions: zoxide ranking and pinned projects.
 
 ## Sources
 

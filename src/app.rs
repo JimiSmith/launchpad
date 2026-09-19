@@ -1,31 +1,6 @@
 use crate::{editor::Editor, fixtures, search::Directory};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tool {
-    Shell,
-    Claude,
-    Codex,
-    Copilot,
-    Hermes,
-}
-impl Tool {
-    pub const ALL: [Self; 5] = [
-        Self::Shell,
-        Self::Claude,
-        Self::Codex,
-        Self::Copilot,
-        Self::Hermes,
-    ];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Shell => "Shell",
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::Copilot => "Copilot",
-            Self::Hermes => "Hermes",
-        }
-    }
-}
+pub use crate::commands::Tool;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Path,
@@ -87,12 +62,15 @@ pub struct App {
     pub highlighted: Option<usize>,
     pub focus: Focus,
     pub tool: Tool,
+    pub commands: crate::commands::Commands,
     pub history: Vec<Launch>,
     pub recent: usize,
     pub screen: Screen,
     pub message: Option<String>,
     pub help: bool,
     pub help_scroll: usize,
+    /// Rendered-row limit from the last help frame, not the logical line count.
+    pub(crate) help_scroll_max: std::cell::Cell<usize>,
     pub copilot_available: bool,
     pub quit: bool,
     pub compact: bool,
@@ -130,12 +108,14 @@ impl Default for App {
             highlighted: None,
             focus: Focus::Path,
             tool: Tool::Shell,
+            commands: Default::default(),
             history: Vec::new(),
             recent: 0,
             screen: Screen::Dashboard,
             message: None,
             help: false,
             help_scroll: 0,
+            help_scroll_max: std::cell::Cell::new(usize::MAX),
             copilot_available: true,
             quit: false,
             compact: false,
@@ -156,6 +136,15 @@ impl Default for App {
     }
 }
 impl App {
+    pub fn configure(&mut self, configuration: &std::collections::BTreeMap<String, String>) {
+        self.commands = crate::commands::Commands::parse(configuration);
+    }
+    pub fn tool_label(&self, tool: Tool) -> String {
+        self.commands
+            .get(tool)
+            .map(|c| c.label.clone())
+            .unwrap_or_else(|| tool.as_str().into())
+    }
     pub fn take_history_mutation(&mut self) -> Option<HistoryMutation> {
         self.history_request.take()
     }
@@ -367,6 +356,7 @@ impl App {
     pub fn demo() -> Self {
         let mut app = Self {
             demo: true,
+            commands: crate::commands::Commands::demo(),
             dirs: fixtures::directories(),
             history: fixtures::history(),
             ..Self::default()
@@ -457,6 +447,7 @@ impl App {
             return;
         }
         if action == Action::Reset {
+            let commands = self.commands.clone();
             let compact = self.compact;
             let host_launch = self.host_launch;
             let remote = self.remote.take();
@@ -473,6 +464,7 @@ impl App {
             } else if !self.demo {
                 self.search_status = status;
             }
+            self.commands = commands;
             self.compact = compact;
             self.host_launch = host_launch;
             self.remote = remote;
@@ -496,12 +488,21 @@ impl App {
                     self.update(if down { Action::Down } else { Action::Up })
                 }
                 Action::Escape => self.help = false,
-                Action::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
+                Action::Up => {
+                    self.help_scroll = self
+                        .help_scroll
+                        .min(self.help_scroll_max.get())
+                        .saturating_sub(1)
+                }
                 Action::Down => {
-                    self.help_scroll = (self.help_scroll + 1).min(crate::help::LINES.len() - 1)
+                    self.help_scroll = self
+                        .help_scroll
+                        .saturating_add(1)
+                        .min(self.help_scroll_max.get())
                 }
                 Action::Home => self.help_scroll = 0,
-                Action::End => self.help_scroll = crate::help::LINES.len() - 1,
+                // Resolve End against the next actual frame, including a resize.
+                Action::End => self.help_scroll = usize::MAX,
                 _ => {}
             }
             return;
@@ -718,7 +719,7 @@ impl App {
                         } else {
                             format!(
                                 "{} is unavailable. Choose a tool with Ctrl+T.",
-                                e.tool.label()
+                                self.tool_label(e.tool)
                             )
                         });
                     }
@@ -754,13 +755,16 @@ impl App {
         }
     }
     pub fn visible_tools(&self) -> Vec<Tool> {
-        Tool::ALL
-            .into_iter()
+        self.commands
+            .entries
+            .iter()
+            .map(|c| c.id)
             .filter(|&t| self.available(t))
             .collect()
     }
     pub fn available(&self, tool: Tool) -> bool {
-        self.host_launch || tool != Tool::Copilot || self.copilot_available
+        self.commands.get(tool).is_some()
+            && (!self.demo || tool != Tool::Copilot || self.copilot_available)
     }
     fn complete(&mut self, reverse: bool) {
         let (items, i) = if let Some((items, i)) = self.cycle.take() {
@@ -855,7 +859,7 @@ impl App {
         if !self.available(tool) {
             self.message = Some(format!(
                 "{} is unavailable. Tab copies; Ctrl+T chooses a tool.",
-                tool.label()
+                self.tool_label(tool)
             ));
             return;
         }

@@ -2992,6 +2992,7 @@ dependencies = [
  "ignore",
  "neo_frizbee",
  "ratatui",
+ "shlex",
  "unicode-normalization",
  "unicode-segmentation",
  "unicode-width 0.2.2",

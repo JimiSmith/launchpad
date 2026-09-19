@@ -232,6 +232,7 @@ mod wasm {
             if configuration.get("demo").is_some_and(|v| v == "true") {
                 self.state.app = App::demo();
             } else {
+                self.state.app.configure(&configuration);
                 self.state.app.host_launch = !self.simulate_launch;
                 self.state.app.search_status = "Waiting for HOME permissions…".into();
                 let mut permissions = vec![
@@ -299,7 +300,7 @@ mod wasm {
                             self.pending = Some(Instant::now());
                             self.ready = true;
                             self.scanning = true;
-                            self.state.app = App::from_remote(cwd.into());
+                            self.state.replace_app(App::from_remote(cwd.into()));
                             self.state.app.host_launch = !self.simulate_launch;
                             self.load_history();
                             #[cfg(feature = "worker-faults")]
@@ -403,6 +404,14 @@ mod wasm {
                         }
                     }
                     tool => {
+                        let Some(definition) = self.state.app.commands.get(tool).cloned() else {
+                            self.reject_launch();
+                            return true;
+                        };
+                        let Some(executable) = definition.executable else {
+                            self.reject_launch();
+                            return true;
+                        };
                         self.launch_serial += 1;
                         let context = std::collections::BTreeMap::from([(
                             "launchpad-launch".into(),
@@ -412,15 +421,8 @@ mod wasm {
                         run_action(
                             actions::Action::NewInPlacePane {
                                 command: Some(actions::RunCommandAction {
-                                    command: match tool {
-                                        Tool::Claude => "claude",
-                                        Tool::Codex => "codex",
-                                        Tool::Copilot => "copilot",
-                                        Tool::Hermes => "hermes",
-                                        Tool::Shell => unreachable!(),
-                                    }
-                                    .into(),
-                                    args: Vec::new(),
+                                    command: executable.into(),
+                                    args: definition.arguments,
                                     cwd: Some(launch.path.into()),
                                     hold_on_close: false,
                                     hold_on_start: false,

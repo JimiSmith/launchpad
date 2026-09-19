@@ -1,0 +1,18 @@
+// Illustrative commands; no agent is started until you select and launch it.
+// Run from this checkout; update the absolute path for another checkout.
+layout {
+    tab name="Launchpad" focus=true {
+        pane borderless=true {
+            plugin location="file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm" {
+                commands "claude,hermes,codex"
+                command_claude "claude"
+                arguments_claude "-w"
+                label_claude "Claude in Worktree"
+                command_hermes "hermes"
+                label_hermes "Hermes"
+                command_codex "codex"
+                label_codex "Codex"
+            }
+        }
+    }
+}

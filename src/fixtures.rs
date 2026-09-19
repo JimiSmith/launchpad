@@ -1,17 +1,18 @@
 pub use crate::search::Directory;
 pub fn history() -> Vec<crate::app::Launch> {
-    use crate::app::{Launch, Tool::*};
+    use crate::app::{Launch, Tool};
+
     [
-        (Claude, "launchpad", "12m ago"),
-        (Shell, "notes", "38m ago"),
-        (Codex, "service", "1h ago"),
-        (Hermes, "team notes", "2h ago"),
-        (Claude, "launchpad", "3h ago"),
-        (Copilot, "service", "4h ago"),
-        (Shell, "current", "Yesterday"),
-        (Codex, "修理", "Yesterday"),
-        (Hermes, "notes", "Yesterday"),
-        (Shell, "it's literal; $HOME", "2d ago"),
+        (Tool::Claude, "launchpad", "12m ago"),
+        (Tool::Shell, "notes", "38m ago"),
+        (Tool::Codex, "service", "1h ago"),
+        (Tool::Hermes, "team notes", "2h ago"),
+        (Tool::Claude, "launchpad", "3h ago"),
+        (Tool::Copilot, "service", "4h ago"),
+        (Tool::Shell, "current", "Yesterday"),
+        (Tool::Codex, "修理", "Yesterday"),
+        (Tool::Hermes, "notes", "Yesterday"),
+        (Tool::Shell, "it's literal; $HOME", "2d ago"),
     ]
     .into_iter()
     .enumerate()
