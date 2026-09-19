@@ -28,7 +28,7 @@ Current defaults:
 
 - Platform: local Linux host running Zellij. macOS verification remains outstanding.
 - Exactly one launch per activation; no automatic agent resume.
-- Initial directory input: `~`. There is no configurable starting-directory fallback.
+- Initial directory input: the original host-supplied invoking cwd, abbreviated under HOME. Capture it before the HOME worker remount/reload; F5/reset restores it. One Enter when ready validates and opens Shell there, including during indexing; no suggestion is initially highlighted. No configured starting-directory fallback.
 - Initial tool: default shell. Do not silently start a remembered agent.
 - Command order: built-in Shell first, followed by the IDs listed in `commands`, in user-specified order. There are no built-in agent commands.
 - Recent list: ten unique absolute directories, newest first, remembering the last tool.
@@ -75,13 +75,13 @@ Responsive behaviour:
 - Search recursively beneath HOME using embedded Frizbee (`neo_frizbee`), not a custom ranking algorithm or external executable. A query such as `notes`, `nts`, or `Projects/notes` finds matching indexed directories without requiring shell-style relative-path navigation. Accepting a completion fills the actual directory path; completion itself never launches.
 - Accept explicit `~`, `~/…`, and absolute paths under HOME. Existing literal validation also resolves HOME-relative input and `.`/`..` within HOME; it does not use the invoking cwd. Adding invoking-cwd-relative resolution is out of scope, not deferred work.
 - Expand only the leading home shortcut. No environment-variable, glob, command-substitution, or arbitrary shell-expression expansion. Spaces and quotes in paths are literal; do not insert shell quoting.
-- Search only HOME. Reject paths outside it and all symlink components, even links pointing inside HOME. Do not create missing directories.
+- Search only HOME. Ordinary validation rejects outside-HOME paths and all symlink components. The exact original invoking cwd is the sole exception: validate it via a main-instance remount, permitting outside-HOME/symlink cwd without indexing there or allowing other outside paths. Do not create missing directories. Failed cwd never falls back to HOME.
 - Prune hidden directories (including `.git`) and exact `node_modules` subtrees at every depth. Apply HOME-local `.gitignore` and `.ignore` rules. A dot-prefixed query does not reveal excluded candidates; explicit literal hidden/ignored directories can still validate and launch. Excluded entries are not catalogued or counted; no skipped list/count is shown.
-- Exclude invalid UTF-8 and control-character directory names. Validate the actual directory on completion acceptance and again on launch, preserving the form on failure. Revalidation is not an atomic guarantee against concurrent filesystem replacement.
-- Run indexing, matching, and validation in a persistent WASM worker. Autonomous bounded scan slices publish progress; query coalescing and generation/revision checks prevent stale results from replacing current ones. Keep previous suggestions visible until the accepted reply arrives.
+- Exclude invalid UTF-8 and control-character directory names. Reject U+FFFD in the invoking cwd because the pinned host serializes paths lossily, even if that character was legitimate; never open a replacement twin. Validate the actual directory on completion acceptance and again on launch, preserving the form on failure. Revalidation is not an atomic guarantee against concurrent filesystem replacement.
+- Run indexing, matching, and ordinary HOME validation in a persistent WASM worker. The exact invoking-cwd exception is validated by the main instance after a host remount acknowledgement. Autonomous bounded scan slices publish progress; query coalescing and generation/revision checks prevent stale results from replacing current ones. Keep previous suggestions visible until the accepted reply arrives.
 - Keep the index in memory. Reopen/F5 rebuilds it; persistent index caching is not implemented. Never rescan on each keystroke.
 - Bound indexing to 20,000 directories, 200,000 entries, depth 64, a conservative 6 MiB retained-path/rule budget, and 4096-byte paths. Limits are visible. Return at most 100 ranked suggestions; an explicit valid path need not appear in the partial index.
-- Cap typed/pasted input and fuzzy queries at 100 Unicode scalar values. Preserve longer completed/history paths without truncating them into different targets. See [search details](docs/home-search.md) for rule budgets and matching bounds.
+- Cap typed/pasted input and fuzzy queries at 100 Unicode scalar values. Preserve longer invoking/completed/history paths without truncating them into different targets. See [search details](docs/home-search.md) for rule budgets and matching bounds.
 
 Rendering performs no filesystem I/O. Worker scheduling keeps search work off
 plugin input handling, but a filesystem syscall cannot be interrupted by a slice
@@ -112,7 +112,7 @@ Three focus areas: path, tools, history. Footer help reflects current focus.
 
 No history: show an empty state; history shortcuts are harmless. On a storage read failure, show an error and retain previously loaded rows where available. If an entry's command was removed, show it as unavailable even in narrow layouts and let the user copy its directory into the form, but never silently substitute another command.
 
-Key delivery is exercised in normal and locked modes. Zellij may intercept shortcuts in normal mode; use locked mode for full plugin input. The opt-in `examples/locked.kdl` is a test/example configuration, not a replacement for the user's global bindings. F1 opens scrollable help, including full command labels and configuration errors; F5 rebuilds the HOME index, reloads shared history, and resets the form while retaining command configuration. Ctrl+Q closes only the plugin pane.
+Key delivery is exercised in normal and locked modes. Zellij may intercept shortcuts in normal mode; use locked mode for full plugin input. The opt-in `examples/locked.kdl` is a test/example configuration, not a replacement for the user's global bindings. F1 opens scrollable help, including full command labels and configuration errors; F5 rebuilds the HOME index, reloads shared history, and resets the form to original cwd and Shell while retaining command configuration. Ctrl+Q closes only the plugin pane.
 
 ## 6. Configured commands
 
@@ -183,6 +183,7 @@ States: booting → permission check → ready → validating → launching → 
 - Freeze duplicate submission while validating/launching.
 - Use structured executable/arguments/cwd. Never synthesize `cd <path> && <command>` or inject typed text into another terminal.
 - Launch into the dashboard's own pane identity, even if the user switches tabs during asynchronous work.
+- Before replacement, name its originating stable tab ID `basename · configured label`, including history replay. Shell uses `Shell`; HOME uses its basename; root uses `/`. Read back the name before spawning. Never use a positional/current-tab rename. Known spawn rejection restores the previous name only if the current name still matches our write; the host offers no atomic compare-and-swap (see launch notes).
 - Known host rejection leaves the dashboard usable with the form intact and requires explicit retry. Successful replacement closes the dashboard permanently; it is not suppressed for later restoration.
 - Shell uses Zellij's default-shell lifecycle. Configured command panes close on process exit, including nonzero exits; Launchpad does not return. Preserve the explicit own-pane action and existing asynchronous rejection handling. Do not respawn commands or fall back into another program.
 - History records validated launch attempts **before** replacement, because successful
@@ -201,8 +202,9 @@ Only version-2 journal records are supported; IDs remain case-sensitive.
 Unsupported old-format cache is ignored, not migrated. See [configured command details](docs/configured-commands.md)
 for exact bounds, lexical parsing, UI overflow and pinned-host CLI limitations.
 Replay uses the current trusted
-launcher mapping, never executable data from history. All replay/copy-to-form
-launches use ordinary directory validation; deleted/out-of-HOME paths cannot launch.
+launcher mapping, never executable data from history. Replay/copy-to-form uses the same directory policy: HOME validation plus the
+exact invoking-cwd exception for that instance. An outside-HOME historical path
+is not a general capability to launch it from another cwd; deleted paths fail.
 
 `/cache/history.d/` contains immutable versioned operation records and the newest
 clear watermark. These coordinate concurrent panes/sessions without WASI flock,
@@ -227,7 +229,9 @@ On pinned 0.45.1, `/data` is per instance and `/cache` is shared by plugin URL.
 
 Rust WASM plugin sharing application state, editing, matching, command definitions,
 and rendering with a native simulation adapter. A persistent worker owns the HOME
-index and directory validation. There is no external runtime helper executable.
+index and ordinary directory validation. The main instance validates only the
+exact invoking cwd via a remount acknowledgement and directory-open check.
+There is no external runtime helper executable.
 
 Pinned Zellij host/SDK: **0.45.1**. Actual launch APIs:
 
@@ -236,7 +240,8 @@ Pinned Zellij host/SDK: **0.45.1**. Actual launch APIs:
 - Correlate asynchronous action rejection with the pending launch. Successful replacement normally destroys the plugin before it receives completion.
 
 The normal plugin requests `ReadSessionEnvironmentVariables`, `FullHdAccess`,
-`ChangeApplicationState`, `OpenTerminalsOrPlugins`, and `RunActionsAsUser`.
+`ChangeApplicationState`, `OpenTerminalsOrPlugins`, `RunActionsAsUser`, and
+`ReadApplicationState` (own-pane-to-stable-tab mapping and name readback).
 Read only HOME from the session environment. On this host, changing the `/host`
 mount requires FullHdAccess; a guarded self-reload makes the worker inherit HOME,
 then a worker handshake verifies the mapping. ChangeApplicationState supports
@@ -257,7 +262,7 @@ all of the user's new-pane behaviour.
 
 ## 10. Acceptance criteria
 
-- A ready dashboard has editable path focus, initial input `~`, and Shell selected. HOME/permission/bootstrap failures remain visible rather than falling back to another directory.
+- A ready dashboard has editable path focus, initial input at the original invoking cwd, and Shell selected. HOME/permission/bootstrap failures remain visible rather than falling back to another directory.
 - Shell appears first and uses Zellij's default shell rather than hard-coded bash. Other entries appear only from `commands`, in configured order with configured labels; absent/empty configuration gives Shell only.
 - Tests cover arbitrary command IDs, multiple variants of one executable, optional fields, whitespace/deduplication, malformed definitions, and unavailable history IDs. Invalid entries show errors without disabling Shell or valid entries.
 - Actual harmless fixture executables verify exact argument vectors (including quoted spaces and empty arguments), literal metacharacters without expansion, and selected cwd; tests do not run actual coding agents.
@@ -276,10 +281,9 @@ all of the user's new-pane behaviour.
 
 These are not implemented and are separate from the current acceptance criteria:
 
-- Starting at the invoking terminal's cwd, optionally with a configured starting directory. This does not imply invoking-cwd-relative path resolution.
+- A configurable starting-directory override (the invoking cwd is already the default).
 - Configurable search roots. HOME-only search remains the current deliberate scope.
-- Directory-symlink support, including cycle and escape policy. Currently all symlink paths are rejected.
-- Optional tab naming after launch.
+- General directory-symlink support, including cycle and escape policy. Only the exact invoking cwd is currently excepted; search never follows links.
 - A documented new-tab keybinding and default-new-tab layout recipe that preserve existing tab/status bars and user layouts.
 - macOS verification. No cross-platform test claim is made from Linux results.
 - A reproducible current-build p95 input-to-render benchmark against the earlier aspirational 50 ms target. Existing performance measurements are not a hard latency guarantee.

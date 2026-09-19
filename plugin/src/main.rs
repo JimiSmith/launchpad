@@ -1,23 +1,34 @@
 // SDK macro uses pre-2024 #[no_mangle], hence this thin package is edition 2021.
-#[cfg(target_family = "wasm")]
+#[cfg(any(target_family = "wasm", test))]
 mod wasm {
+    #[cfg(test)]
+    use self::tests::{change_host_folder, read_dir, send, set_timeout};
+    #[cfg(not(test))]
+    use launchpad_plugin::workers::Engine;
     use launchpad_plugin::{
-        workers::{Engine, Reply, Request},
+        workers::{Reply, Request},
         State,
     };
+    #[cfg(not(test))]
     use serde::{Deserialize, Serialize};
+    #[cfg(not(test))]
+    use std::fs::read_dir;
     use std::time::{Duration, Instant};
     use zellij_launchpad_prototype::app::{Action, App, Tool};
     use zellij_launchpad_prototype::remote::RemoteRequest;
     use zellij_tile::prelude::*;
+    #[cfg(not(test))]
     register_plugin!(Plugin);
+    #[cfg(not(test))]
     register_worker!(IndexWorker, index_worker, INDEX);
+    #[cfg(not(test))]
     #[derive(Default, Serialize, Deserialize)]
     struct IndexWorker {
         engine: Engine,
         #[cfg(feature = "worker-faults")]
         silenced: bool,
     }
+    #[cfg(not(test))]
     impl ZellijWorker<'_> for IndexWorker {
         fn on_message(&mut self, _name: String, payload: String) {
             #[cfg(feature = "worker-faults")]
@@ -32,7 +43,11 @@ mod wasm {
             if let Ok(request) = serde_json::from_str::<Request>(&payload) {
                 // Only Start needs the host handshake (a synchronous host call).
                 let cwd = if matches!(request, Request::Start { .. }) {
-                    get_plugin_ids().initial_cwd.to_string_lossy().into_owned()
+                    get_plugin_ids()
+                        .initial_cwd
+                        .to_str()
+                        .unwrap_or("")
+                        .to_owned()
                 } else {
                     String::new()
                 };
@@ -49,6 +64,7 @@ mod wasm {
             }
         }
     }
+    #[cfg(not(test))]
     fn send(request: Request) {
         post_message_to(PluginMessage::new_to_worker(
             "index",
@@ -56,6 +72,7 @@ mod wasm {
             &serde_json::to_string(&request).unwrap(),
         ));
     }
+    #[cfg(not(test))]
     pub fn initialize() {
         main();
     }
@@ -63,6 +80,7 @@ mod wasm {
     struct Plugin {
         state: State,
         initial_cwd: String,
+        original_cwd: Option<String>,
         home: Option<String>,
         epoch: u64,
         ready: bool,
@@ -70,6 +88,9 @@ mod wasm {
         pending: Option<Instant>,
         timer_pending: bool,
         remounting: bool,
+        // Host remounts have no request IDs. Keep the outstanding operation
+        // across App resets; its epoch decides whether the result is still live.
+        cwd_validation: Option<(u64, u64)>,
         failed: bool,
         simulate_launch: bool,
         launch_serial: u64,
@@ -77,12 +98,24 @@ mod wasm {
         history_attempt: Option<String>,
         history_rows: Vec<launchpad_plugin::history::Entry>,
         launch_context: Option<std::collections::BTreeMap<String, String>>,
+        renamed_tab: Option<(usize, String, String)>,
         work: Option<(u64, Instant)>,
         #[cfg(feature = "worker-faults")]
         silence_worker: bool,
     }
     impl Plugin {
         fn reject_launch(&mut self) {
+            if let Some((id, previous, written)) = self.renamed_tab.take() {
+                // Do not undo a later name observed from the user/another plugin.
+                // The host has no compare-and-swap rename: this check and write
+                // are separate screen instructions (documented concurrency limit).
+                if get_tab_info(id).is_some_and(|tab| tab.name == written) {
+                    rename_tab_with_id(id as u64, &previous);
+                    if !get_tab_info(id).is_some_and(|tab| tab.name == previous) {
+                        eprintln!("Launchpad: tab-name rollback could not be confirmed");
+                    }
+                }
+            }
             self.state.app.host_launch_rejected();
             if let Some(attempt) = self.history_attempt.take() {
                 let (token, _) = self.history_token();
@@ -185,12 +218,61 @@ mod wasm {
                 eprintln!("Launchpad: history not saved: {error}");
             }
         }
+        fn spawn_launch(&mut self, launch: zellij_launchpad_prototype::app::Launch) {
+            self.record_history(&launch);
+            // Target this plugin explicitly, never the last-focused pane.
+            // Close rather than suppress it: command exit cannot restore it.
+            match launch.tool {
+                Tool::Shell => {
+                    // Preserve Zellij's configured default shell and its cwd.
+                    if open_terminal_in_place_of_plugin(&launch.path, true).is_none() {
+                        self.reject_launch();
+                    }
+                }
+                tool => {
+                    let Some(definition) = self.state.app.commands.get(tool).cloned() else {
+                        self.reject_launch();
+                        return;
+                    };
+                    let Some(executable) = definition.executable else {
+                        self.reject_launch();
+                        return;
+                    };
+                    self.launch_serial += 1;
+                    let context = std::collections::BTreeMap::from([(
+                        "launchpad-launch".into(),
+                        self.launch_serial.to_string(),
+                    )]);
+                    self.launch_context = Some(context.clone());
+                    run_action(
+                        actions::Action::NewInPlacePane {
+                            command: Some(actions::RunCommandAction {
+                                command: executable.into(),
+                                args: definition.arguments,
+                                cwd: Some(launch.path.into()),
+                                hold_on_close: false,
+                                hold_on_start: false,
+                                ..Default::default()
+                            }),
+                            pane_name: None,
+                            near_current_pane: false,
+                            no_focus: false,
+                            pane_id_to_replace: Some(PaneId::Plugin(get_plugin_ids().plugin_id)),
+                            close_replaced_pane: true,
+                            tab_id: None,
+                        },
+                        context,
+                    );
+                }
+            }
+        }
         fn start(&mut self) {
             self.epoch += 1;
             self.ready = false;
             self.scanning = false;
             self.work = None;
             self.failed = false;
+
             self.pending = Some(Instant::now());
             self.state.app.search_status = "Verifying worker HOME mapping…".into();
             send(Request::Start {
@@ -217,7 +299,11 @@ mod wasm {
                     .get("test_silence_worker")
                     .is_some_and(|v| v == "true");
             }
-            self.initial_cwd = get_plugin_ids().initial_cwd.to_string_lossy().into_owned();
+            self.initial_cwd = get_plugin_ids()
+                .initial_cwd
+                .to_str()
+                .unwrap_or("")
+                .to_owned();
             subscribe(&[
                 EventType::Key,
                 EventType::Mouse,
@@ -229,6 +315,19 @@ mod wasm {
                 EventType::CustomMessage,
                 EventType::ActionComplete,
             ]);
+            // Capture before HOME remount; /data is instance-local across reload.
+            if !self.simulate_launch && configuration.get("demo").is_none_or(|v| v != "true") {
+                match launchpad_plugin::cwd::load(
+                    std::path::Path::new("/data"),
+                    &get_plugin_ids().initial_cwd,
+                ) {
+                    Ok(cwd) => self.original_cwd = Some(cwd),
+                    Err(error) => {
+                        self.fail(error);
+                        return;
+                    }
+                }
+            }
             if configuration.get("demo").is_some_and(|v| v == "true") {
                 self.state.app = App::demo();
             } else {
@@ -244,6 +343,7 @@ mod wasm {
                     permissions.extend([
                         PermissionType::OpenTerminalsOrPlugins,
                         PermissionType::RunActionsAsUser,
+                        PermissionType::ReadApplicationState,
                     ]);
                 }
                 request_permission(&permissions);
@@ -289,7 +389,37 @@ mod wasm {
                         self.fail("Cannot guard worker reload. Reopen the plugin.".into());
                     }
                 }
-                Event::FailedToChangeHostFolder(_) => {
+                Event::HostFolderChanged(path)
+                    if self.cwd_validation.is_some()
+                        && path.to_str() == self.original_cwd.as_deref() =>
+                {
+                    let (epoch, generation) = self.cwd_validation.take().unwrap();
+                    // Only this exact host-supplied directory is an exception to
+                    // HOME validation. No traversal or catalogue is added here.
+                    changed = if epoch == self.epoch {
+                        self.work = None;
+                        let result = read_dir("/host")
+                            .map(|_| self.original_cwd.clone().unwrap())
+                            .map_err(|e| format!("Invoking directory unavailable: {e}"));
+                        self.state.app.finish_remote_validation(generation, result)
+                    } else {
+                        false
+                    };
+                }
+                Event::FailedToChangeHostFolder(_) if self.cwd_validation.is_some() => {
+                    let (epoch, generation) = self.cwd_validation.take().unwrap();
+                    changed = if epoch == self.epoch {
+                        self.work = None;
+                        self.state.app.finish_remote_validation(
+                            generation,
+                            Err("Invoking directory unavailable; no fallback.".into()),
+                        )
+                    } else {
+                        false
+                    };
+                }
+                Event::FailedToChangeHostFolder(_) if self.remounting => {
+                    self.remounting = false;
                     self.fail("HOME filesystem unavailable. Reopen the plugin.".into())
                 }
                 Event::CustomMessage(name, payload) if name == "index-reply" && !self.failed => {
@@ -301,6 +431,9 @@ mod wasm {
                             self.ready = true;
                             self.scanning = true;
                             self.state.replace_app(App::from_remote(cwd.into()));
+                            if let Some(cwd) = &self.original_cwd {
+                                self.state.app.set_initial_cwd(cwd.clone());
+                            }
                             self.state.app.host_launch = !self.simulate_launch;
                             self.load_history();
                             #[cfg(feature = "worker-faults")]
@@ -374,6 +507,7 @@ mod wasm {
                     }
                 }
                 Event::HostFolderChanged(_)
+                | Event::FailedToChangeHostFolder(_)
                 | Event::PermissionRequestResult(_)
                 | Event::ActionComplete(..) => changed = false,
                 event => {
@@ -393,59 +527,68 @@ mod wasm {
                 self.mutate_history(mutation);
             }
             if let Some(launch) = self.state.app.take_host_launch() {
-                self.record_history(&launch);
-                // Target this plugin explicitly, never the last-focused pane.
-                // Close rather than suppress it: command exit cannot restore it.
-                match launch.tool {
-                    Tool::Shell => {
-                        // Preserve Zellij's configured default shell and its cwd.
-                        if open_terminal_in_place_of_plugin(&launch.path, true).is_none() {
-                            self.reject_launch();
-                        }
-                    }
-                    tool => {
-                        let Some(definition) = self.state.app.commands.get(tool).cloned() else {
-                            self.reject_launch();
-                            return true;
-                        };
-                        let Some(executable) = definition.executable else {
-                            self.reject_launch();
-                            return true;
-                        };
-                        self.launch_serial += 1;
-                        let context = std::collections::BTreeMap::from([(
-                            "launchpad-launch".into(),
-                            self.launch_serial.to_string(),
-                        )]);
-                        self.launch_context = Some(context.clone());
-                        run_action(
-                            actions::Action::NewInPlacePane {
-                                command: Some(actions::RunCommandAction {
-                                    command: executable.into(),
-                                    args: definition.arguments,
-                                    cwd: Some(launch.path.into()),
-                                    hold_on_close: false,
-                                    hold_on_start: false,
-                                    ..Default::default()
-                                }),
-                                pane_name: None,
-                                near_current_pane: false,
-                                no_focus: false,
-                                pane_id_to_replace: Some(PaneId::Plugin(
-                                    get_plugin_ids().plugin_id,
-                                )),
-                                close_replaced_pane: true,
-                                tab_id: None,
-                            },
-                            context,
-                        );
-                    }
+                let plugin_id = get_plugin_ids().plugin_id;
+                // Session snapshots can lag a newly opened/replaced plugin.
+                // A synchronous focus tuple is safe ONLY when its pane ID is us.
+                let tab_id = get_focused_pane_info()
+                    .ok()
+                    .and_then(|(id, pane)| (pane == PaneId::Plugin(plugin_id)).then_some(id))
+                    .or_else(|| {
+                        get_session_list().ok().and_then(|snapshot| {
+                            snapshot
+                                .live_sessions
+                                .into_iter()
+                                .find(|s| s.is_current_session)
+                                .and_then(|s| launchpad_plugin::launch_tab(&s, plugin_id))
+                                .map(|tab| tab.tab_id)
+                        })
+                    });
+                let tab = tab_id.and_then(get_tab_info);
+                let Some(tab) = tab else {
+                    self.state.app.host_launch_rejected();
+                    self.state.app.message =
+                        Some("Originating tab unavailable; no launch. Retry.".into());
+                    return true;
+                };
+                let name = launchpad_plugin::tab_name(
+                    &launch.path,
+                    &self.state.app.tool_label(launch.tool),
+                );
+                self.renamed_tab = Some((tab.tab_id, tab.name, name.clone()));
+                // The direct stable-ID command and synchronous read go to the
+                // same screen queue. run_action's CLI-only ID variant is NOT
+                // serializable in SDK 0.45.1.
+                rename_tab_with_id(tab.tab_id as u64, &name);
+                if get_tab_info(tab.tab_id).is_some_and(|t| t.name == name) {
+                    self.spawn_launch(launch);
+                } else {
+                    self.reject_launch();
                 }
                 return true;
             }
-            if self.ready && !self.failed && self.work.is_none() && !self.state.app.quit {
+            // Drain the anonymous host acknowledgement before taking any new
+            // validation, even after F5 recreated App with reused generations.
+            if self.ready
+                && !self.failed
+                && self.work.is_none()
+                && self.cwd_validation.is_none()
+                && !self.state.app.quit
+            {
                 if let Some(request) = self.state.app.take_remote_request() {
                     self.work = Some((request.generation(), Instant::now()));
+                    if let RemoteRequest::Validate { generation, raw } = &request {
+                        if let Some(cwd) = &self.original_cwd {
+                            if raw == cwd || *raw == self.state.app.path_label(cwd) {
+                                self.cwd_validation = Some((self.epoch, *generation));
+                                change_host_folder(cwd.into());
+                                if !self.timer_pending {
+                                    set_timeout(1.0);
+                                    self.timer_pending = true;
+                                }
+                                return true;
+                            }
+                        }
+                    }
                     send(match request {
                         RemoteRequest::Query { generation, text } => Request::Query {
                             epoch: self.epoch,
@@ -477,6 +620,8 @@ mod wasm {
             print!("{}", self.state.render_frame(rows, cols));
         }
     }
+    #[cfg(test)]
+    mod tests;
 }
 #[cfg(target_family = "wasm")]
 fn main() {

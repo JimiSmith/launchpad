@@ -8,7 +8,8 @@ through `get_session_environment_variables()` and retains only `HOME`. Changing
 HOME in a later shell does not change the session's HOME. Missing/invalid HOME is
 an error, never a fallback to `/host`, process CWD, `/`, or fixture directories.
 
-Initial input is `~` and history is empty. Normal plugin launches now
+Native/simulation input starts at `~`. Production starts at the original invoking
+cwd and loads shared history. Normal plugin launches
 [replace the originating pane](real-launch.md); native/demo launches remain
 simulated. Only completed simulation actions add in-memory history. F5 clears
 that history/form and rebuilds the index. Search uses no persistent history, PATH
@@ -26,8 +27,10 @@ Pinned SDK/verified host: Zellij 0.45.1. Request:
 The current website describes `ChangeApplicationState` for `change_host_folder`,
 but the pinned source (`zellij-server/src/plugins/zellij_exports.rs`, permission
 match) and live host reject that combination with `FullHdAccess` denied. The
-filesystem permission is broad; this plugin's implementation only reads HOME.
-Normal launches additionally request `RunActionsAsUser` and `OpenTerminalsOrPlugins`;
+filesystem permission is broad; search traverses only HOME. The main instance
+additionally opens the exact invoking cwd for validation, without traversing it.
+Normal launches additionally request `RunActionsAsUser`, `OpenTerminalsOrPlugins`,
+and `ReadApplicationState` for stable-tab naming;
 the explicit `simulate_launch "true"` search harness needs only the three above.
 
 After permission grant, remount `/host` to HOME using `change_host_folder`, then
@@ -38,6 +41,17 @@ The default `/host` is an invoking-terminal CWD, not necessarily HOME. Host path
 are kept separate from WASI paths; `/host` is never presented as a user path.
 Denial, missing HOME, remount failure, and root read failure stay visible without
 retry loops. Reopen after fixing the environment/permissions.
+
+The exact original cwd is preserved in instance-local `/data/original-cwd` before
+HOME remount/reload. For a submission matching that identity (or its HOME-short
+label), remount only the main instance to it and wait for acknowledgement, then
+open `/host` as a directory. Workers remain HOME-mapped. This supports hidden,
+ignored, outside-HOME and symlink invoking directories without adding search
+roots or cwd-relative navigation. Other outside/symlink paths remain rejected.
+The host serializes paths lossily, so an invoking path containing U+FFFD is
+rejected, including a legitimate U+FFFD spelling, rather than launching a UTF-8
+replacement twin. Invalid UTF-8, control characters and paths over 4096 bytes
+also fail visibly. Filesystem mutation between validation and spawn is not atomic.
 
 ## Policy and bounds
 
@@ -56,7 +70,8 @@ retry loops. Reopen after fixing the environment/permissions.
   these limits are not exact syscall or wall-clock budgets. Native polling is cooperative; the plugin keeps traversal, Frizbee and
   validation in a persistent WASM worker. Only capped results reach its UI;
   epochs, query generations and revisions reject stale responses. No filesystem
-  IO or matching runs on the plugin's input/render path.
+  IO or matching runs during rendering. Exact invoking-cwd validation performs
+  one main-instance directory-open check after the host remount acknowledgement.
   The worker schedules its next slice immediately, keeping at most one queued
   continuation so queries/validation/refresh can interleave. Progress is emitted
   at most every 100 ms, with immediate final status. UI timers only check the
@@ -64,7 +79,7 @@ retry loops. Reopen after fixing the environment/permissions.
 - Stop at 20,000 directory candidates or 200,000 entries, with maximum depth 64.
   Also stop at a conservative 6 MiB retained-path/rule budget or a path over
   4096 bytes. Typed/pasted input and fuzzy queries are capped at 100 Unicode
-  scalar values; completed paths are preserved without truncation.
+  scalar values; invoking/completed/history paths are preserved without truncation.
   Limits are visible; ignored entries are not counted or retained. This is a partial index when capped;
   an explicit valid path can still be entered without being indexed.
 - Keep at most 100 ranked suggestions, ordered by Frizbee score and path tie-break.
@@ -76,7 +91,7 @@ retry loops. Reopen after fixing the environment/permissions.
   acceptance/submission still check every literal path component. The old repeated
   ancestor revalidation on each scan descent is removed. Concurrent hostile
   filesystem replacement is not an atomic-security guarantee; there is no real
-  process launch at this stage.
+  atomic guarantee from validation through launch.
 - Skip invalid UTF-8 and control-character directory names rather than display
   ambiguous/unsafe names. Spaces, Unicode, quotes and shell-looking text are literal.
 - `~`, `~/…`, absolute paths under HOME and HOME-relative paths work. `.`/`..`

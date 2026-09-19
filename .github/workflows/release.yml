@@ -1,0 +1,65 @@
+name: Release WASM
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust and WASI target
+        run: |
+          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup target add --toolchain "$toolchain" wasm32-wasip1
+
+      - name: Build release plugin
+        run: cargo build --locked --release -p launchpad-plugin --bin launchpad-plugin --target wasm32-wasip1
+
+      - name: Package WASM and checksum
+        run: |
+          mkdir -p dist
+          cp target/wasm32-wasip1/release/launchpad-plugin.wasm dist/launchpad-plugin.wasm
+          cd dist
+          sha256sum launchpad-plugin.wasm > launchpad-plugin.wasm.sha256
+          sha256sum --check launchpad-plugin.wasm.sha256
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          # Keep a new release draft until both assets have uploaded. Reruns can
+          # finish a partial draft or replace the same tag's existing assets.
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "$RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" \
+            dist/launchpad-plugin.wasm dist/launchpad-plugin.wasm.sha256 --clobber
+          prerelease=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            prerelease=true
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease"

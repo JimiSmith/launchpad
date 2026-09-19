@@ -45,6 +45,14 @@ run configured-invalid "$PYTHON" tools/verify_launch.py --commands-case invalid 
 run configured-many "$PYTHON" tools/verify_launch.py --commands-case many --tool Claude
 run configured-review-ui "$PYTHON" tools/verify_launch.py --commands-case review-ui --tool Claude
 run history "$PYTHON" tools/verify_history.py
+for cwd in ordinary home outside hidden ignored symlink long deleted ambiguous invalid-bytes; do
+    run "cwd-$cwd" "$PYTHON" tools/verify_launch.py --initial-cwd --cwd-case "$cwd" --refresh
+done
+run cwd-indexing "$PYTHON" tools/verify_launch.py --initial-cwd --cwd-case hidden --during-index
+run cwd-reset-remount "$PYTHON" tools/verify_launch.py --initial-cwd --reset-remount
+run cwd-reset-deleted "$PYTHON" tools/verify_launch.py --initial-cwd --cwd-case deleted --reset-remount
+run tab-naming-race "$PYTHON" tools/verify_launch.py --commands-case agreed --tool Claude --layout tiled --race --tab-race
+run tab-shell-race "$PYTHON" tools/verify_launch.py --initial-cwd --layout tiled --race --tab-race
 run live-1 "$PYTHON" tools/verify_zellij.py
 run live-2 "$PYTHON" tools/verify_zellij.py
 OUT=$("$PYTHON" -c 'import json;print(json.load(open("target/plugin-verification/live-2.log"))["evidence"])')

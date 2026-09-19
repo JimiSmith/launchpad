@@ -88,6 +88,7 @@ pub struct App {
     history_request: Option<HistoryMutation>,
     host_launch_pending: bool,
     show_suggestions: bool,
+    initial_cwd: Option<String>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollTarget {
@@ -132,10 +133,18 @@ impl Default for App {
             history_request: None,
             host_launch_pending: false,
             show_suggestions: true,
+            initial_cwd: None,
         }
     }
 }
 impl App {
+    /// Host-supplied identity, not typed input: never apply the insertion cap.
+    pub fn set_initial_cwd(&mut self, cwd: String) {
+        self.editor.set(&self.path_label(&cwd));
+        self.initial_cwd = Some(cwd);
+        self.highlighted = None;
+        self.tool = Tool::Shell;
+    }
     pub fn configure(&mut self, configuration: &std::collections::BTreeMap<String, String>) {
         self.commands = crate::commands::Commands::parse(configuration);
     }
@@ -448,6 +457,7 @@ impl App {
         }
         if action == Action::Reset {
             let commands = self.commands.clone();
+            let initial_cwd = self.initial_cwd.clone();
             let compact = self.compact;
             let host_launch = self.host_launch;
             let remote = self.remote.take();
@@ -465,6 +475,9 @@ impl App {
                 self.search_status = status;
             }
             self.commands = commands;
+            if let Some(cwd) = initial_cwd {
+                self.set_initial_cwd(cwd);
+            }
             self.compact = compact;
             self.host_launch = host_launch;
             self.remote = remote;

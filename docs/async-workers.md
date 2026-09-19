@@ -26,7 +26,11 @@ a failed remount/reload from looping. Mapping disagreement, permission denial,
 and a 15-second missing-response watchdog have visible failures, not a scan of
 the wrong directory. Full disk access is a broad **host permission**, not a
 HOME-only OS sandbox. Change application state is an additional permission for
-self-reload. Plugin-private `/data` is used only for the reload marker, not history.
+self-reload. Plugin-private `/data` holds the reload marker and original invoking
+cwd identity, not history. Production captures that identity before remount and
+restores it to the input after reload/F5. Submission of exactly that path can
+remount the main instance again for validation; the worker stays HOME-mapped.
+See [launch details](real-launch.md) for the bounded invoking-cwd exception.
 
 Source checked against upstream tag v0.45.1, commit
 `efd8fd5a89a20c07a111d248ad7fce53848d2c18`:
@@ -58,7 +62,7 @@ not the current UI implementation.
 ## Stage 2: matching and validation off the UI
 
 `plugin/src/workers.rs::Engine` owns the only populated catalogue and runs
-Frizbee and directory revalidation. Indexing, matching and validation share one
+Frizbee and ordinary HOME directory revalidation. Indexing, matching and HOME validation share one
 persistent worker. This deliberately avoids duplicating the catalogue or sending
 large index deltas between sibling instances under the host's memory ceiling.
 The native adapter retains its cooperative synchronous backend.

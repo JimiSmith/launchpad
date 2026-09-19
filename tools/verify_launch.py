@@ -33,14 +33,21 @@ parser.add_argument('--layout', choices=['only', 'tiled', 'floating'], default='
 parser.add_argument('--deny', action='store_true')
 parser.add_argument('--missing', action='store_true')
 parser.add_argument('--race', action='store_true')
+parser.add_argument('--tab-race', action='store_true', help='Reorder tabs and launch while a different tab has keyboard focus')
+parser.add_argument('--during-index', action='store_true')
 parser.add_argument('--different-cwd', action='store_true')
 parser.add_argument('--commands-case', choices=['fixtures', 'shell-only', 'agreed', 'literals', 'invalid', 'many', 'review-ui'], default='fixtures')
 parser.add_argument('--refresh', action='store_true')
+parser.add_argument('--initial-cwd', action='store_true', help='One Enter from the untouched invoking directory')
+parser.add_argument('--reset-remount', action='store_true', help='Enter then F5 in one input batch; verify cancelled remount and explicit retry')
+parser.add_argument('--cwd-case', choices=['ordinary', 'home', 'outside', 'hidden', 'ignored', 'symlink', 'long', 'deleted', 'ambiguous', 'invalid-bytes'], default='ordinary')
 parser.add_argument('--startup-redraw', action='store_true', help='One recorded viewport redraw before the unchanged permission assertion')
 parser.add_argument('--exit-code', type=int, choices=[0, 17], default=0)
 args = parser.parse_args()
 if args.race and args.layout == 'only': parser.error('--race requires a neighbor')
 if args.missing and args.tool == 'Shell': parser.error('--missing requires an agent command')
+if args.reset_remount and (not args.initial_cwd or args.tool != 'Shell' or args.layout != 'only' or args.during_index or args.cwd_case not in ['ordinary', 'deleted']):
+    parser.error('--reset-remount requires initial-cwd, Shell, only layout, ordinary/deleted cwd and settled indexing')
 OUT = ROOT / 'target/real-launch' / ('live-' + uuid.uuid4().hex[:8])
 OUT.mkdir(parents=True)
 NAME = OUT.name[-8:]
@@ -49,6 +56,34 @@ for d in ['home', 'bin', 'cache', 'config', 'data', 'runtime', 'sock', 'tmp']:
 home = OUT/'home'
 cwd = home/"space 修理 it's literal; $HOME"
 cwd.mkdir()
+if args.cwd_case != 'ordinary':
+    assert args.initial_cwd
+    if args.cwd_case == 'home': cwd = home
+    elif args.cwd_case == 'outside': cwd = OUT/'outside'
+    elif args.cwd_case == 'hidden': cwd = home/'.hidden'
+    elif args.cwd_case == 'ignored':
+        cwd = home/'ignored'
+        (home/'.ignore').write_text('ignored/\n')
+    elif args.cwd_case == 'symlink':
+        target = OUT/'symlink-target'
+        target.mkdir()
+        cwd = home/'symlink'
+        cwd.symlink_to(target, target_is_directory=True)
+    elif args.cwd_case == 'long': cwd = home/('修理 é; $HOME '+ 'x'*140)
+    elif args.cwd_case == 'ambiguous': cwd = home/'replacement-�'
+    elif args.cwd_case == 'invalid-bytes':
+        cwd = Path(os.fsdecode(os.fsencode(home)+b'/invalid-\xff'))
+        (home/'invalid-�').mkdir()  # existing lossy twin must NEVER be launched
+    else: cwd = home/'deleted'
+    cwd.mkdir(exist_ok=True)
+expected_cwd = str(cwd.resolve())
+expected_input = ('~/' + str(cwd.relative_to(home))) if cwd.is_relative_to(home) else str(cwd)
+if cwd == home: expected_input = '~'
+if args.cwd_case in ['outside', 'hidden', 'ignored', 'symlink']:
+    (cwd/'not-in-home-index').mkdir()
+if args.during_index:
+    assert args.initial_cwd and not args.refresh
+    for i in range(15000): (home/f'index-{i:05}').mkdir()
 log = OUT/'executions.jsonl'
 exit_log = OUT/'exits.jsonl'
 fixture = f'''#!{PYTHON}
@@ -126,6 +161,10 @@ if args.commands_case == 'review-ui':
 config_kdl = '; '.join(k+' '+json.dumps(v, ensure_ascii=False) for k,v in configuration.items())
 if config_kdl: config_kdl += ';'
 plugin = f'pane name="launchpad" focus=true {{ plugin location="file:{WASM}" {{ {config_kdl} }}; }}'
+if args.initial_cwd and args.cwd_case != 'invalid-bytes':
+    # Plugin cwd is a plugin-block property, not a pane property. Supplying it
+    # also exercises a logical symlink path rather than Python's physical cwd.
+    plugin = plugin.replace('plugin location=', 'plugin cwd='+json.dumps(str(cwd), ensure_ascii=False)+' location=')
 neighbor = f'pane name="neighbor" command="{OUT}/bin/neighbor"'
 if args.layout == 'only':
     layout = f'layout {{ {plugin}; }}'
@@ -135,6 +174,10 @@ else:
     plugin = plugin.replace('focus=true', 'focus=true width=120 height=30')
     layout = f'layout {{ tab {{ {neighbor}; floating_panes {{ {plugin}; }}; }}; }}'
 (OUT/'layout.kdl').write_text(layout)
+if args.tab_race:
+    assert args.race and args.layout == 'tiled'
+    layout = f'layout {{ tab name="other" {{ {neighbor}; }}; tab name="origin" focus=true {{ {plugin}; }}; }}'
+    (OUT/'layout.kdl').write_text(layout)
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH',36,160,0,0))
 def setup():
@@ -142,7 +185,7 @@ def setup():
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 child = subprocess.Popen([ZELLIJ, '--config', str(config), '--layout-string', layout],
                          stdin=slave, stdout=slave, stderr=slave, env=env,
-                         cwd=OUT/'tmp' if args.different_cwd else home, preexec_fn=setup)
+                         cwd=cwd if args.initial_cwd else (OUT/'tmp' if args.different_cwd else home), preexec_fn=setup)
 class Screen(pyte.Screen):
     def report_device_status(self, mode, **kwargs):
         if not kwargs.get('private'): super().report_device_status(mode)
@@ -219,6 +262,15 @@ try:
             events.append({'resize':[160,rows]})
             pump(.3)
         snapshot('startup-after-redraw')
+    if args.cwd_case in ['ambiguous', 'invalid-bytes']:
+        expect('unsupported; no fallback', 'ambiguous invoking identity is refused visibly')
+        before=panes('unsupported-before')
+        send('\r\x1b[15~\r')
+        check(panes('unsupported-after') == before, 'unsupported cwd never replaces or renames')
+        check(records() == [], 'unsupported cwd and its existing UTF-8 twin execute nothing')
+        check(hashlib.sha256(WASM.read_bytes()).hexdigest()==ARTIFACT_HASH, 'loaded artifact unchanged')
+        success=True
+        raise SystemExit(0)
     expect('permission','permission prompt')
     expect('Execute actions as the user', 'host asks for run-action permission')
     expect('Start new terminals and plugins', 'host asks for terminal opening')
@@ -234,7 +286,7 @@ try:
         check(all(r['exe']=='neighbor' for r in records()),'denial executes no launch')
         check('Terminal placeholder' not in display(),'denial never simulates success')
     else:
-        expect('~/space' if args.commands_case == 'invalid' else 'HOME indexed','real worker ready')
+        expect('Indexing HOME' if args.during_index else ('~/space' if args.commands_case == 'invalid' else 'HOME indexed'),'real worker ready')
         if args.commands_case == 'shell-only':
             check('[ Shell ]' in display() and all(n not in display() for n in ['Claude','Codex','Hermes','Copilot']), 'unconfigured production is Shell-only')
         elif args.commands_case not in ['many', 'review-ui']:
@@ -341,16 +393,38 @@ try:
             send('\x1b[15~')
             expect('~/space' if args.commands_case == 'invalid' else 'HOME indexed','configured F5 refresh ready')
             expect(labels[args.tool], 'configured label survives F5 app recreation')
-        send('\x15')
-        send("\x1b[200~~/space 修理 it's literal; $HOME\x1b[201~")
-        send('\x14')
+        if args.initial_cwd:
+            if args.cwd_case in ['outside', 'hidden', 'ignored', 'symlink'] and not args.during_index:
+                check('HOME indexed · 1 dirs' in display(), 'invoking exception and its descendants do not widen HOME index')
+            path_row = next(line for line in screen.display if '│ › ' in line)
+            import unicodedata
+            expected_tail = unicodedata.normalize('NFC', expected_input[-70:])
+            check(expected_tail in path_row, 'untouched input is invoking cwd after remount/reset')
+            check('[ Shell ]' in display(), 'initial tool is Shell')
+        else:
+            send('\x15')
+            send("\x1b[200~~/space 修理 it's literal; $HOME\x1b[201~")
+            send('\x14')
         for _ in range(64 if args.commands_case == 'many' else order.index(args.tool)):
             send('\x1b[C')
         before=panes('panes-before')
         plugin_before=next(p for p in before if p.get('plugin_url') == 'file:'+str(WASM))
         snapshot('01-before')
+        if args.during_index:
+            check('Indexing HOME' in display(), 'first Enter is sent while indexing is in progress')
+        if args.cwd_case == 'deleted':
+            cwd.rmdir()
         if args.race:
             neighbor_before=next(p for p in before if p.get('title') == 'neighbor')
+            if args.tab_race:
+                cli('action','move-tab','--tab-id',str(plugin_before['tab_id']),'left')
+                moved=panes('panes-reordered')
+                moved_plugin=next(p for p in moved if p['is_plugin'] and p['id']==plugin_before['id'])
+                check(moved_plugin['tab_id']==plugin_before['tab_id'] and moved_plugin['tab_position']!=plugin_before['tab_position'],
+                      'tab reordered without changing originating stable ID')
+                before=moved
+                plugin_before=moved_plugin
+                neighbor_before=next(p for p in before if p.get('title')=='neighbor')
             cli('action','focus-pane-id', 'terminal_'+str(neighbor_before['id']))
             focused=panes('panes-focused-neighbor')
             check(next(p for p in focused if not p['is_plugin'] and p['id']==neighbor_before['id'])['is_focused'],
@@ -361,11 +435,30 @@ try:
             expect('FIXTURE_INPUT neighbor-focus-proof', 'neighbor receives actual keyboard input', timeout=5)
             cli('action','send-keys','--pane-id','plugin_'+str(plugin_before['id']),'Enter')
         else:
+            if args.reset_remount:
+                send('\r\x1b[15~')
+                pump(2)
+                snapshot('reset-after-pending-remount')
+                check('HOME filesystem unavailable' not in display(), 'cancelled cwd failure is not a HOME bootstrap failure')
+                expect('HOME indexed', 'F5 worker recovers after cancelled remount', timeout=8)
+                check(records() == [], 'reset cancels old launch without auto-retry')
+                check(panes('panes-after-reset') == before, 'reset and stale acknowledgement preserve plugin and tab name')
+                check(expected_input in display(), 'reset retains invoking cwd even when it was deleted')
+                check('[ Shell ]' in display(), 'reset retains Shell default')
             send('\r')
         expected=expected_exe
+        if args.cwd_case == 'deleted':
+            expect('Invoking directory unavailable', 'deleted invoking cwd fails visibly without fallback', timeout=8)
+            check(records() == [], 'deleted invoking cwd starts nothing')
+            check(panes('panes-deleted') == before, 'deleted invoking cwd retains tab name and plugin')
+            snapshot('deleted-error')
+            cwd.mkdir()
+            send('\r')
         if args.missing:
             expect('did not accept', 'asynchronous spawn failure is visible on original dashboard', timeout=8)
             missing=panes('panes-missing')
+            check(next(p for p in missing if p['is_plugin'] and p['id']==plugin_before['id'])['tab_name'] == plugin_before['tab_name'],
+                  'known spawn rejection restores original tab name')
             check({(p['is_plugin'],p['id']) for p in missing} ==
                   {(p['is_plugin'],p['id']) for p in before},
                   'missing executable leaves original plugin and neighbors, no held error pane')
@@ -388,6 +481,12 @@ try:
         check(len(before)==len(after),'pane count unchanged')
         old_ids={(p['is_plugin'],p['id']) for p in before}
         replacement=next(p for p in after if (p['is_plugin'],p['id']) not in old_ids)
+        label = configuration.get('label_'+args.tool.lower(), args.tool)
+        if args.commands_case == 'literals': label = configuration['label_Variant_2.worktree']
+        if args.commands_case == 'many': label = configuration['label_variant63']
+        if args.commands_case == 'review-ui': label = configuration['label_'+'i'*64]
+        check(replacement['tab_name'] == cwd.name+' · '+label,
+              'originating stable tab has basename and configured label')
         check(replacement['terminal_command']==(str(OUT/'bin/default-shell') if args.tool=='Shell' else ' '.join([expected, *expected_argv])),
               'host command readback matches selected launch mapping')
         geometry=['pane_x','pane_y','pane_rows','pane_columns','is_floating','tab_id','tab_position']
@@ -396,15 +495,16 @@ try:
             if not old['is_plugin']:
                 new=next(p for p in after if not p['is_plugin'] and p['id']==old['id'])
                 stable=['id','terminal_command','pane_command','pane_cwd',*geometry]
+                if args.tab_race: stable.append('tab_name')
                 check(all(new.get(k)==old.get(k) for k in stable),'neighbor identity, command, cwd and geometry unchanged')
         check('Terminal placeholder' not in display(),'real request never renders a fake terminal')
         launched=[r for r in records() if r['exe']==expected]
         check(len(launched)==1,'exactly one OS launch')
         check(launched[0]['argv']==expected_argv,'exact configured literal argv including empty arguments')
         check(not (cwd/'NO_EXPANSION').exists(),'no command substitution side effect')
-        check(launched[0]['cwd']==str(cwd),'literal Unicode and metacharacter cwd')
-        check(replacement['pane_cwd']==str(cwd),'host readback confirms literal cwd')
-        if not replacement['is_focused'] or (args.layout=='floating' and args.race):
+        check(launched[0]['cwd']==expected_cwd,'literal Unicode and metacharacter cwd')
+        check(replacement['pane_cwd']==expected_cwd,'host readback confirms literal cwd')
+        if args.tab_race or not replacement['is_focused'] or (args.layout=='floating' and args.race):
             cli('action','focus-pane-id','terminal_'+str(replacement['id']))
         expect('FIXTURE_READY '+expected, 'replacement renders actual fixture output', timeout=5)
         send('hello\r')
@@ -437,6 +537,10 @@ try:
                   'after exit only original neighbors remain')
             for old in neighbors:
                 new=next(p for p in exited if (p['is_plugin'],p['id'])==(old['is_plugin'],old['id']))
+                if args.tab_race and old['is_suppressed'] and old.get('plugin_url')=='zellij:link':
+                    check(new['plugin_url']=='zellij:link' and new['is_suppressed'],
+                          'host relocates its own suppressed link plugin when origin tab closes')
+                    continue
                 check(all(new.get(k)==old.get(k) for k in ['terminal_command','pane_command','pane_cwd','tab_id','is_floating']),
                       'neighbor command, cwd, tab and layout type survive exit')
             pump(.5)

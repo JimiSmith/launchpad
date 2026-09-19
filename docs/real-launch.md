@@ -25,11 +25,64 @@ shows a generic rejection; fix PATH/install the command and explicitly resubmit.
 The plugin does not claim the command successfully executed merely because
 Zellij accepted the replacement.
 
+## Invoking cwd and tab naming
+
+Production captures `get_plugin_ids().initial_cwd` before HOME remount and stores
+it in instance-local `/data/original-cwd`. HOME bootstrap reload and F5 retain it;
+Shell starts selected, with no highlighted suggestion. One Enter validates and
+replaces the dashboard even while HOME is still indexing. Longer-than-100-scalar
+cwd identities are never truncated. Native/demo/simulation defaults are unchanged.
+
+Only the exact original cwd (including its HOME-short label) can bypass ordinary
+HOME validation. On submission the main instance remounts to that path, waits for
+`HostFolderChanged`, and opens `/host` as a directory. The worker remains mounted
+to HOME and never scans this exception. Hidden/ignored, outside-HOME and symlink
+invoking cwd work; an unavailable/deleted cwd stays visible without fallback.
+F5 cancels the validation result but retains the outstanding host remount until
+its acknowledgement is consumed. Host remounts have no request IDs, so new
+validation waits for that acknowledgement; a stale success cannot launch an old
+target or validate the new form. A late invoking-cwd failure is not a HOME
+bootstrap failure. Resubmitting a still-deleted cwd gives a recoverable directory
+error; restoring it and explicitly resubmitting can launch normally.
+This is not general outside-root or relative-to-cwd navigation. The original
+host path is passed literally to the shell/command, without a helper or wrapper.
+Host path serialization is lossy in 0.45.1: U+FFFD invoking names are conservatively
+rejected (even legitimate ones), as are invalid UTF-8, controls and overlong paths.
+
+Before replacement the tab name is `basename · configured label`, for example
+`notes · Shell` or `my-app · Claude in Worktree`. Root uses `/`; HOME uses its
+basename. History replay resolves the current label. Naming uses the stable tab
+ID, never its mutable position or an unrelated focused tab. A synchronous
+`get_focused_pane_info` tuple is accepted only when its pane ID equals our plugin;
+otherwise one coherent session snapshot maps the plugin ID through pane position
+to stable tab ID. A missing mapping fails visibly instead of guessing. Session
+snapshots can lag new background panes or pane moves; no atomic pane-move/naming
+transaction is claimed.
+
+Use the direct `rename_tab_with_id` command, then synchronous `get_tab_info`
+readback before spawn. The two requests use the same host screen queue. **Do not
+use `run_action(Action::RenameTabById)`**: SDK 0.45.1 calls it CLI-only and panics
+on serialization, despite exposing the enum variant. Positional `rename_tab` is
+also unsuitable when tabs reorder.
+
+Known spawn rejection reads the current name and restores the saved previous
+name only when it still equals this attempt's write, then reads back the result.
+A newer name already visible at that check is preserved. Host rename has **no
+compare-and-swap**: a manual rename arriving between the check and restore can
+still race; an atomic rollback guarantee needs a host API change. Successful
+replacement destroys Launchpad, so subsequent process failure cannot undo naming.
+There is likewise no atomic filesystem validation/spawn guarantee.
+
+Live cwd/name evidence and TDD failures are summarized in
+`target/cwd-tab-naming/REPORT.md`; the reset/remount follow-up and rebuilt artifact
+hash are in `target/cwd-tab-naming/reset-fix/REPORT.md`.
+
 ## Permissions and failure
 
 The startup request bundles the existing `ReadSessionEnvironmentVariables`,
 `FullHdAccess`, and `ChangeApplicationState` permissions with
-`OpenTerminalsOrPlugins` (Shell) and `RunActionsAsUser` (agents). The latter is
+`OpenTerminalsOrPlugins` (Shell), `RunActionsAsUser` (agents), and
+`ReadApplicationState` (own-pane/tab mapping and name readback). RunActionsAsUser is
 shown as **Execute actions as the user**, is broader than `RunCommands`, and is
 required by `run_action` even for a command-launch action. Denial retains the
 dashboard with a visible error and starts nothing. The bundle must be granted
@@ -55,7 +108,8 @@ boundary is logged by Zellij and does not itself deliver `ActionComplete`.
 Directory failures retain the existing form and never reach the launch API.
 Shared history and its failure/consistency contract are described in [history.md](history.md).
 
-The existing HOME directory/symlink policy, ignore rules and input limits remain.
+The ordinary HOME directory/symlink policy, ignore rules and insertion limits
+remain, with only the exact invoking-cwd exception described above.
 Filesystem validation and OS spawn are separate operations: this does not promise
 an atomic security boundary against concurrent directory/symlink replacement.
 

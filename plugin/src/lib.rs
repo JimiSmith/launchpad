@@ -1,6 +1,32 @@
 //! Zellij 0.45.1 event adapter; UI and fixtures remain in the shared crate.
+pub mod cwd;
 pub mod history;
 pub mod workers;
+/// Resolve position-keyed panes and stable-ID tabs from ONE coherent snapshot.
+pub fn launch_tab(
+    session: &zellij_tile::prelude::SessionInfo,
+    plugin_id: u32,
+) -> Option<zellij_tile::prelude::TabInfo> {
+    let position = session.panes.panes.iter().find_map(|(position, panes)| {
+        panes
+            .iter()
+            .any(|p| p.is_plugin && p.id == plugin_id)
+            .then_some(*position)
+    })?;
+    session
+        .tabs
+        .iter()
+        .find(|tab| tab.position == position)
+        .cloned()
+}
+
+pub fn tab_name(path: &str, label: &str) -> String {
+    let basename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("/");
+    format!("{basename} · {label}")
+}
 use zellij_launchpad_prototype::app::{Action, Focus};
 use zellij_tile::prelude::{BareKey, KeyModifier, KeyWithModifier};
 
