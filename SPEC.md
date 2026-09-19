@@ -1,15 +1,14 @@
-# Zellij Launchpad — draft product specification
+# Zellij Launchpad — product specification
 
-Status: draft target product specification, not all implemented. HOME-only search
-and real own-pane launches plus shared persistent history are implemented.
-Configurable commands are implemented from Zellij plugin configuration; they replace
-the fixed launcher list and earlier installed-tool discovery proposal. No executable
-availability checks are required. Native/demo adapters still simulate launches
-and do not access persistent history. History's implemented contract supersedes
-older event-log proposals below: see [persistence details](docs/history.md).
-Current scope and deviations: [home-search notes](docs/home-search.md) and
-[real launch behavior](docs/real-launch.md).
-Working name, not checked for uniqueness.
+Sections 2–10 describe the current product contract. Deferred features and
+verification gaps are listed separately in section 11; they are not claims of
+implemented behaviour. The production plugin provides HOME-only fuzzy directory
+search, configured commands, own-pane launches, and shared recent history.
+Native/demo adapters simulate launches and do not access persistent history.
+
+Implementation details: [directory search](docs/home-search.md),
+[commands](docs/configured-commands.md), [launching](docs/real-launch.md), and
+[history](docs/history.md). Zellij host/SDK baseline: **0.45.1**, verified on Linux.
 
 ## 1. Existing solutions and differentiation
 
@@ -25,11 +24,11 @@ The community catalogue describes **zellij-newtab-plus** as named-tab creation w
 
 Opening a dashboard tab gives the user an immediately focused directory input, a configured-command selector, and recent launch history. Selecting a command launches it in the chosen directory and replaces the dashboard pane in the same tab.
 
-Proposed v0.1 defaults:
+Current defaults:
 
-- Platform: Linux and macOS; local host running Zellij.
+- Platform: local Linux host running Zellij. macOS verification remains outstanding.
 - Exactly one launch per activation; no automatic agent resume.
-- Initial directory: invoking terminal's working directory, falling back to configured starting directory, then home.
+- Initial directory input: `~`. There is no configurable starting-directory fallback.
 - Initial tool: default shell. Do not silently start a remembered agent.
 - Command order: built-in Shell first, followed by the IDs listed in `commands`, in user-specified order. There are no built-in agent commands.
 - Recent list: ten unique absolute directories, newest first, remembering the last tool.
@@ -69,25 +68,27 @@ Responsive behaviour:
 - At least 80×24: full layout and up to ten history rows.
 - Smaller viewports: scroll history, wrap tool choices, preserve path input and errors.
 - Below 40×10: explicit compact/resize notice; never launch because controls are hidden.
-- Measure and truncate by terminal cells, not bytes. Escape control characters in filenames; preserve actual path bytes separately from display labels.
+- Measure and truncate by terminal cells, not bytes. Exclude invalid UTF-8 and control-character directory names instead of displaying ambiguous paths. Preserve valid literal paths separately from clipped display labels.
 
 ## 4. Directory input and autocomplete
 
-- Accept absolute paths, `~`, `~/…`, `.`, `..`, and paths relative to the captured invoking directory.
-- Expand only the leading home shortcut; no command substitution, glob expansion, or arbitrary shell expression evaluation. `~otheruser` and environment-variable expansion are out of scope for v0.1.
-- Complete directories only, including symlinks resolving to directories.
-- Reuse an established embedded fuzzy matcher; do not implement a custom fuzzy matching/ranking algorithm. Selected matcher: Frizbee (`neo_frizbee`), approved by the user, embedded directly in the WASM plugin. Fuzzy-match directory names and relative paths using the library's scoring, with deterministic tie-breaking—not just prefixes of the currently typed path component. A bare query such as `notes` must find `~/Projects/notes/` within the configured search roots without requiring the user to type `~/Projects/`. Abbreviated queries can match non-contiguous characters. Show enough of each matching path to distinguish directories with the same name. Accepting a result fills the actual directory path; never launch using the unresolved query text. Explicit absolute or relative paths remain supported.
-- Deliver a single WASM plugin: no external search executable or native companion. Directory enumeration, path expansion, and the input/suggestion UI still need thin Zellij-specific integration; a matcher library does not supply those pieces.
-- A standalone probe using `neo_frizbee` 0.13.1 with default features disabled and `safe_read` enabled passed native fixture checks and compiled for `wasm32-wasip1`. Live Zellij execution remains unverified. The full fff engine is not selected: its current core has unconditional native-oriented dependencies including notify, heed/LMDB, memmap2, git2, and rayon.[18][19]
-- Hidden directories are excluded unless explicitly requested by a dot-prefixed path component.
-- Discover directory candidates beneath configured search roots (including `~/Projects` for this design), not only immediate children of the current directory. Use bounded, incremental enumeration with cached candidates; never scan the entire disk on each keystroke. Root configuration, traversal limits, exclusions, and symlink-cycle handling must be specified before implementation.
-- Spaces and quotes are literal filename characters, not shell syntax. Do not automatically add shell quoting to the input.
-- List directory entries asynchronously, debounce input, and discard stale responses using request generations.
-- Validate immediately before launch: directory exists, is a directory, and can be entered. Broken symlinks and permission failures get actionable inline messages.
-- Do not create missing directories automatically.
-- Preserve the entered absolute/logical path for display and relaunch. A canonical path may be stored as metadata but must not silently replace the user's symlink spelling.
+- Search recursively beneath HOME using embedded Frizbee (`neo_frizbee`), not a custom ranking algorithm or external executable. A query such as `notes`, `nts`, or `Projects/notes` finds matching indexed directories without requiring shell-style relative-path navigation. Accepting a completion fills the actual directory path; completion itself never launches.
+- Accept explicit `~`, `~/…`, and absolute paths under HOME. Existing literal validation also resolves HOME-relative input and `.`/`..` within HOME; it does not use the invoking cwd. Adding invoking-cwd-relative resolution is out of scope, not deferred work.
+- Expand only the leading home shortcut. No environment-variable, glob, command-substitution, or arbitrary shell-expression expansion. Spaces and quotes in paths are literal; do not insert shell quoting.
+- Search only HOME. Reject paths outside it and all symlink components, even links pointing inside HOME. Do not create missing directories.
+- Prune hidden directories (including `.git`) and exact `node_modules` subtrees at every depth. Apply HOME-local `.gitignore` and `.ignore` rules. A dot-prefixed query does not reveal excluded candidates; explicit literal hidden/ignored directories can still validate and launch. Excluded entries are not catalogued or counted; no skipped list/count is shown.
+- Exclude invalid UTF-8 and control-character directory names. Validate the actual directory on completion acceptance and again on launch, preserving the form on failure. Revalidation is not an atomic guarantee against concurrent filesystem replacement.
+- Run indexing, matching, and validation in a persistent WASM worker. Autonomous bounded scan slices publish progress; query coalescing and generation/revision checks prevent stale results from replacing current ones. Keep previous suggestions visible until the accepted reply arrives.
+- Keep the index in memory. Reopen/F5 rebuilds it; persistent index caching is not implemented. Never rescan on each keystroke.
+- Bound indexing to 20,000 directories, 200,000 entries, depth 64, a conservative 6 MiB retained-path/rule budget, and 4096-byte paths. Limits are visible. Return at most 100 ranked suggestions; an explicit valid path need not appear in the partial index.
+- Cap typed/pasted input and fuzzy queries at 100 Unicode scalar values. Preserve longer completed/history paths without truncating them into different targets. See [search details](docs/home-search.md) for rule budgets and matching bounds.
 
-Proposed performance targets: no filesystem I/O in the render path; p95 input-to-render under 50 ms on a declared local test machine; cap visible completions and bound background work. Slow or unreachable mounts must not block typing.
+Rendering performs no filesystem I/O. Worker scheduling keeps search work off
+plugin input handling, but a filesystem syscall cannot be interrupted by a slice
+budget. History persistence also performs bounded synchronous I/O outside render.
+No hard input-latency or slow-mount guarantee is claimed. The single WASM artifact
+and embedded matcher have been exercised in real Zellij; the full fff engine is
+not used.[18][19]
 
 ## 5. Keyboard contract
 
@@ -109,9 +110,9 @@ Three focus areas: path, tools, history. Footer help reflects current focus.
 | Any | Ctrl+P / Ctrl+T / Ctrl+R | Focus path / tools / history |
 | Any | Esc | Dismiss suggestions or inline transient UI first; otherwise close the untouched dashboard pane |
 
-History unavailable: show an empty state; history shortcuts are harmless. If an entry's tool was removed, show it as unavailable and let the user copy its directory into the form, but never silently substitute another tool.
+No history: show an empty state; history shortcuts are harmless. On a storage read failure, show an error and retain previously loaded rows where available. If an entry's command was removed, show it as unavailable even in narrow layouts and let the user copy its directory into the form, but never silently substitute another command.
 
-Key delivery must be tested against Zellij normal and locked modes. Installation documents conflicts and a compatible binding set rather than globally stealing terminal input. Global shortcuts remain subject to revision after the compatibility spike.
+Key delivery is exercised in normal and locked modes. Zellij may intercept shortcuts in normal mode; use locked mode for full plugin input. The opt-in `examples/locked.kdl` is a test/example configuration, not a replacement for the user's global bindings. F1 opens scrollable help, including full command labels and configuration errors; F5 rebuilds the HOME index, reloads shared history, and resets the form while retaining command configuration. Ctrl+Q closes only the plugin pane.
 
 ## 6. Configured commands
 
@@ -182,8 +183,7 @@ States: booting → permission check → ready → validating → launching → 
 - Freeze duplicate submission while validating/launching.
 - Use structured executable/arguments/cwd. Never synthesize `cd <path> && <command>` or inject typed text into another terminal.
 - Launch into the dashboard's own pane identity, even if the user switches tabs during asynchronous work.
-- Keep the dashboard recoverable until launch acceptance is known; prove exact suppression/close ordering in the API spike.
-- On accepted launch, optionally rename the tab to `<directory basename> · <tool>`. Do not rename other tabs.
+- Known host rejection leaves the dashboard usable with the form intact and requires explicit retry. Successful replacement closes the dashboard permanently; it is not suppressed for later restoration.
 - Shell uses Zellij's default-shell lifecycle. Configured command panes close on process exit, including nonzero exits; Launchpad does not return. Preserve the explicit own-pane action and existing asynchronous rejection handling. Do not respawn commands or fall back into another program.
 - History records validated launch attempts **before** replacement, because successful
   replacement normally destroys the plugin before acknowledgement. Known spawn
@@ -225,30 +225,39 @@ On pinned 0.45.1, `/data` is per instance and `/cache` is shared by plugin URL.
 
 ## 9. Architecture and integration
 
-Proposed implementation: Rust WASM plugin, with pure modules for path editing, matching, focus/state transitions, target descriptors, history schema, and rendering. Keep host access behind an adapter for testability.
+Rust WASM plugin sharing application state, editing, matching, command definitions,
+and rendering with a native simulation adapter. A persistent worker owns the HOME
+index and directory validation. There is no external runtime helper executable.
 
-Zellij documents `open_terminal_in_place_of_plugin` and `open_command_pane_in_place_of_plugin`, including a flag to close versus suppress the replaced plugin. Command launches support a separate cwd and argument vector.[12]
+Pinned Zellij host/SDK: **0.45.1**. Actual launch APIs:
 
-Use a dedicated dashboard layout and an explicit new-tab keybinding as the initial integration. Offer a default-new-tab layout recipe after verifying layout composition. Do not claim the `welcome-screen` alias is a new-tab hook, and do not change every user's new-pane behaviour. Installation is opt-in and must preserve existing tab/status bars and existing layouts.
+- Shell: `open_terminal_in_place_of_plugin`, using Zellij's configured default shell.
+- Configured commands: `run_action(Action::NewInPlacePane)` with an explicit originating plugin pane ID, structured executable/argv/cwd, `close_replaced_pane: true`, and both command hold flags false.
+- Correlate asynchronous action rejection with the pending launch. Successful replacement normally destroys the plugin before it receives completion.
 
-Permissions should be mapped to the tested implementation: likely `ReadApplicationState`, `OpenTerminalsOrPlugins`, `RunCommands`, `ChangeApplicationState` for renaming, and `FullHdAccess` for arbitrary directory browsing/state storage. Current documentation also lists `ReadSessionEnvironmentVariables`; use it only if needed and supported by the pinned baseline.[13]
+The normal plugin requests `ReadSessionEnvironmentVariables`, `FullHdAccess`,
+`ChangeApplicationState`, `OpenTerminalsOrPlugins`, and `RunActionsAsUser`.
+Read only HOME from the session environment. On this host, changing the `/host`
+mount requires FullHdAccess; a guarded self-reload makes the worker inherit HOME,
+then a worker handshake verifies the mapping. ChangeApplicationState supports
+that bootstrap, not tab renaming. These host permissions are broader than the
+plugin's HOME-only search policy and own-pane launch actions.
 
-No network access, stdin injection, pane-content reads, or config-rewrite permission is needed for the intended product. A denied permission must produce a clear restricted mode or explanation, not a retry loop.
+Use Zellij's URL-shared `/cache` for disposable history and per-instance `/data`
+for bootstrap state. History's immutable journal avoids reliance on unavailable
+WASI advisory locking. No network access, pane-content reads, terminal-input
+injection, or rewriting the user's Zellij configuration is required.
 
-### Required compatibility spike before implementation
-
-The live documentation is not proof of support in the user's installed release. Pin the Rust SDK and minimum Zellij release only after checking:
-
-1. Capturing invoking cwd and the host PATH/home/XDG environment reliably.
-2. Filesystem mapping outside `/host`; safe access to durable state without confusing host paths and WASI paths.
-3. Configured executable/argument forwarding in the environment inherited by command panes, without availability probing or implicit shell interpretation.
-4. Own-pane replacement, acknowledgement events, error recovery, and history write ordering for both Shell and agents.
-5. Cross-instance/cross-session file locking from WASI. A single WASM artifact is a product constraint. If reliable host discovery or durable locking cannot be implemented through Zellij/WASI, report the limitation and revisit the affected requirement; do not introduce an external binary.
-6. Key delivery, default-layout integration, focus races, plugin cleanup, and narrow-terminal rendering.
+Installation is opt-in. `examples/launchpad.kdl` provides Shell only;
+`examples/configured.kdl` demonstrates configured commands. Layouts and plugin
+aliases carry settings; do not use the host's comma-splitting CLI configuration
+argument for multi-command lists. New-tab keybinding/default-layout recipes remain
+listed separately below. Do not claim `welcome-screen` is a new-tab hook or change
+all of the user's new-pane behaviour.
 
 ## 10. Acceptance criteria
 
-- A new dashboard opens with editable path focus and the expected invoking cwd/fallback.
+- A ready dashboard has editable path focus, initial input `~`, and Shell selected. HOME/permission/bootstrap failures remain visible rather than falling back to another directory.
 - Shell appears first and uses Zellij's default shell rather than hard-coded bash. Other entries appear only from `commands`, in configured order with configured labels; absent/empty configuration gives Shell only.
 - Tests cover arbitrary command IDs, multiple variants of one executable, optional fields, whitespace/deduplication, malformed definitions, and unavailable history IDs. Invalid entries show errors without disabling Shell or valid entries.
 - Actual harmless fixture executables verify exact argument vectors (including quoted spaces and empty arguments), literal metacharacters without expansion, and selected cwd; tests do not run actual coding agents.
@@ -263,9 +272,27 @@ The live documentation is not proof of support in the user's installed release. 
 - Tests cover 80×24, 40×12, and very small viewports; long paths and wide Unicode do not corrupt layout.
 - Unit tests cover matching, input/focus state, validation, sorting/pruning, and schema handling. Live Zellij integration tests cover permissions, replacement, launch cwd/argv, default shell, cancellation, and restart persistence on the pinned supported version(s).
 
-## 11. Explicitly out of scope
+## 11. Deferred features and verification gaps
 
-Conversation resume, agent status monitoring, built-in worktree management, git-aware dashboards, remote host selection, automatic trust/permission flags, ad-hoc command entry in the launch form, a settings editor, and project environment auto-activation. Users may explicitly configure command arguments that request a tool's own worktree mode or other behaviour. Optional future additions: zoxide ranking and pinned projects.
+These are not implemented and are separate from the current acceptance criteria:
+
+- Starting at the invoking terminal's cwd, optionally with a configured starting directory. This does not imply invoking-cwd-relative path resolution.
+- Configurable search roots. HOME-only search remains the current deliberate scope.
+- Directory-symlink support, including cycle and escape policy. Currently all symlink paths are rejected.
+- Optional tab naming after launch.
+- A documented new-tab keybinding and default-new-tab layout recipe that preserve existing tab/status bars and user layouts.
+- macOS verification. No cross-platform test claim is made from Linux results.
+- A reproducible current-build p95 input-to-render benchmark against the earlier aspirational 50 ms target. Existing performance measurements are not a hard latency guarantee.
+
+An intermittent blank permission screen has occurred in live Zellij verification.
+Component reruns or recorded viewport redraws have passed, but the startup cause
+remains unresolved; they are not evidence of an uninterrupted full-suite pass.
+
+## 12. Explicitly out of scope
+
+Invoking-directory-relative path resolution is not planned: relative-looking input is served by fuzzy search and accepting the desired completion. Existing HOME-relative literal validation need not be removed, but is not a reason to add cwd-relative navigation.
+
+Other exclusions: conversation resume, agent status monitoring, built-in worktree management, git-aware dashboards, remote host selection, automatic trust/permission flags, ad-hoc command entry in the launch form, a settings editor, and project environment auto-activation. Users may explicitly configure command arguments that request a tool's own worktree mode or other behaviour. zoxide ranking and pinned projects are ideas, not acceptance criteria.
 
 ## Sources
 
