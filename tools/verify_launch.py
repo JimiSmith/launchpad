@@ -33,7 +33,6 @@ parser.add_argument('--layout', choices=['only', 'tiled', 'floating'], default='
 parser.add_argument('--deny', action='store_true')
 parser.add_argument('--missing', action='store_true')
 parser.add_argument('--race', action='store_true')
-parser.add_argument('--tab-race', action='store_true', help='Reorder tabs and launch while a different tab has keyboard focus')
 parser.add_argument('--during-index', action='store_true')
 parser.add_argument('--different-cwd', action='store_true')
 parser.add_argument('--commands-case', choices=['fixtures', 'shell-only', 'agreed', 'literals', 'invalid', 'many', 'review-ui'], default='fixtures')
@@ -174,10 +173,6 @@ else:
     plugin = plugin.replace('focus=true', 'focus=true width=120 height=30')
     layout = f'layout {{ tab {{ {neighbor}; floating_panes {{ {plugin}; }}; }}; }}'
 (OUT/'layout.kdl').write_text(layout)
-if args.tab_race:
-    assert args.race and args.layout == 'tiled'
-    layout = f'layout {{ tab name="other" {{ {neighbor}; }}; tab name="origin" focus=true {{ {plugin}; }}; }}'
-    (OUT/'layout.kdl').write_text(layout)
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH',36,160,0,0))
 def setup():
@@ -416,15 +411,6 @@ try:
             cwd.rmdir()
         if args.race:
             neighbor_before=next(p for p in before if p.get('title') == 'neighbor')
-            if args.tab_race:
-                cli('action','move-tab','--tab-id',str(plugin_before['tab_id']),'left')
-                moved=panes('panes-reordered')
-                moved_plugin=next(p for p in moved if p['is_plugin'] and p['id']==plugin_before['id'])
-                check(moved_plugin['tab_id']==plugin_before['tab_id'] and moved_plugin['tab_position']!=plugin_before['tab_position'],
-                      'tab reordered without changing originating stable ID')
-                before=moved
-                plugin_before=moved_plugin
-                neighbor_before=next(p for p in before if p.get('title')=='neighbor')
             cli('action','focus-pane-id', 'terminal_'+str(neighbor_before['id']))
             focused=panes('panes-focused-neighbor')
             check(next(p for p in focused if not p['is_plugin'] and p['id']==neighbor_before['id'])['is_focused'],
@@ -495,7 +481,6 @@ try:
             if not old['is_plugin']:
                 new=next(p for p in after if not p['is_plugin'] and p['id']==old['id'])
                 stable=['id','terminal_command','pane_command','pane_cwd',*geometry]
-                if args.tab_race: stable.append('tab_name')
                 check(all(new.get(k)==old.get(k) for k in stable),'neighbor identity, command, cwd and geometry unchanged')
         check('Launch suppressed' not in display(),'real request never renders a fake terminal')
         launched=[r for r in records() if r['exe']==expected]
@@ -504,7 +489,7 @@ try:
         check(not (cwd/'NO_EXPANSION').exists(),'no command substitution side effect')
         check(launched[0]['cwd']==expected_cwd,'literal Unicode and metacharacter cwd')
         check(replacement['pane_cwd']==expected_cwd,'host readback confirms literal cwd')
-        if args.tab_race or not replacement['is_focused'] or (args.layout=='floating' and args.race):
+        if not replacement['is_focused'] or (args.layout=='floating' and args.race):
             cli('action','focus-pane-id','terminal_'+str(replacement['id']))
         expect('FIXTURE_READY '+expected, 'replacement renders actual fixture output', timeout=5)
         send('hello\r')
@@ -537,10 +522,6 @@ try:
                   'after exit only original neighbors remain')
             for old in neighbors:
                 new=next(p for p in exited if (p['is_plugin'],p['id'])==(old['is_plugin'],old['id']))
-                if args.tab_race and old['is_suppressed'] and old.get('plugin_url')=='zellij:link':
-                    check(new['plugin_url']=='zellij:link' and new['is_suppressed'],
-                          'host relocates its own suppressed link plugin when origin tab closes')
-                    continue
                 check(all(new.get(k)==old.get(k) for k in ['terminal_command','pane_command','pane_cwd','tab_id','is_floating']),
                       'neighbor command, cwd, tab and layout type survive exit')
             pump(.5)

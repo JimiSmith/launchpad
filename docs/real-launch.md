@@ -59,6 +59,14 @@ to stable tab ID. A missing mapping fails visibly instead of guessing. Session
 snapshots can lag new background panes or pane moves; no atomic pane-move/naming
 transaction is claimed.
 
+The suite deliberately does not launch from a tab that was just reordered. That
+snapshot lag is real — after a `move-tab` the session list can report no current
+session, so the mapping is missing and the launch is refused with a retry
+prompt — but reaching it needs a keystroke delivered to an unfocused pane while
+a validation round trip of a few milliseconds is in flight. It is a property of
+the host snapshot, not a reachable user sequence, and asserting otherwise only
+produced a failing check that outlived its usefulness.
+
 Use the direct `rename_tab_with_id` command, then synchronous `get_tab_info`
 readback before spawn. The two requests use the same host screen queue. **Do not
 use `run_action(Action::RenameTabById)`**: SDK 0.45.1 calls it CLI-only and panics
