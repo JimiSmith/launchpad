@@ -524,11 +524,14 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
 #[test]
 fn search_status_uses_readable_text_color_not_separator_color() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{app::App, theme::MUTED, view};
+    use zellij_launchpad_core::{app::App, theme::Theme, view};
     let app = App::default();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|f| view::render(f, &app)).unwrap();
-    assert_eq!(terminal.backend().buffer()[(2, 10)].fg, MUTED);
+    assert_eq!(
+        terminal.backend().buffer()[(2, 10)].fg,
+        Theme::default().muted
+    );
 }
 
 #[test]

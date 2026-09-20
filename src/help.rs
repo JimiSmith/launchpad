@@ -16,7 +16,7 @@ const LINES: &[&str] = &[
     "RECENT ↑ / ↓ select · Home / End · Enter replay",
     "Tab copy path + tool · Delete remove · Ctrl+L clear (confirm)",
     "",
-    "F5  Refresh HOME / reset form; command configuration is preserved",
+    "F5  Refresh HOME / reset form; command and theme settings are preserved",
     "Esc dismisses transient UI, then closes an untouched pane",
     "The dashboard closes on launch; it does not return on command exit.",
     "",
@@ -48,7 +48,7 @@ pub fn lines(app: &crate::app::App) -> Vec<String> {
     for c in &app.commands.entries {
         lines.push(format!("{}: {}", c.id.as_str(), c.label));
     }
-    for error in &app.commands.errors {
+    for error in app.config_errors() {
         lines.push(format!("Config error: {error}"));
     }
     lines

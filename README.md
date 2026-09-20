@@ -100,6 +100,45 @@ Use KDL for lists: Zellij 0.45.1's CLI `--configuration` splits at every comma a
 cannot encode a multi-ID `commands` value. Layouts and KDL aliases do not have
 that limitation. [Exact syntax, bounds, and examples](docs/configured-commands.md).
 
+## Configure colours
+
+The default theme is [Catppuccin Macchiato](https://github.com/catppuccin/palette)
+with a mauve accent and your terminal's background. Override any colours in the
+same plugin KDL block as your commands. These are the complete defaults; every
+setting is optional:
+
+```kdl
+theme_background "default"
+theme_surface "#1e2030"
+theme_raised "#363a4f"
+theme_border "#494d64"
+theme_text "#cad3f5"
+theme_muted "#a5adcb"
+theme_accent "#c6a0f6"
+theme_on_accent "#181926"
+theme_error "#ed8796"
+```
+
+| Setting | Used for |
+| --- | --- |
+| `theme_background` | Main dashboard and help background; inherits the terminal by default |
+| `theme_surface` | Directory input and footer controls background |
+| `theme_raised` | Highlighted suggestion and history row backgrounds |
+| `theme_border` | Unfocused directory input border |
+| `theme_text` | Primary text |
+| `theme_muted` | Hints, metadata, and inactive labels |
+| `theme_accent` | Headings, focused borders, selections, and buttons |
+| `theme_on_accent` | Text on filled accent buttons |
+| `theme_error` | Status and error messages |
+
+Colours use quoted `#RRGGBB` hex values or `"default"` to inherit the terminal's
+foreground/background for that role. Values are case-insensitive, with surrounding
+whitespace ignored. For a solid Macchiato background, set `theme_background "#24273a"`.
+Omitted colours keep their defaults. An invalid value keeps
+that colour's default and shows a config error; F1 lists all errors. Themes are
+local to each plugin instance and survive F5 and HOME remounts. Reopen the plugin
+after editing its config to apply changes.
+
 ## Controls
 
 - `Ctrl+P` / `Ctrl+T` / `Ctrl+R`: focus the path, tool selector, or history.
@@ -108,7 +147,7 @@ that limitation. [Exact syntax, bounds, and examples](docs/configured-commands.m
 - Click to select directories, tools, or history; click the launch/replay action
   to launch. Scroll to browse lists.
 - `Esc`: go back or dismiss suggestions. `F1`: full keyboard help.
-- `F5`: refresh HOME and shared history; reset the form. Command configuration is preserved.
+- `F5`: refresh HOME and shared history; reset the form. Command and theme settings are preserved.
 - In history, `Tab` copies, `Enter` revalidates/replays, `Delete` removes the selected
   entry, and `Ctrl+L` twice clears shared history (`Esc` cancels).
 

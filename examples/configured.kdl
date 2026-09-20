@@ -12,6 +12,17 @@ layout {
                 label_hermes "Hermes"
                 command_codex "codex"
                 label_codex "Codex"
+
+                // Optional overrides: Macchiato colours over the terminal background.
+                theme_background "default"
+                theme_surface "#1e2030"
+                theme_raised "#363a4f"
+                theme_border "#494d64"
+                theme_text "#cad3f5"
+                theme_muted "#a5adcb"
+                theme_accent "#c6a0f6"
+                theme_on_accent "#181926"
+                theme_error "#ed8796"
             }
         }
     }

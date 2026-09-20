@@ -83,6 +83,8 @@ pub struct State {
 impl State {
     pub fn replace_app(&mut self, mut app: zellij_launchpad_core::app::App) {
         app.commands = self.app.commands.clone();
+        app.theme = self.app.theme;
+        app.theme_errors = self.app.theme_errors.clone();
         app.simulate_launch = self.app.simulate_launch;
         self.app = app;
     }

@@ -56,6 +56,8 @@ pub struct App {
     pub focus: Focus,
     pub tool: Tool,
     pub commands: crate::commands::Commands,
+    pub theme: crate::theme::Theme,
+    pub theme_errors: Vec<String>,
     pub history: Vec<Launch>,
     pub recent: usize,
     pub message: Option<String>,
@@ -99,6 +101,8 @@ impl Default for App {
             focus: Focus::Path,
             tool: Tool::Shell,
             commands: Default::default(),
+            theme: Default::default(),
+            theme_errors: Vec::new(),
             history: Vec::new(),
             recent: 0,
             message: None,
@@ -133,6 +137,10 @@ impl App {
     }
     pub fn configure(&mut self, configuration: &std::collections::BTreeMap<String, String>) {
         self.commands = crate::commands::Commands::parse(configuration);
+        (self.theme, self.theme_errors) = crate::theme::Theme::parse(configuration);
+    }
+    pub fn config_errors(&self) -> impl Iterator<Item = &String> {
+        self.commands.errors.iter().chain(&self.theme_errors)
     }
     pub fn tool_label(&self, tool: Tool) -> String {
         self.commands
@@ -427,6 +435,8 @@ impl App {
         }
         if action == Action::Reset {
             let commands = self.commands.clone();
+            let theme = self.theme;
+            let theme_errors = std::mem::take(&mut self.theme_errors);
             let initial_cwd = self.initial_cwd.clone();
             let compact = self.compact;
             let simulate_launch = self.simulate_launch;
@@ -441,6 +451,8 @@ impl App {
                 self.search_status = status;
             }
             self.commands = commands;
+            self.theme = theme;
+            self.theme_errors = theme_errors;
             if let Some(cwd) = initial_cwd {
                 self.set_initial_cwd(cwd);
             }

@@ -2,7 +2,7 @@
 use crate::{
     app::{Action, App, Focus, ScrollTarget},
     cells::{clip, input_cursor, input_window, width},
-    theme::*,
+    theme::Theme,
 };
 use ratatui::{
     Frame,
@@ -17,6 +17,7 @@ use ratatui::{
 // or Ratatui's diff against a previous frame.
 struct Canvas<'a> {
     buffer: &'a mut Buffer,
+    theme: Theme,
     cursor: Option<Position>,
 }
 impl Canvas<'_> {
@@ -43,12 +44,13 @@ fn at(area: Rect, y: u16, height: u16) -> Rect {
     Rect::new(area.x, y, area.width, height).intersection(area)
 }
 fn pair(f: &mut Canvas, area: Rect, left: &str, right: &str, style: Style) {
+    let theme = f.theme;
     let rw = (width(right) as u16).min(area.width);
     row(
         f,
         Rect::new(area.right() - rw, area.y, rw, 1),
         right,
-        muted(),
+        theme.muted(),
     );
     row(
         f,
@@ -58,10 +60,22 @@ fn pair(f: &mut Canvas, area: Rect, left: &str, right: &str, style: Style) {
     );
 }
 fn section(f: &mut Canvas, a: Rect, label: &str, hint: &str, active: bool) {
-    pair(f, a, label, hint, if active { accent() } else { muted() });
+    let theme = f.theme;
+    pair(
+        f,
+        a,
+        label,
+        hint,
+        if active {
+            theme.accent()
+        } else {
+            theme.muted()
+        },
+    );
 }
 
 fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Action)]) {
+    let theme = f.theme;
     let mut x = area.x;
     for (i, (label, action)) in items.iter().enumerate() {
         if i > 0 {
@@ -69,7 +83,7 @@ fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Actio
                 f,
                 Rect::new(x, area.y, 3, 1).intersection(area),
                 " · ",
-                muted().bg(BG),
+                theme.muted().bg(theme.surface),
             );
             x += 3;
         }
@@ -78,7 +92,7 @@ fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Actio
             break;
         }
         let rect = Rect::new(x, area.y, w, 1);
-        row(f, rect, label, accent().bg(BG));
+        row(f, rect, label, theme.accent().bg(theme.surface));
         hits.add(rect, action.clone());
         x += w;
     }
@@ -139,6 +153,7 @@ pub fn render_buffer(buffer: &mut Buffer, app: &App) -> (HitMap, Option<Position
     };
     let mut canvas = Canvas {
         buffer,
+        theme: app.theme,
         cursor: None,
     };
     render_ui(&mut canvas, app, &mut hits);
@@ -148,8 +163,9 @@ pub fn render(f: &mut Frame, app: &App) {
     render_with_hits(f, app);
 }
 fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
+    let theme = f.theme;
     let viewport = f.area();
-    f.render_widget(Block::default().style(base()), viewport);
+    f.render_widget(Block::default().style(theme.base()), viewport);
     let width = viewport.width.min(160);
     let full = Rect::new(
         viewport.x + (viewport.width - width) / 2,
@@ -160,7 +176,7 @@ fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
     if full.width < 40 || full.height < 10 {
         f.render_widget(
             Paragraph::new("Resize to at least 40 × 10.\nNo launch at this size.\nCtrl+Q quit")
-                .style(accent())
+                .style(theme.accent())
                 .wrap(Wrap { trim: false }),
             full,
         );
@@ -181,6 +197,7 @@ fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
 }
 
 fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
+    let theme = f.theme;
     let short = area.height < 18;
     let roomy = area.height >= 30;
     let narrow = area.width < 60;
@@ -194,7 +211,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             (true, false) => "HOME / launch suppressed",
             (true, true) => "SUPPRESSED",
         },
-        accent().add_modifier(Modifier::BOLD),
+        theme.accent().add_modifier(Modifier::BOLD),
     );
     let mut y = area.y + if roomy { 2 } else { 1 };
     section(
@@ -208,17 +225,20 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let path_height = if short { 1 } else { 3 };
     let input = at(area, y, path_height);
     let inner = if short {
-        f.render_widget(Block::default().style(base().bg(BG)), input);
+        f.render_widget(
+            Block::default().style(theme.base().bg(theme.surface)),
+            input,
+        );
         input
     } else {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(if app.focus == Focus::Path {
-                accent()
+                theme.accent()
             } else {
-                base().fg(LINE)
+                theme.base().fg(theme.border)
             })
-            .style(base().bg(BG));
+            .style(theme.base().bg(theme.surface));
         let inner = block.inner(input);
         f.render_widget(block, input);
         inner
@@ -227,7 +247,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         Rect::new(inner.x + 1, inner.y, 2, 1),
         "›",
-        accent().bg(BG),
+        theme.accent().bg(theme.surface),
     );
     let text_area = Rect::new(inner.x + 3, inner.y, inner.width.saturating_sub(4), 1);
     for x in input.x..input.right() {
@@ -251,7 +271,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         text_area,
         &visible,
-        base().bg(BG).add_modifier(Modifier::BOLD),
+        theme.base().bg(theme.surface).add_modifier(Modifier::BOLD),
     );
     if app.focus == Focus::Path && text_area.width > 0 {
         f.set_cursor_position((text_area.x + caret as u16, text_area.y));
@@ -302,7 +322,9 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         column += w + 1;
     }
     let max_rows = if short
-        && (app.focus == Focus::History || app.message.is_some() || !app.commands.errors.is_empty())
+        && (app.focus == Focus::History
+            || app.message.is_some()
+            || app.config_errors().next().is_some())
     {
         1
     } else {
@@ -319,12 +341,16 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         x = area.x + col;
         let style = if app.tool == tool {
             if app.focus == Focus::Tools {
-                base().fg(ON_ACCENT).bg(ACCENT).add_modifier(Modifier::BOLD)
+                theme
+                    .base()
+                    .fg(theme.on_accent)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
-                accent()
+                theme.accent()
             }
         } else {
-            muted()
+            theme.muted()
         };
         row(f, Rect::new(x, row_y, *w, 1), label, style);
         hits.add(Rect::new(x, row_y, *w, 1), Action::SelectTool(tool));
@@ -337,7 +363,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             f,
             heading,
             &format!("‹ {:02}/{:02} ›", selected + 1, tools.len()),
-            accent(),
+            theme.accent(),
         );
         hits.add(
             Rect::new(heading.x, heading.y, 2, 1),
@@ -353,7 +379,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             f,
             Rect::new(area.right() - 12, y, 12, 1),
             " Enter ↵ ",
-            base().fg(ON_ACCENT).bg(ACCENT),
+            theme.base().fg(theme.on_accent).bg(theme.accent),
         );
         hits.add(Rect::new(area.right() - 12, y, 12, 1), Action::LaunchForm);
     } else {
@@ -365,10 +391,10 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         );
     }
     y += 1;
-    let config_error = app.commands.errors.first().map(|e| {
+    let config_error = app.config_errors().next().map(|e| {
         format!(
             "Config error: {e} (F1: all {} errors)",
-            app.commands.errors.len()
+            app.config_errors().count()
         )
     });
     let status_height = if let Some(message) = app.message.as_ref().or(config_error.as_ref()) {
@@ -380,7 +406,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         let h = (width(message).div_ceil(area.width as usize) as u16).clamp(1, max_height);
         f.render_widget(
             Paragraph::new(message.as_str())
-                .style(base().fg(ERROR))
+                .style(theme.base().fg(theme.error))
                 .wrap(Wrap { trim: false }),
             at(area, y, h),
         );
@@ -388,7 +414,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     } else if short {
         0
     } else {
-        row(f, at(area, y, 1), &app.search_status, muted());
+        row(f, at(area, y, 1), &app.search_status, theme.muted());
         1
     };
     y += status_height;
@@ -440,7 +466,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             "TOOL",
             "DIRECTORY",
             "WHEN",
-            muted(),
+            theme.muted(),
             !narrow,
         );
         y += 1;
@@ -450,7 +476,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             f,
             at(area, y, 1),
             "No recent launches. Choose a directory.",
-            muted(),
+            theme.muted(),
         );
     }
     for (i, event) in app
@@ -461,7 +487,11 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         .take(available_rows)
     {
         let active = i == app.recent && app.focus == Focus::History;
-        let style = if active { accent().bg(RAISED) } else { base() };
+        let style = if active {
+            theme.accent().bg(theme.raised)
+        } else {
+            theme.base()
+        };
         let a = at(area, y, 1);
         hits.add(a, Action::SelectHistory(event.id));
         f.render_widget(Block::default().style(style), a);
@@ -529,11 +559,12 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             (_, true) => "TOOLS ←→ · Enter",
             (_, false) => "TOOLS ←→ choose · ↑ path · ↓ recent · Enter",
         };
-        row(f, left, hints, accent().bg(BG));
+        row(f, left, hints, theme.accent().bg(theme.surface));
     }
 }
 
 fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
+    let theme = f.theme;
     if app.suggestions.is_empty() {
         row(
             f,
@@ -545,7 +576,7 @@ fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             } else {
                 "Enter launches · edit to search · ↓ tools"
             },
-            muted(),
+            theme.muted(),
         );
         return;
     }
@@ -566,7 +597,11 @@ fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         let a = at(area, area.y + r as u16, 1);
         hits.add(a, Action::AcceptSuggestion(index));
         let active = app.highlighted == Some(i);
-        let style = if active { accent().bg(RAISED) } else { base() };
+        let style = if active {
+            theme.accent().bg(theme.raised)
+        } else {
+            theme.base()
+        };
         f.render_widget(Block::default().style(style), a);
         let label = format!(
             " {} {}/",
@@ -592,7 +627,8 @@ fn history_row(
     style: Style,
     show_age: bool,
 ) {
-    row(f, Rect::new(a.x, a.y, 3, 1), marker, style.fg(MUTED));
+    let theme = f.theme;
+    row(f, Rect::new(a.x, a.y, 3, 1), marker, style.fg(theme.muted));
     row(f, Rect::new(a.x + 3, a.y, 9, 1), tool, style);
     let age_width = if show_age { 12 } else { 0 };
     row(
@@ -603,11 +639,17 @@ fn history_row(
     );
     if show_age {
         let w = width(age) as u16;
-        row(f, Rect::new(a.right() - w, a.y, w, 1), age, style.fg(MUTED));
+        row(
+            f,
+            Rect::new(a.right() - w, a.y, w, 1),
+            age,
+            style.fg(theme.muted),
+        );
     }
 }
 
 fn help(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
+    let theme = f.theme;
     hits.wheels.push((
         Rect::new(area.x, area.y + 1, area.width, area.height - 2),
         ScrollTarget::Help,
@@ -621,12 +663,12 @@ fn help(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         } else {
             "REPLACE PANE"
         },
-        accent(),
+        theme.accent(),
     );
     let lines: Vec<_> = crate::help::lines(app).into_iter().map(Line::raw).collect();
     let content = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
     let paragraph = Paragraph::new(lines)
-        .style(base())
+        .style(theme.base())
         .wrap(Wrap { trim: false });
     // Use the same Ratatui cell/grapheme wrapper for measuring and painting.
     let max = paragraph
@@ -638,7 +680,7 @@ fn help(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         content,
     );
     let foot = at(area, area.bottom() - 1, 1);
-    row(f, foot, "↑↓ / wheel scroll · Home/End", accent());
+    row(f, foot, "↑↓ / wheel scroll · Home/End", theme.accent());
     controls(
         f,
         hits,

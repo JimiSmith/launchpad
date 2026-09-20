@@ -83,7 +83,7 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     assert_eq!(b[(18, 3)].symbol(), " ");
     assert_eq!(b[(19, 3)].symbol(), "理");
     assert_eq!(b[(77, 3)].symbol(), "│");
-    assert_eq!(b[(77, 3)].fg, theme::ACCENT);
+    assert_eq!(b[(77, 3)].fg, theme::Theme::default().accent);
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         a.update(Action::Clear);
         a.update(Action::Text("👩🏽‍💻e\u{301}修理/".repeat(50)));
@@ -190,7 +190,11 @@ fn dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes() {
         }
         let tools = ["Shell", "Claude", "Codex", "Copilot", "Hermes"].map(|s1| s.find(s1).unwrap());
         assert!(tools.windows(2).all(|p| p[0] < p[1]));
-        assert!(b.content.iter().any(|c| c.fg == theme::ACCENT));
+        assert!(
+            b.content
+                .iter()
+                .any(|c| c.fg == theme::Theme::default().accent)
+        );
         assert!(!s.contains("one directory"));
     }
 }
