@@ -123,6 +123,15 @@ but validation and scanning can wait behind that computation in the shared
 worker. A slow filesystem syscall also cannot be interrupted. Moving work off
 the UI does not create a hard latency SLA or make final ranked results immediate.
 The measured improvement is **key-to-visible-edit latency**, not matcher speed.
+
+Since the host gained a search debounce, that distinction has teeth:
+`benchmark_workers.py` times a keystroke to its echo in the path field, and
+matching no longer runs inside that window. Builds that differ by a quarter in
+search cost measure identically there. `benchmark_latency.py` times the
+suggestion row as well, which is the only figure that still contains a
+whole-catalogue Frizbee pass. Use it whenever a change could affect matching,
+including compiler settings: `opt-level = "s"` costs about 25% on suggestions
+while leaving echo untouched, which is why the release profile stays at 3.
 The improved observed index duration also reflects less redundant matching of
 unchanged catalogue revisions, not a faster disk traversal primitive.
 
@@ -141,12 +150,16 @@ $PY tools/verify_workers.py
 $PY tools/benchmark_workers.py baseline target/perf-baseline/zellij-launchpad.wasm
 $PY tools/benchmark_workers.py index-worker target/perf-index-worker/zellij-launchpad.wasm
 $PY tools/benchmark_workers.py async-final target/wasm32-wasip1/release/zellij-launchpad.wasm
+$PY tools/benchmark_latency.py shipped target/wasm32-wasip1/release/zellij-launchpad.wasm
 ```
 
 The PTY tools reuse `verify_search.py`'s isolated setup/emulator prefix, changing
 only artifact/layout and controlled test-tree creation. They preserve raw ANSI
 and xterm replay records beneath `target/zj-*`; no private HOME listings are
-copied into tracked evidence. All three performance runs enumerate 18,110 dirs.
+copied into tracked evidence. The `benchmark_workers.py` runs enumerate 18,110
+dirs; `benchmark_latency.py` uses 18,100 plus one witness directory per trial.
+Its `index_observed_seconds` is quantised by a one-second repaint nudge and is
+not a traversal measurement.
 
 The `worker-faults` feature is development-only and absent from normal builds.
 It can deliberately silence replies after the mapping handshake to verify the
