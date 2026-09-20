@@ -27,13 +27,14 @@ jobs:
 
       - name: Install pinned Rust and WASI target
         run: |
-          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
-          rustup toolchain install "$toolchain" --profile minimal --component rustfmt clippy
-          rustup target add --toolchain "$toolchain" wasm32-wasip1
-          rustup override set "$toolchain"
+          # rust-toolchain.toml pins the channel plus rustfmt and clippy, and
+          # rustup installs all of it on first use in this directory.
+          rustup show active-toolchain
+          rustup target add wasm32-wasip1
+          rustup component list --installed
 
       - name: Cache cargo registry and build output
-        uses: actions/cache@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
