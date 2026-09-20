@@ -20,8 +20,8 @@ def populate(home):
 
 
 source = Path(__file__).with_name('verify_search.py').read_text().split('success = False')[0]
-source = source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'", 'WASM = artifact')
-source = source.replace('master, slave = pty.openpty()', "(probe/'deniedneedle').chmod(0o700)\nshutil.rmtree(probe)\npopulate(home)\nlayout.write_text(layout.read_text().replace(str(ROOT/'target/wasm32-wasip1/release/launchpad-plugin.wasm'), str(WASM)))\nmaster, slave = pty.openpty()")
+source = source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'", 'WASM = artifact')
+source = source.replace('master, slave = pty.openpty()', "(probe/'deniedneedle').chmod(0o700)\nshutil.rmtree(probe)\npopulate(home)\nlayout.write_text(layout.read_text().replace(str(ROOT/'target/wasm32-wasip1/release/zellij-launchpad.wasm'), str(WASM)))\nmaster, slave = pty.openpty()")
 exec(compile(source, str(Path(__file__).with_name('verify_search.py')), 'exec'))
 success = False
 report = {'artifact': str(WASM), 'sha256': hashlib.sha256(WASM.read_bytes()).hexdigest(),

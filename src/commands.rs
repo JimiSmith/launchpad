@@ -21,19 +21,8 @@ impl Tool {
             len: id.len() as u8,
         }
     }
+    /// The one built-in identity: Zellij's configured default shell.
     pub const Shell: Self = Self::literal("shell");
-    // Illustrative fixture identities, not a production command registry.
-    pub const Claude: Self = Self::literal("claude");
-    pub const Codex: Self = Self::literal("codex");
-    pub const Copilot: Self = Self::literal("copilot");
-    pub const Hermes: Self = Self::literal("hermes");
-    pub const ALL: [Self; 5] = [
-        Self::Shell,
-        Self::Claude,
-        Self::Codex,
-        Self::Copilot,
-        Self::Hermes,
-    ];
     pub fn new(id: &str) -> Option<Self> {
         (!id.is_empty()
             && id.len() <= 64
@@ -44,16 +33,6 @@ impl Tool {
     }
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(&self.bytes[..self.len as usize]).unwrap()
-    }
-    pub fn label(&self) -> &str {
-        match *self {
-            Self::Shell => "Shell",
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::Copilot => "Copilot",
-            Self::Hermes => "Hermes",
-            _ => self.as_str(),
-        }
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,19 +146,5 @@ impl Commands {
     }
     pub fn get(&self, id: Tool) -> Option<&Command> {
         self.entries.iter().find(|c| c.id == id)
-    }
-    pub fn demo() -> Self {
-        Self {
-            entries: Tool::ALL
-                .into_iter()
-                .map(|id| Command {
-                    id,
-                    label: id.label().into(),
-                    executable: (id != Tool::Shell).then(|| id.as_str().into()),
-                    arguments: Vec::new(),
-                })
-                .collect(),
-            errors: Vec::new(),
-        }
     }
 }

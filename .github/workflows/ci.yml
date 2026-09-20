@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust and WASI target
+        run: |
+          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt clippy
+          rustup target add --toolchain "$toolchain" wasm32-wasip1
+          rustup override set "$toolchain"
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@640a1c2554105b57832a23eea0b4672fc7a790d5 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Clippy (host, all targets)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Clippy (wasm32-wasip1)
+        run: cargo clippy -p zellij-launchpad --target wasm32-wasip1 --locked -- -D warnings
+
+      - name: Release WASM builds
+        run: cargo build --locked --release -p zellij-launchpad --target wasm32-wasip1
+
+      - name: Plugin artifact depends on no terminal backend
+        run: |
+          cargo tree -p zellij-launchpad --target wasm32-wasip1 --locked --edges normal > wasm-deps.txt
+          ! grep -q crossterm wasm-deps.txt

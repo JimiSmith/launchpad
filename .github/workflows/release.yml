@@ -34,15 +34,15 @@ jobs:
           rustup target add --toolchain "$toolchain" wasm32-wasip1
 
       - name: Build release plugin
-        run: cargo build --locked --release -p launchpad-plugin --bin launchpad-plugin --target wasm32-wasip1
+        run: cargo build --locked --release -p zellij-launchpad --bin zellij-launchpad --target wasm32-wasip1
 
       - name: Package WASM and checksum
         run: |
           mkdir -p dist
-          cp target/wasm32-wasip1/release/launchpad-plugin.wasm dist/launchpad-plugin.wasm
+          cp target/wasm32-wasip1/release/zellij-launchpad.wasm dist/zellij-launchpad.wasm
           cd dist
-          sha256sum launchpad-plugin.wasm > launchpad-plugin.wasm.sha256
-          sha256sum --check launchpad-plugin.wasm.sha256
+          sha256sum zellij-launchpad.wasm > zellij-launchpad.wasm.sha256
+          sha256sum --check zellij-launchpad.wasm.sha256
 
       - name: Publish GitHub release
         env:
@@ -57,7 +57,7 @@ jobs:
               --title "$RELEASE_TAG" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" \
-            dist/launchpad-plugin.wasm dist/launchpad-plugin.wasm.sha256 --clobber
+            dist/zellij-launchpad.wasm dist/zellij-launchpad.wasm.sha256 --clobber
           prerelease=false
           if [[ "$RELEASE_TAG" == *-* ]]; then
             prerelease=true

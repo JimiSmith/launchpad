@@ -18,7 +18,7 @@ hold_on_close: false, hold_on_start: false, … }`. The action explicitly target
 There is no `which`, PATH scan, executable probe, authentication check, shell
 interpolation, or command injection via terminal input. Shell is the sole
 unconfigured choice; other choices come only from [plugin configuration](configured-commands.md).
-F6 does nothing in real launch mode. A missing command is passed to
+A missing command is passed to
 Zellij without prevalidation. With close-on-exit, 0.45.1 logs the spawn failure
 instead of replacing the dashboard with a held error pane. The original form
 shows a generic rejection; fix PATH/install the command and explicitly resubmit.
@@ -31,7 +31,7 @@ Production captures `get_plugin_ids().initial_cwd` before HOME remount and store
 it in instance-local `/data/original-cwd`. HOME bootstrap reload and F5 retain it;
 Shell starts selected, with no highlighted suggestion. One Enter validates and
 replaces the dashboard even while HOME is still indexing. Longer-than-100-scalar
-cwd identities are never truncated. Native/demo/simulation defaults are unchanged.
+cwd identities are never truncated. The `simulate_launch` default is unchanged.
 
 Only the exact original cwd (including its HOME-short label) can bypass ordinary
 HOME validation. On submission the main instance remounts to that path, waits for
@@ -116,7 +116,7 @@ an atomic security boundary against concurrent directory/symlink replacement.
 A narrow real-mode guard ignores Enter/the launch button while completion or
 launch validation is outstanding. Wait for completion, then submit again. This
 prevents rapid Tab→Enter from launching the old editor path; it does not otherwise
-redesign asynchronous completion or alter demo/native behavior.
+redesign asynchronous completion.
 
 ## Pinned source findings
 
@@ -148,7 +148,7 @@ The inspected server source is retained locally at
 ## Safe verification
 
 `bash tools/verify_plugin.sh` runs serial builds (`CARGO_BUILD_JOBS=1`), Rust tests,
-Clippy, native PTYs, explicit simulated search/worker/capacity tests, demo PTYs,
+Clippy, explicit simulated search/worker/capacity tests, live-host PTYs,
 and actual real-host launches with `tools/verify_launch.py`.
 
 The real launch harness uses owned `target/real-launch/live-*` HOME/config/cache/
@@ -173,10 +173,10 @@ verify clean client exit and the CLI's `There is no active session!` response.
 Missing-command tests assert failure on the original form, no automatic retry,
 then install the harmless fixture and verify explicit retry through normal exit.
 
-The standalone native app remains a simulation. `demo "true"` uses simulated
-fixture directories; `simulate_launch "true"` keeps real HOME search/validation
-but simulates launches. Search harnesses explicitly choose the latter so their
-existing validation/history assertions remain meaningful and safe.
+`simulate_launch "true"` keeps real HOME search and validation but never spawns
+a process: the dashboard reports `Launch suppressed (simulate_launch)` and keeps
+the attempt in memory only. Search harnesses choose it so their existing
+validation/history assertions remain meaningful and safe.
 
 TDD evidence is under `target/real-launch/`: `red-shell.log` shows the original
 WASM displaying its placeholder instead of executing the default-shell fixture;
@@ -199,9 +199,9 @@ use the [configured layout](../examples/configured.kdl) for additional commands)
 
 ```sh
 zellij action launch-plugin --skip-plugin-cache -- \
-  "file:$(pwd)/target/wasm32-wasip1/release/launchpad-plugin.wasm"
+  "file:$(pwd)/target/wasm32-wasip1/release/zellij-launchpad.wasm"
 ```
 
 Allow the new **Execute actions as the user** permission when prompted. Existing
 already-launched/held terminals retain their old lifecycle; this affects only
-new launches from the rebuilt plugin. Native/demo launches remain simulations.
+new launches from the rebuilt plugin.

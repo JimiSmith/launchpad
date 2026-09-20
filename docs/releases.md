@@ -2,13 +2,13 @@
 
 Pushing a tag beginning with `v` runs `.github/workflows/release.yml`. It builds
 only the production plugin for `wasm32-wasip1`, with the toolchain pinned in
-`rust-toolchain.toml` and dependencies from `Cargo.lock` (`--locked`). No native
-companion or development-only worker-fault features are included.
+`rust-toolchain.toml` and dependencies from `Cargo.lock` (`--locked`). The
+development-only worker-fault feature is not included.
 
 The workflow publishes a GitHub release containing:
 
-- `launchpad-plugin.wasm`
-- `launchpad-plugin.wasm.sha256`
+- `zellij-launchpad.wasm`
+- `zellij-launchpad.wasm.sha256`
 
 New releases remain drafts until both assets upload. Rerunning a failed workflow
 can finish the draft; assets for the same tag are replaced. Replacing assets on
@@ -41,8 +41,8 @@ Download and verify into an empty directory:
 
 ```sh
 gh release download v0.1 --repo JimiSmith/zellij-launchpad \
-  --pattern 'launchpad-plugin.wasm*'
-sha256sum --check launchpad-plugin.wasm.sha256
+  --pattern 'zellij-launchpad.wasm*'
+sha256sum --check zellij-launchpad.wasm.sha256
 ```
 
 Install at a stable local path and point the plugin layout/alias there. Updating

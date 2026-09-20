@@ -16,7 +16,11 @@ and sessions using Zellij's URL-shared `/cache/history.json` plus a small recove
 journal. History records launch attempts, not agent success. Changing the plugin
 URL or deleting its cache starts fresh. [Persistence details](docs/history.md).
 
-![Launchpad](verification/plugin/01-initial-80x24.png)
+![Launchpad](verification/plugin-only/dashboard-80x24.png)
+
+*Captured from the live verification harness, which runs with
+`simulate_launch "true"` — hence the "launch suppressed" badge. An ordinary
+install reads "HOME / replace this pane".*
 
 ## Run in Zellij
 
@@ -25,14 +29,14 @@ Run these commands from the repository root:
 
 ```sh
 rustup target add wasm32-wasip1
-cargo build --locked --release -p launchpad-plugin --target wasm32-wasip1
+cargo build --locked --release -p zellij-launchpad --target wasm32-wasip1
 ```
 
 For **Shell only**, from a shell inside Zellij:
 
 ```sh
 zellij action launch-plugin --skip-plugin-cache -- \
-  "file:$(pwd)/target/wasm32-wasip1/release/launchpad-plugin.wasm"
+  "file:$(pwd)/target/wasm32-wasip1/release/zellij-launchpad.wasm"
 ```
 
 The plugin is a single `.wasm` file with no companion executable. After rebuilding,
@@ -124,28 +128,35 @@ expansion, return no suggestions rather than allocating oversized matcher
 buffers. Bare short queries still find long paths; literal path validation and
 the separate 4096-byte filesystem safety limits are unchanged.
 
-## Standalone prototype
-
-The same UI also runs outside Zellij, with safe **simulated launches only**:
-
-```sh
-cargo run --locked --release
-```
-
-Plugin configuration `demo "true"` uses fixtures and simulates launches without
-permissions. `simulate_launch "true"` keeps real HOME search but simulates launches
-for development tests. `F6` is an illustrative availability toggle, not command discovery.
-
 ## Development
 
-Built with Ratatui, the serial `ignore` walker, and embedded Frizbee matching. The native executable and Zellij
-plugin share the application state and renderer.
+Launchpad is a single Zellij plugin. `zellij-launchpad-core` holds the state
+machine, the Ratatui renderer, the serial `ignore` walker and embedded Frizbee
+matching; `zellij-launchpad` is the Zellij 0.45.1 adapter that compiles to the
+`.wasm` artifact. There is no companion executable and no fixture data in the
+shipped plugin.
 
 ```sh
 cargo test --workspace --locked
 ```
 
-Run `bash tools/verify_plugin.sh` for builds, tests and isolated real-host fixture
-launches (no coding agents). See [launch behavior](docs/real-launch.md), the
-[spec](SPEC.md), [HTML mockup](design/launchpad.html), and
-[search implementation notes](docs/home-search.md) for policy and verification.
+Plugin configuration `simulate_launch "true"` keeps real HOME search and
+directory validation but never spawns a process: the dashboard reports
+`Launch suppressed (simulate_launch)` and keeps recent attempts in memory only,
+leaving the shared history cache untouched. The verification harness uses it;
+it is not a mode to install.
+
+The bounded live-host suite needs a development-only Python environment:
+
+```sh
+python3 -m venv target/verification-venv
+target/verification-venv/bin/pip install pyte==0.8.2 playwright==1.58.0
+bash tools/verify_plugin.sh
+```
+
+That runs builds, tests, lints and isolated real-host fixture launches in
+throwaway Zellij sessions (no coding agents are ever started). See
+[launch behavior](docs/real-launch.md), the [spec](SPEC.md),
+[HTML mockup](design/launchpad.html),
+[search implementation notes](docs/home-search.md) and
+[Zellij SDK notes](docs/zellij-sdk-notes.md) for policy and verification.

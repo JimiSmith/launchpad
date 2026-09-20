@@ -1,6 +1,6 @@
 //! Pure Ratatui renderer: no terminal input, filesystem, clock or launches.
 use crate::{
-    app::{Action, App, Focus, Screen, ScrollTarget},
+    app::{Action, App, Focus, ScrollTarget},
     cells::{clip, input_cursor, input_window, width},
     theme::*,
 };
@@ -146,65 +146,7 @@ fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
         help(f, app, area, hits);
         return;
     }
-    match &app.screen {
-        Screen::Terminal(event) => {
-            pair(
-                f,
-                at(area, area.y, 1),
-                "Terminal placeholder",
-                "SIMULATION",
-                accent(),
-            );
-            let lines = [
-                format!("{} · simulated launch accepted", app.tool_label(event.tool)),
-                String::new(),
-                format!("cwd  {}", event.path),
-                format!("tool {} · fixture target", app.tool_label(event.tool)),
-                String::new(),
-                if app.is_demo() {
-                    "No process was started. No host data was read.".into()
-                } else {
-                    "Directory validated. No process was started.".into()
-                },
-                "One launch event was added to in-memory history.".into(),
-            ];
-            f.render_widget(
-                Paragraph::new(lines.join("\n"))
-                    .style(base())
-                    .wrap(Wrap { trim: false }),
-                Rect::new(area.x, area.y + 2, area.width, area.height - 3),
-            );
-            controls(
-                f,
-                hits,
-                at(area, area.bottom() - 1, 1),
-                &[
-                    ("Esc back", Action::Escape),
-                    ("F5 reset", Action::Reset),
-                    ("Ctrl+Q quit", Action::Quit),
-                ],
-            );
-        }
-        Screen::Closed => {
-            row(
-                f,
-                at(area, area.y, 1),
-                "Launchpad · pane closed (simulation)",
-                accent(),
-            );
-            controls(
-                f,
-                hits,
-                at(area, area.y + 2, 1),
-                &[
-                    ("Esc reopen", Action::Escape),
-                    ("F5 reset", Action::Reset),
-                    ("Ctrl+Q quit", Action::Quit),
-                ],
-            );
-        }
-        Screen::Dashboard => dashboard(f, app, area, hits),
-    }
+    dashboard(f, app, area, hits);
 }
 
 fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
@@ -215,18 +157,11 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         at(area, area.y, 1),
         "›_ Launchpad",
-        if app.is_demo() {
-            if narrow { "DEMO" } else { "DEMO / memory only" }
-        } else if app.host_launch {
-            if narrow {
-                "REPLACE PANE"
-            } else {
-                "HOME / replace this pane"
-            }
-        } else if narrow {
-            "SIMULATED LAUNCH"
-        } else {
-            "HOME / launches simulated"
+        match (app.simulate_launch, narrow) {
+            (false, false) => "HOME / replace this pane",
+            (false, true) => "REPLACE PANE",
+            (true, false) => "HOME / launch suppressed",
+            (true, true) => "SUPPRESSED",
         },
         accent().add_modifier(Modifier::BOLD),
     );
@@ -422,20 +357,7 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
     } else if short {
         0
     } else {
-        row(
-            f,
-            at(area, y, 1),
-            &if app.is_demo() {
-                "─".repeat(area.width as usize)
-            } else {
-                app.search_status.clone()
-            },
-            if app.is_demo() {
-                base().fg(LINE)
-            } else {
-                muted()
-            },
-        );
+        row(f, at(area, y, 1), &app.search_status, muted());
         1
     };
     y += status_height;
@@ -585,7 +507,7 @@ fn suggestions(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         row(
             f,
             at(area, area.y, 1),
-            if !app.is_demo() && area.width < 60 {
+            if area.width < 60 {
                 &app.search_status
             } else if app.message.is_some() {
                 "Edit the path or choose another directory."
@@ -663,10 +585,10 @@ fn help(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
         f,
         at(area, area.y, 1),
         "Launchpad / help",
-        if app.host_launch {
-            "REPLACE PANE"
+        if app.simulate_launch {
+            "SUPPRESSED"
         } else {
-            "SIMULATION"
+            "REPLACE PANE"
         },
         accent(),
     );

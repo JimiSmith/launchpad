@@ -2,9 +2,10 @@
 
 Sections 2–10 describe the current product contract. Deferred features and
 verification gaps are listed separately in section 11; they are not claims of
-implemented behaviour. The production plugin provides HOME-only fuzzy directory
-search, configured commands, own-pane launches, and shared recent history.
-Native/demo adapters simulate launches and do not access persistent history.
+implemented behaviour. Launchpad is a single Zellij plugin providing HOME-only
+fuzzy directory search, configured commands, own-pane launches, and shared
+recent history. The development-only `simulate_launch` configuration validates
+a directory without spawning a process and never touches persistent history.
 
 Implementation details: [directory search](docs/home-search.md),
 [commands](docs/configured-commands.md), [launching](docs/real-launch.md), and
@@ -50,7 +51,7 @@ Illustrative only; configured labels and history vary:
     my-app/                 my-app-tests/
 
   Launch with
-  [ Shell ]   Claude   Codex   Copilot   Hermes
+  [ Shell ]   Claude   Codex   Hermes
 
   Recent launches
     Claude    ~/Projects/my-app                 12m ago
@@ -227,13 +228,15 @@ On pinned 0.45.1, `/data` is per instance and `/cache` is shared by plugin URL.
 
 ## 9. Architecture and integration
 
-Rust WASM plugin sharing application state, editing, matching, command definitions,
-and rendering with a native simulation adapter. A persistent worker owns the HOME
-index and ordinary directory validation. The main instance validates only the
+Rust WASM plugin in two crates: `zellij-launchpad-core` owns application state,
+editing, matching, command definitions and rendering, and `zellij-launchpad` is
+the Zellij event adapter compiled to the artifact. A persistent worker owns the
+HOME index and ordinary directory validation. The main instance validates only the
 exact invoking cwd via a remount acknowledgement and directory-open check.
 There is no external runtime helper executable.
 
-Pinned Zellij host/SDK: **0.45.1**. Actual launch APIs:
+Pinned Zellij host/SDK: **0.45.1**; the API contracts this relies on are
+recorded in [SDK notes](docs/zellij-sdk-notes.md). Actual launch APIs:
 
 - Shell: `open_terminal_in_place_of_plugin`, using Zellij's configured default shell.
 - Configured commands: `run_action(Action::NewInPlacePane)` with an explicit originating plugin pane ID, structured executable/argv/cwd, `close_replaced_pane: true`, and both command hold flags false.

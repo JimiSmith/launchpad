@@ -1,4 +1,4 @@
-use launchpad_plugin::{launch_tab, tab_name};
+use zellij_launchpad::{launch_tab, tab_name};
 use zellij_tile::prelude::{PaneInfo, SessionInfo, TabInfo};
 
 #[test]

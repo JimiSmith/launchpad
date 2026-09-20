@@ -1,5 +1,5 @@
 [package]
-name = "launchpad-plugin"
+name = "zellij-launchpad"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.98.1"
@@ -12,7 +12,7 @@ worker-faults = []
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-zellij-launchpad-prototype = { path = "..", default-features = false }
+zellij-launchpad-core = { path = ".." }
 zellij-tile = "=0.45.1"
 ratatui = { version = "=0.30.2", default-features = false }
 

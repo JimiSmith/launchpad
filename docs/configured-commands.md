@@ -4,7 +4,7 @@ Only the plugin's Zellij configuration defines production commands. A direct
 unconfigured WASM launch shows **Shell only**, initially selected. Shell uses
 `open_terminal_in_place_of_plugin`, so Zellij's configured default shell wins over
 `SHELL`. There are no built-in production agents, discovery, PATH probes, or
-availability filtering. Demo mode alone supplies illustrative commands/history.
+availability filtering. An unconfigured plugin shows Shell alone.
 
 See [the complete KDL layout](../examples/configured.kdl). Inside a plugin block:
 

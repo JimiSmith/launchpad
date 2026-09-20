@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
-use zellij_launchpad_prototype::search::HomeIndex;
+use zellij_launchpad_core::search::HomeIndex;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Tree(PathBuf);
 impl Tree {
@@ -29,21 +29,21 @@ impl Drop for Tree {
 }
 #[test]
 fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
-    use zellij_launchpad_prototype::search::{Directory, matches_in};
+    use zellij_launchpad_core::search::{Directory, matches_in};
     let home = format!("/home/{}", "a".repeat(101));
     let dirs = [Directory {
         path: format!("{home}/needle"),
         note: "directory",
         error: None,
     }];
-    assert!(matches_in(&"a".repeat(101), &dirs, &home, &home).is_empty());
-    assert!(matches_in("~/needle", &dirs, &home, &home).is_empty());
-    assert_eq!(matches_in("needle", &dirs, &home, &home), vec![0]);
+    assert!(matches_in(&"a".repeat(101), &dirs, &home).is_empty());
+    assert!(matches_in("~/needle", &dirs, &home).is_empty());
+    assert_eq!(matches_in("needle", &dirs, &home), vec![0]);
 }
 
 #[test]
 fn completed_long_path_is_preserved_and_launches_exact_target() {
-    use zellij_launchpad_prototype::app::{Action, App, Screen};
+    use zellij_launchpad_core::app::{Action, App};
     let tree = Tree::new();
     let name = format!("{}-needle", "a".repeat(110));
     tree.dir(&name);
@@ -58,8 +58,8 @@ fn completed_long_path_is_preserved_and_launches_exact_target() {
     app.update(Action::Text("ignored".into()));
     assert_eq!(app.editor.text, format!("~/{name}"));
     app.update(Action::Enter);
-    assert!(matches!(app.screen, Screen::Terminal(_)));
-    assert_eq!(app.history[0].path, tree.0.join(name).to_str().unwrap());
+    let launch = app.take_launch().expect("one launch request");
+    assert_eq!(launch.path, tree.0.join(name).to_str().unwrap());
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn bounded_scan_reports_limits_and_read_errors() {
 
 #[test]
 fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
-    use zellij_launchpad_prototype::app::{Action, App, Screen};
+    use zellij_launchpad_core::app::{Action, App};
     let tree = Tree::new();
     tree.dir("Projects/research/notes");
     tree.dir("Projects/.archive/notes");
@@ -385,22 +385,25 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     query(&mut app, "~/Projects/.archive");
     assert!(app.suggestions.is_empty());
     app.update(Action::Enter);
-    assert!(matches!(app.screen, Screen::Terminal(_)));
-    app.update(Action::Escape);
-    app.history.clear();
+    assert!(
+        app.take_launch().is_some(),
+        "an explicit hidden literal launches"
+    );
+    app.launch_rejected();
     query(&mut app, "修理");
     app.update(Action::Tab);
     assert_eq!(app.editor.text, "~/team notes/修理");
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
     fs::remove_dir(tree.0.join("team notes/修理")).unwrap();
     app.update(Action::Enter);
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
     assert!(app.message.as_ref().unwrap().contains("unavailable"));
     assert!(app.history.is_empty());
     query(&mut app, "~/Projects/research/notes");
     app.update(Action::Enter);
-    assert!(matches!(app.screen, Screen::Terminal(_)));
-    assert_eq!(app.history.len(), 1);
+    assert!(app.take_launch().is_some());
+    assert!(app.history.is_empty(), "the shared store owns real history");
+    app.launch_rejected();
     app.update(Action::Reset);
     for _ in 0..100 {
         app.index_tick();
@@ -412,12 +415,14 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
 
 #[test]
 fn background_indexing_respects_dismissal_and_history_copy() {
-    use zellij_launchpad_prototype::app::{Action, App, Focus};
+    use zellij_launchpad_core::app::{Action, App, Focus};
     let tree = Tree::new();
     for i in 0..300 {
         tree.dir(&format!("notes-{i}"));
     }
     let mut app = App::from_home(tree.0.clone(), tree.0.clone());
+    // Recording in memory keeps one recent row to copy back into the form.
+    app.simulate_launch = true;
     app.index_tick();
     assert!(app.is_indexing());
     app.update(Action::Escape);
@@ -429,7 +434,7 @@ fn background_indexing_respects_dismissal_and_history_copy() {
     app.update(Action::Clear);
     app.update(Action::Text("~".into()));
     app.update(Action::Enter); // ~ validates without needing an indexed candidate
-    app.update(Action::Escape);
+    assert_eq!(app.history.len(), 1);
     app.update(Action::Focus(Focus::History));
     app.update(Action::Tab);
     app.index_tick();
@@ -442,7 +447,7 @@ fn background_indexing_respects_dismissal_and_history_copy() {
 #[test]
 fn restricted_state_is_visible_at_minimum_size() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_prototype::{app::App, view};
+    use zellij_launchpad_core::{app::App, view};
     let mut app = App::default();
     app.search_status = "HOME access denied. Reopen plugin.".into();
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
@@ -500,7 +505,7 @@ fn directory_entry_and_depth_caps_remain_explicit() {
 
 #[test]
 fn hidden_home_spelling_does_not_hide_normal_descendants() {
-    use zellij_launchpad_prototype::app::{Action, App};
+    use zellij_launchpad_core::app::{Action, App};
     let tree = Tree::new();
     tree.dir(".home/notes");
     tree.dir(".home/.secret/notes");
@@ -519,7 +524,7 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
 #[test]
 fn search_status_uses_readable_text_color_not_separator_color() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_prototype::{app::App, theme::MUTED, view};
+    use zellij_launchpad_core::{app::App, theme::MUTED, view};
     let app = App::default();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|f| view::render(f, &app)).unwrap();

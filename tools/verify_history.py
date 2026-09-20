@@ -21,7 +21,7 @@ import uuid
 import pyte
 
 ROOT = Path(__file__).resolve().parents[1]
-WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'
+WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'
 ARTIFACT_HASH = hashlib.sha256(WASM.read_bytes()).hexdigest()
 ZELLIJ = shutil.which('zellij')
 python = shutil.which('python3')
@@ -178,7 +178,7 @@ def reopen(configuration=None, wasm=WASM):
         # An alias can focus an existing rejected dashboard; reset before waiting
         # for status text hidden by its transient rejection message.
         send('\x1b[15~')
-    target = 'Launchpad' if configuration == 'demo=true' else 'HOME indexed'
+    target = 'HOME indexed'
     deadline = time.monotonic()+45
     approvals = 0
     while target not in display() and time.monotonic() < deadline:
@@ -393,14 +393,10 @@ try:
         check(len(json.loads(history_file.read_text())['entries']) == 9, 'missing/corrupt projection recovers from bounded journal')
     before_cache = {p.name:p.read_bytes() for p in journal.iterdir()}
     before_json = history_file.read_bytes()
-    reopen('demo=true')
-    send('\x14\r')
-    expect('Terminal placeholder', 'demo still simulates')
-    check(history_file.read_bytes() == before_json and {p.name:p.read_bytes() for p in journal.iterdir()} == before_cache, 'demo leaves real persistent history unchanged')
     reopen('simulate_launch=true')
     check('No recent launches' in display(), 'simulation does not load persistent history')
     send('\x14\r')
-    expect('Terminal placeholder', 'real HOME simulation stays simulated')
+    expect('Launch suppressed', 'the harness mode never spawns a process')
     check(history_file.read_bytes() == before_json and {p.name:p.read_bytes() for p in journal.iterdir()} == before_cache, 'simulation never changes persistent history')
     reopen()
     snapshot('07-restored-real-history')

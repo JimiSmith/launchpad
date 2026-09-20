@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live input-limit/matcher memory regression at the 20,000-directory cap.
 Run after both release builds: target/verification-venv/bin/python tools/verify_input_limit.py
-Use --native for the shared native editor. HOME is always a disposable fixture.
+HOME is always a disposable fixture.
 """
 from pathlib import Path
 
@@ -23,7 +23,7 @@ source = Path(__file__).with_name('verify_search.py').read_text().split('success
 source = source.replace('master, slave = pty.openpty()', 'populate(home)\nmaster, slave = pty.openpty()')
 exec(compile(source, str(Path(__file__).with_name('verify_search.py')), 'exec'))
 success = False
-report = {'native': NATIVE, 'artifact': str(WASM if not NATIVE else ROOT/'target/release/zellij-launchpad-prototype')}
+report = {'artifact': str(WASM)}
 
 
 def input_text():
@@ -43,9 +43,8 @@ def paste(text):
 
 
 try:
-    if not NATIVE:
-        expect('permission', 'isolated host permission prompt', 45)
-        send('y')
+    expect('permission', 'isolated host permission prompt', 45)
+    send('y')
     expect('Launchpad', 'dashboard ready', 45)
     resize(160, 36)
     # Avoid matching every path on each progress tick while constructing the
@@ -94,7 +93,7 @@ try:
     send('Z')
     check('~/' + LONG_PATH in input_text() and 'Z' not in input_text(), 'long completion is preserved when insertion is blocked')
     send('\r')
-    expect('simulated launch accepted', 'long completed path still validates and launches', 10)
+    expect('Launch suppressed', 'long completed path still validates and launches', 10)
     snapshot('long-completion')
     send('\x1b')
     paste('freshneedle')
@@ -102,18 +101,13 @@ try:
     pump(1)
     check('Worker timed out' not in display(), 'no worker timeout at catalogue capacity')
     send('\x11')
-    if not NATIVE:
-        records = json.loads(cli('action', 'list-panes', '--all', '--json'))
-        check(not any(p.get('plugin_url') == 'file:' + str(WASM) for p in records), 'exact pane readback confirms unload')
-    else:
-        child.wait(timeout=10)
-        check(child.returncode == 0, 'native exits cleanly')
+    records = json.loads(cli('action', 'list-panes', '--all', '--json'))
+    check(not any(p.get('plugin_url') == 'file:' + str(WASM) for p in records), 'exact pane readback confirms unload')
     success = True
 finally:
     snapshot('last')
     (OUT/'session.ansi').write_bytes(raw)
-    if not NATIVE:
-        subprocess.run(['zellij', '--session', NAME, 'kill-session', NAME], env=env, capture_output=True, timeout=10)
+    subprocess.run(['zellij', '--session', NAME, 'kill-session', NAME], env=env, capture_output=True, timeout=10)
     if child.poll() is None:
         child.terminate()
     child.wait(timeout=5)

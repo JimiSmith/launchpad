@@ -1,4 +1,4 @@
-use zellij_launchpad_prototype::{
+use zellij_launchpad_core::{
     app::{Action, App, Focus, Tool},
     remote::RemoteRequest,
 };
@@ -7,7 +7,6 @@ use zellij_launchpad_prototype::{
 fn initial_cwd_is_a_full_identity_and_one_enter_validates_once_during_indexing() {
     let cwd = format!("/home/owned/{} 修理 e\u{301}; $HOME", "long".repeat(40));
     let mut app = App::from_remote("/home/owned".into());
-    app.host_launch = true;
     app.set_initial_cwd(cwd.clone());
     assert_eq!(
         app.editor.text,
@@ -29,16 +28,15 @@ fn initial_cwd_is_a_full_identity_and_one_enter_validates_once_during_indexing()
         Some(RemoteRequest::Validate { .. })
     ));
     assert!(app.finish_remote_validation(generation, Ok(cwd.clone())));
-    assert_eq!(app.take_host_launch().unwrap().path, cwd);
-    assert!(app.take_host_launch().is_none());
+    assert_eq!(app.take_launch().unwrap().path, cwd);
+    assert!(app.take_launch().is_none());
     app.update(Action::Enter);
-    assert!(app.take_host_launch().is_none());
+    assert!(app.take_launch().is_none());
 }
 
 #[test]
 fn reset_restores_original_identity_and_shell_but_editing_stays_normal_search() {
     let mut app = App::from_remote("/home/owned".into());
-    app.host_launch = true;
     app.set_initial_cwd("/outside/notes".into());
     app.update(Action::Clear);
     app.update(Action::Text("needle".into()));
@@ -61,5 +59,5 @@ fn reset_restores_original_identity_and_shell_but_editing_stays_normal_search() 
     ));
     assert_eq!(app.editor.text, "/outside/notes");
     assert!(app.message.as_ref().unwrap().contains("no fallback"));
-    assert!(app.take_host_launch().is_none());
+    assert!(app.take_launch().is_none());
 }

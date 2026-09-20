@@ -17,7 +17,7 @@ inside Zellij's plugin-URL-shared cache, not HOME, `/host`, or per-instance `/da
 Changing the plugin URL separates history even if the WASM bytes are identical.
 Deleting the URL cache clears history. Removing only `history.json` does not:
 reopen/refresh repairs it from the journal. Do not manually edit the projection.
-Native, `demo=true`, and `simulate_launch=true` never access this store.
+`simulate_launch=true` never accesses this store.
 
 ## Cache schema
 
@@ -120,7 +120,7 @@ fixtures. Socket roots live under `target/hp-sock/` to fit Unix socket path limi
 It checks replacement/reopen, remount reload, cap/dedup/tool/order, stored age,
 clear/cancel/delete, rejected spawn rollback, deleted directories, corrupt/missing
 cache, symlink failures without blocking execution, simulation isolation, and
-concurrent sessions sharing a URL. Native tests stress concurrent store operations
+concurrent sessions sharing a URL. Host-target tests stress concurrent store operations
 and parser/filesystem bounds. No test mode scans the actual user's HOME.
 
 RED/GREEN logs, PTY records, exact execution logs, host logs, screenshots and the

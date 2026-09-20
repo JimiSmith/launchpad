@@ -1,13 +1,13 @@
 //! Input help shared by navigation and renderer.
-pub const LINES: &[&str] = &[
+const LINES: &[&str] = &[
     "F1 / Esc  Back to the launcher",
-    "Ctrl+Q / Ctrl+C  Quit",
+    "Ctrl+Q / Ctrl+C  Close this plugin pane",
     "Ctrl+P / Ctrl+T / Ctrl+R  Path / tools / recent",
     "",
     "PATH   Type a home directory path or fuzzy query, e.g. notes / nts",
     "Tab / Shift+Tab  Accept next / previous completion",
     "↑ / ↓  Highlight suggestions; Enter accepts only",
-    "Enter without a highlight  Validate and simulate launch",
+    "Enter without a highlight  Validate and replace this pane",
     "← / → / Home / End  Move by grapheme",
     "Ctrl+A / Ctrl+E  Home / end · Ctrl+U  Clear input",
     "Backspace / Delete  Remove a whole grapheme",
@@ -16,56 +16,40 @@ pub const LINES: &[&str] = &[
     "RECENT ↑ / ↓ select · Home / End · Enter replay",
     "Tab copy path + tool · Delete remove · Ctrl+L clear (confirm)",
     "",
-    "F5  Refresh HOME / reset form · F6  Toggle Copilot availability",
+    "F5  Refresh HOME / reset form; command configuration is preserved",
     "Esc dismisses transient UI, then closes an untouched pane",
-    "Esc returns from the simulated terminal / closed pane",
+    "The dashboard closes on launch; it does not return on command exit.",
     "",
     "MOUSE Left click: place path cursor, accept a suggestion,",
     "select a tool or select a recent row. Selection never launches.",
     "Click Enter ↵ to launch; recent Tab copy / Enter replay act",
-    "on the selected row. All launches are still simulated.",
+    "on the selected row. Launch replaces this plugin pane.",
     "Wheel over suggestions / recent / help scrolls that section.",
     "Click F1 help, F5 reset, Ctrl+Q quit (^Q), or Esc back.",
     "Drag, release, right click ignored; host handles modifiers.",
     "",
     "Search: HOME only; relative paths start at HOME, not CWD.",
-    "Hidden directories require a dot-prefixed query component.",
+    "Hidden/ignored directories can still be entered literally.",
     "Symlinks, non-UTF-8 and control-character names are skipped.",
     "",
-    "Directory search is real. No PATH discovery or processes.",
-    "Launches, availability and history remain simulated; memory only.",
+    "Shell uses Zellij's default shell; configured commands use literal argv.",
+    "No command availability checks. Recent validated attempts persist in cache.",
 ];
 
 pub fn lines(app: &crate::app::App) -> Vec<String> {
-    let mut lines: Vec<String> = LINES
-        .iter()
-        .enumerate()
-        .map(|(i, s)| line(i, s, app.host_launch).into())
-        .collect();
-    if !app.is_demo() {
-        lines.push("Configured commands (Shell first):".into());
-        for c in &app.commands.entries {
-            lines.push(format!("{}: {}", c.id.as_str(), c.label));
-        }
-        for error in &app.commands.errors {
-            lines.push(format!("Config error: {error}"));
-        }
+    let mut lines: Vec<String> = LINES.iter().map(|s| (*s).into()).collect();
+    if app.simulate_launch {
+        lines.push(String::new());
+        lines.push("simulate_launch: directories are validated but no process".into());
+        lines.push("is started, and recent launches stay in memory only.".into());
+    }
+    lines.push(String::new());
+    lines.push("Configured commands (Shell first):".into());
+    for c in &app.commands.entries {
+        lines.push(format!("{}: {}", c.id.as_str(), c.label));
+    }
+    for error in &app.commands.errors {
+        lines.push(format!("Config error: {error}"));
     }
     lines
-}
-
-pub fn line(index: usize, simulation: &str, host_launch: bool) -> &str {
-    if !host_launch {
-        return simulation;
-    }
-    match index {
-        7 => "Enter without a highlight  Validate and replace this pane",
-        16 => "F5  Refresh HOME / reset form; command configuration is preserved",
-        18 => "The dashboard closes on launch; it does not return on command exit.",
-        23 => "on the selected row. Launch replaces this plugin pane.",
-        29 => "Hidden/ignored directories can still be entered literally.",
-        32 => "Shell uses Zellij's default shell; configured commands use literal argv.",
-        33 => "No command availability checks. Recent validated attempts persist in cache.",
-        _ => simulation,
-    }
 }

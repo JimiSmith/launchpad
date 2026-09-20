@@ -1,5 +1,5 @@
-use zellij_launchpad_prototype::app::{Action, App, Screen};
-use zellij_launchpad_prototype::remote::RemoteRequest;
+use zellij_launchpad_core::app::{Action, App};
+use zellij_launchpad_core::remote::RemoteRequest;
 #[test]
 fn async_search_coalesces_edits_and_rejects_dismissed_or_stale_results() {
     let mut app = App::from_remote("/home/example".into());
@@ -34,7 +34,7 @@ fn validation_runs_off_ui_and_late_selection_or_launch_cannot_win() {
     assert!(app.message.as_deref().unwrap().contains("Validating"));
     assert!(app.finish_remote_validation(generation, Ok(raw)));
     assert_eq!(app.editor.text, "~/notes");
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
     app.update(Action::Enter);
     let RemoteRequest::Validate { generation, .. } = app.take_remote_request().unwrap() else {
         panic!()
@@ -47,16 +47,16 @@ fn validation_runs_off_ui_and_late_selection_or_launch_cannot_win() {
         panic!()
     };
     assert!(app.finish_remote_validation(generation, Err("Directory unavailable".into())));
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
     assert!(app.message.as_deref().unwrap().contains("unavailable"));
     app.update(Action::Enter);
     let RemoteRequest::Validate { generation, .. } = app.take_remote_request().unwrap() else {
         panic!()
     };
     assert!(app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
-    assert!(matches!(app.screen, Screen::Terminal(_)));
+    assert!(app.take_launch().is_some());
     assert!(!app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
-    assert_eq!(app.history.len(), 1);
+    assert!(app.history.is_empty(), "the shared store owns real history");
 }
 #[test]
 fn navigating_results_never_resubmits_search_or_loses_selection() {
@@ -81,7 +81,7 @@ fn timeout_after_selected_result_keeps_enter_safe() {
     assert_eq!(app.highlighted, None);
     assert!(app.suggestions.is_empty());
     assert_eq!(app.message.as_deref(), Some("Worker timed out"));
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
     assert!(app.history.is_empty());
     assert!(app.take_remote_request().is_none());
     assert!(!app.apply_remote_results(generation, vec!["/home/example/late".into()]));
@@ -97,12 +97,12 @@ fn enter_with_stale_highlight_does_not_index_missing_result() {
         app.take_remote_request(),
         Some(RemoteRequest::Validate { .. })
     ));
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
 
 #[test]
 fn delayed_completion_survives_path_cursor_navigation() {
-    use zellij_launchpad_prototype::app::Focus;
+    use zellij_launchpad_core::app::Focus;
     for action in [
         Action::Left,
         Action::Right,
@@ -126,25 +126,25 @@ fn delayed_completion_survives_path_cursor_navigation() {
         );
         assert_eq!(app.editor.text, "~/notes", "{action:?}");
         assert_eq!(app.message, None, "{action:?}");
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert!(app.take_launch().is_none());
         assert!(app.history.is_empty());
     }
 }
 
 #[test]
 fn cancelling_delayed_validation_clears_status_and_restores_search() {
-    use zellij_launchpad_prototype::app::{Focus, Tool};
+    use zellij_launchpad_core::app::{Focus, Tool};
     for start in [Action::Tab, Action::LaunchForm] {
         for action in [
             Action::Focus(Focus::Tools),
             Action::Focus(Focus::History),
             Action::Down,
-            Action::SelectTool(Tool::Codex),
+            Action::SelectTool(Tool::new("codex").unwrap()),
             Action::Text("x".into()),
             Action::Backspace,
             Action::Delete,
             Action::Clear,
-            Action::ToggleCopilot,
+            Action::ClearHistory,
         ] {
             let mut app = App::from_remote("/home/example".into());
             app.take_remote_request();
@@ -160,7 +160,7 @@ fn cancelling_delayed_validation_clears_status_and_restores_search() {
                 Some("Validating directory…"),
                 "{start:?}, {action:?}"
             );
-            assert_eq!(app.screen, Screen::Dashboard);
+            assert!(app.take_launch().is_none());
             assert!(app.history.is_empty());
             assert_eq!(app.highlighted, None);
             let Some(RemoteRequest::Query {
@@ -202,12 +202,12 @@ fn timeout_during_completion_discards_cycle_and_delayed_reply() {
     );
     assert_eq!(app.editor.text, "~");
     assert!(app.take_remote_request().is_none());
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
 
 #[test]
 fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
-    use zellij_launchpad_prototype::app::{Focus, Tool};
+    use zellij_launchpad_core::app::{Focus, Tool};
     for start in [Action::Tab, Action::LaunchForm] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
@@ -218,13 +218,13 @@ fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
             panic!("cursor motion must preserve even an unsent validation")
         };
         assert!(app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
-        assert_eq!(app.message, None);
         if start == Action::Tab {
+            assert_eq!(app.message, None);
             assert_eq!(app.editor.text, "~/notes");
-            assert_eq!(app.screen, Screen::Dashboard);
+            assert!(app.take_launch().is_none());
         } else {
-            assert!(matches!(app.screen, Screen::Terminal(_)));
-            assert_eq!(app.history.len(), 1);
+            assert!(app.take_launch().is_some());
+            assert!(app.history.is_empty(), "the shared store owns real history");
         }
     }
     for action in [
@@ -251,7 +251,7 @@ fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
     let mut app = App::from_remote("/home/example".into());
     app.take_remote_request();
     app.update(Action::LaunchForm);
-    app.update(Action::SelectTool(Tool::Codex));
+    app.update(Action::SelectTool(Tool::new("codex").unwrap()));
     assert!(matches!(
         app.take_remote_request(),
         Some(RemoteRequest::Query { .. })
@@ -275,7 +275,7 @@ fn dismissing_delayed_validation_cannot_accept_or_launch_late() {
             assert!(!app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
             assert_eq!(app.editor.text, "~");
             assert_eq!(app.message, None);
-            assert_eq!(app.screen, Screen::Dashboard);
+            assert!(app.take_launch().is_none());
             assert!(app.history.is_empty());
             if action == Action::Reset {
                 assert!(matches!(
@@ -315,7 +315,7 @@ fn repeated_tab_replaces_delayed_validation_without_losing_cycle() {
         assert!(!app.finish_remote_validation(old_generation, Ok("/home/example/a".into())));
         assert!(app.finish_remote_validation(generation, Ok(raw)));
         assert_eq!(app.message, None);
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert!(app.take_launch().is_none());
     }
 }
 
@@ -335,7 +335,7 @@ fn old_index_revision_cannot_replace_newer_results() {
 }
 #[test]
 fn reset_close_quit_failure_and_history_copy_invalidate_pending_work() {
-    use zellij_launchpad_prototype::app::{Focus, Launch, Tool};
+    use zellij_launchpad_core::app::{Focus, Launch, Tool};
     for action in [Action::Reset, Action::Quit, Action::Escape] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();

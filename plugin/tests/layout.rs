@@ -11,7 +11,7 @@ fn configured_example_forwards_exact_values_from_pinned_kdl_parser() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/configured.kdl");
     let layout = Layout::from_path_without_config(&path).unwrap();
     let config = plugin_config(&layout.tabs()[0].1).unwrap();
-    let parsed = zellij_launchpad_prototype::commands::Commands::parse(&config);
+    let parsed = zellij_launchpad_core::commands::Commands::parse(&config);
     assert!(parsed.errors.is_empty());
     assert_eq!(
         parsed
@@ -52,7 +52,7 @@ fn documented_argument_examples_parse_and_produce_literal_argv() {
         let Some(Run::Plugin(plugin)) = &pane.run else {
             panic!("plugin missing")
         };
-        let parsed = zellij_launchpad_prototype::commands::Commands::parse(
+        let parsed = zellij_launchpad_core::commands::Commands::parse(
             plugin.get_configuration().unwrap().inner(),
         );
         assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);

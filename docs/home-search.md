@@ -3,15 +3,15 @@
 ## Current scope
 
 Both adapters use the same HOME-only directory index and embedded Frizbee matcher.
-The native process reads its `HOME`; Zellij reads the session-creation environment
+Zellij reads the session-creation environment
 through `get_session_environment_variables()` and retains only `HOME`. Changing
 HOME in a later shell does not change the session's HOME. Missing/invalid HOME is
 an error, never a fallback to `/host`, process CWD, `/`, or fixture directories.
 
-Native/simulation input starts at `~`. Production starts at the original invoking
+`simulate_launch` input starts at `~`. Production starts at the original invoking
 cwd and loads shared history. Normal plugin launches
-[replace the originating pane](real-launch.md); native/demo launches remain
-simulated. Only completed simulation actions add in-memory history. F5 clears
+[replace the originating pane](real-launch.md); `simulate_launch` runs never
+spawn a process. Only their completed validations add in-memory history. F5 clears
 that history/form and rebuilds the index. Search uses no persistent history, PATH
 probe, subprocess, external search helper, or network request. Indexing reads
 HOME-local `.gitignore` and `.ignore` contents, but not ordinary project files.
@@ -67,7 +67,7 @@ also fail visibly. Filesystem mutation between validation and spawn is not atomi
   by a descendant rule. No excluded paths or skipped counter are retained.
 - One scan slice requests at most 128 iterator results, checking a cooperative 5 ms
   budget between calls. `next()` may internally consume many ignored entries;
-  these limits are not exact syscall or wall-clock budgets. Native polling is cooperative; the plugin keeps traversal, Frizbee and
+  these limits are not exact syscall or wall-clock budgets. Stepping is cooperative; the plugin keeps traversal, Frizbee and
   validation in a persistent WASM worker. Only capped results reach its UI;
   epochs, query generations and revisions reject stale responses. No filesystem
   IO or matching runs during rendering. Exact invoking-cwd validation performs
@@ -109,7 +109,7 @@ Visible, non-ignored build trees still do.
 ### Rule loading and filesystem boundaries
 
 `ignore` 0.4.33's automatic Git discovery opens parent ignore files even when
-`parents(false)` disables their *effects*. A native inotify regression proves this
+`parents(false)` disables their *effects*. A host-target regression proves this
 upstream behaviour and the boundary fix. All automatic rule discovery is therefore
 disabled. A small DFS-ancestry rule stack uses the released crate's `GitignoreBuilder`
 and matcher, loading only `.ignore`/`.gitignore` in accepted HOME directories. It
@@ -139,22 +139,17 @@ of zero metadata/open syscalls for the excluded directory itself.
 cargo fmt --all --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p launchpad-plugin --target wasm32-wasip1 --locked -- -D warnings
-cargo build --locked --release
-cargo build --locked --release -p launchpad-plugin --target wasm32-wasip1
+cargo clippy -p zellij-launchpad --target wasm32-wasip1 --locked -- -D warnings
+cargo build --locked --release -p zellij-launchpad --target wasm32-wasip1
 # pyte is a development-only dependency in target/verification-venv
 PY=target/verification-venv/bin/python
 $PY tools/verify_search.py
 $PY tools/verify_search.py --deny
-$PY tools/verify_search.py --native
 $PY tools/verify_workers.py
 $PY tools/verify_input_limit.py
-$PY tools/verify_input_limit.py --native
-$PY tools/verify_index_benchmark.py --wasm target/wasm32-wasip1/release/launchpad-plugin.wasm
+$PY tools/verify_index_benchmark.py --wasm target/wasm32-wasip1/release/zellij-launchpad.wasm
 
 $PY tools/verify_zellij.py
-$PY tools/verify_pty.py
-$PY tools/verify_cleanup.py
 ```
 
 `verify_search.py` uses private host state and controlled directories, a CWD outside
@@ -166,5 +161,6 @@ result latency. These are PTY-observed timings, not cold-disk or pure-walker tim
 All automated search checks use disposable HOME fixtures beneath `target/`;
 there is no mode that uses the invoking user’s HOME. Unsupported flags are rejected
 before setup. Evidence is ignored under `target/zj-*`.
-The older UI/mouse regression harnesses explicitly select demo mode (`--demo` for
-native, plugin configuration `demo=true`); production startup never uses it.
+The UI/mouse regression harnesses run the real plugin with plugin configuration
+`simulate_launch=true` over a disposable fixture HOME; production startup never
+uses that setting.

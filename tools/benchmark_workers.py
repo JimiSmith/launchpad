@@ -14,8 +14,8 @@ benchmark_options = parser.parse_args()
 label, artifact = benchmark_options.label, benchmark_options.artifact
 SEARCH_ARGS = []
 source = (__import__('pathlib').Path(__file__).with_name('verify_search.py')).read_text().split('success = False')[0]
-source = source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'", "WASM = Path(artifact).resolve()")
-source = source.replace("shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)", "layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace(str(ROOT/'target/wasm32-wasip1/release/launchpad-plugin.wasm'), str(WASM)))\nfor i in range(100):\n    for j in range(180):\n        (home/f'group-{i:03d}'/f'candidate-{j:04d}-notes-project').mkdir(parents=True, exist_ok=True)")
+source = source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'", "WASM = Path(artifact).resolve()")
+source = source.replace("shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)", "layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace(str(ROOT/'target/wasm32-wasip1/release/zellij-launchpad.wasm'), str(WASM)))\nfor i in range(100):\n    for j in range(180):\n        (home/f'group-{i:03d}'/f'candidate-{j:04d}-notes-project').mkdir(parents=True, exist_ok=True)")
 exec(compile(source, str(__import__('pathlib').Path(__file__).with_name('verify_search.py')), 'exec'))
 report = {'label':label, 'artifact':str(WASM), 'sha256':hashlib.sha256(WASM.read_bytes()).hexdigest(), 'evidence':str(OUT)}
 def wait_until(predicate, timeout=240):

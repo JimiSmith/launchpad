@@ -1,11 +1,10 @@
-use zellij_launchpad_prototype::{
-    app::{Action, App, Screen, Tool},
+use zellij_launchpad_core::{
+    app::{Action, App, Tool},
     remote::RemoteRequest,
 };
 
 fn app() -> App {
     let mut app = App::from_remote("/home/fixture".into());
-    app.host_launch = true;
     app.configure(&std::collections::BTreeMap::from([
         ("commands".into(), "claude,codex,copilot,hermes".into()),
         ("command_claude".into(), "claude".into()),
@@ -23,12 +22,12 @@ fn validate(app: &mut App, result: Result<String, String>) {
 }
 #[test]
 fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
-    use zellij_launchpad_prototype::app::{Focus, Launch};
+    use zellij_launchpad_core::app::{Focus, Launch};
     let mut app = app();
     app.history.push(Launch {
         id: 1,
         path: "/home/fixture/a".into(),
-        tool: Tool::Codex,
+        tool: Tool::new("codex").unwrap(),
         age: "Yesterday".into(),
     });
     app.update(Action::Focus(Focus::History));
@@ -45,30 +44,31 @@ fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
     );
     assert_eq!(
         app.take_history_mutation(),
-        Some(zellij_launchpad_prototype::app::HistoryMutation::Clear)
+        Some(zellij_launchpad_core::app::HistoryMutation::Clear)
     );
     assert!(app.take_history_mutation().is_none());
     app.update(Action::Delete);
     assert_eq!(app.history.len(), 1, "delete also waits for persistence");
     assert_eq!(
         app.take_history_mutation(),
-        Some(zellij_launchpad_prototype::app::HistoryMutation::Remove(1))
+        Some(zellij_launchpad_core::app::HistoryMutation::Remove(1))
     );
 }
 #[test]
-fn real_launch_is_one_shot_not_a_simulated_terminal_or_history_event() {
-    for tool in Tool::ALL {
+fn real_launch_is_one_shot_and_never_records_its_own_history() {
+    for id in ["shell", "claude", "codex", "copilot", "hermes"] {
+        let tool = Tool::new(id).unwrap();
         let mut app = app();
-        app.copilot_available = false;
-        assert_eq!(app.visible_tools(), Tool::ALL);
-        app.update(Action::ToggleCopilot);
+        assert_eq!(app.visible_tools().len(), 5, "Shell plus four configured");
         app.update(Action::SelectTool(tool));
         app.update(Action::LaunchForm);
-        assert!(app.take_host_launch().is_none());
+        assert!(
+            app.take_launch().is_none(),
+            "nothing reaches the host before validation"
+        );
         validate(&mut app, Ok("/home/fixture/space 修理 it's; $HOME".into()));
-        assert_eq!(app.screen, Screen::Dashboard);
-        assert!(app.history.is_empty());
-        let launch = app.take_host_launch().unwrap();
+        assert!(app.history.is_empty(), "the shared store owns real history");
+        let launch = app.take_launch().expect("exactly one launch request");
         assert_eq!(launch.tool, tool);
         assert_eq!(launch.path, "/home/fixture/space 修理 it's; $HOME");
         for action in [
@@ -77,35 +77,38 @@ fn real_launch_is_one_shot_not_a_simulated_terminal_or_history_event() {
             Action::Reset,
             Action::Escape,
         ] {
-            app.update(action);
+            app.update(action.clone());
             app.remote_progress(3, "HOME indexed".into());
-            assert!(app.take_host_launch().is_none());
+            assert!(
+                app.take_launch().is_none(),
+                "{action:?} cannot launch again"
+            );
         }
         assert!(!app.finish_remote_validation(0, Ok("/home/fixture".into())));
-        assert!(app.take_host_launch().is_none());
+        assert!(app.take_launch().is_none());
     }
 }
 #[test]
 fn rejected_host_request_retains_form_and_requires_explicit_resubmission() {
     let mut app = app();
-    app.update(Action::SelectTool(Tool::Copilot));
+    app.update(Action::SelectTool(Tool::new("copilot").unwrap()));
     app.update(Action::LaunchForm);
     validate(&mut app, Err("directory unavailable".into()));
-    assert!(app.take_host_launch().is_none());
+    assert!(app.take_launch().is_none());
     assert_eq!(app.message.as_deref(), Some("directory unavailable"));
     app.update(Action::LaunchForm);
     validate(&mut app, Ok("/home/fixture".into()));
-    assert!(app.take_host_launch().is_some());
-    app.host_launch_rejected();
-    assert_eq!(app.screen, Screen::Dashboard);
-    assert_eq!(app.tool, Tool::Copilot);
+    assert!(app.take_launch().is_some());
+    app.launch_rejected();
+    assert!(app.take_launch().is_none());
+    assert_eq!(app.tool, Tool::new("copilot").unwrap());
     assert_eq!(app.editor.text, "~");
     assert!(app.message.as_ref().unwrap().contains("did not accept"));
     app.remote_progress(4, "HOME indexed".into());
-    assert!(app.take_host_launch().is_none());
+    assert!(app.take_launch().is_none());
     app.update(Action::LaunchForm);
     validate(&mut app, Ok("/home/fixture".into()));
-    assert!(app.take_host_launch().is_some());
+    assert!(app.take_launch().is_some());
 }
 #[test]
 fn rapid_submit_during_completion_does_not_launch_the_old_editor_path() {
@@ -120,25 +123,26 @@ fn rapid_submit_during_completion_does_not_launch_the_old_editor_path() {
         app.update(submit);
         assert!(app.finish_remote_validation(generation, Ok(raw)));
         assert_eq!(app.editor.text, "~/selected");
-        assert!(app.take_host_launch().is_none());
+        assert!(app.take_launch().is_none());
         assert!(!matches!(
             app.take_remote_request(),
             Some(RemoteRequest::Validate { .. })
         ));
         app.update(Action::Enter);
         validate(&mut app, Ok("/home/fixture/selected".into()));
-        assert_eq!(
-            app.take_host_launch().unwrap().path,
-            "/home/fixture/selected"
-        );
+        assert_eq!(app.take_launch().unwrap().path, "/home/fixture/selected");
     }
 }
 #[test]
-fn host_mode_survives_reset_while_native_remote_and_demo_default_to_simulation() {
+fn real_launching_is_the_default_and_the_harness_flag_survives_reset() {
     let mut app = app();
+    assert!(
+        !app.simulate_launch,
+        "the plugin launches for real by default"
+    );
+    assert!(!App::default().simulate_launch);
+    assert!(!App::from_remote("/home/fixture".into()).simulate_launch);
+    app.simulate_launch = true;
     app.update(Action::Reset);
-    assert!(app.host_launch);
-    assert!(!App::default().host_launch);
-    assert!(!App::demo().host_launch);
-    assert!(!App::from_remote("/home/fixture".into()).host_launch);
+    assert!(app.simulate_launch, "F5 keeps the configured harness mode");
 }

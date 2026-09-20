@@ -13,15 +13,11 @@ run() {
 
 run fmt cargo fmt --all --check
 run tests cargo test --workspace --locked
-run clippy-native cargo clippy --workspace --all-targets --locked -- -D warnings
-run clippy-wasm cargo clippy -p launchpad-plugin --target wasm32-wasip1 --locked -- -D warnings
-run native-build cargo build --release --locked
-run wasm-build cargo build -p launchpad-plugin --target wasm32-wasip1 --release --locked
-cargo tree -p launchpad-plugin --target wasm32-wasip1 --locked --edges normal > target/plugin-verification/wasm-deps.txt
+run clippy-host cargo clippy --workspace --all-targets --locked -- -D warnings
+run clippy-wasm cargo clippy -p zellij-launchpad --target wasm32-wasip1 --locked -- -D warnings
+run wasm-build cargo build -p zellij-launchpad --target wasm32-wasip1 --release --locked
+cargo tree -p zellij-launchpad --target wasm32-wasip1 --locked --edges normal > target/plugin-verification/wasm-deps.txt
 "$PYTHON" -c 'from pathlib import Path; assert "crossterm" not in Path("target/plugin-verification/wasm-deps.txt").read_text()'
-run native-pty "$PYTHON" tools/verify_pty.py
-run native-cleanup "$PYTHON" tools/verify_cleanup.py
-run search-native "$PYTHON" tools/verify_search.py --native
 run search-plugin "$PYTHON" tools/verify_search.py
 run search-denied "$PYTHON" tools/verify_search.py --deny
 run workers "$PYTHON" tools/verify_workers.py

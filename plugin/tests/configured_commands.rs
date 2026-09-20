@@ -1,6 +1,6 @@
-use launchpad_plugin::State;
 use std::collections::BTreeMap;
-use zellij_launchpad_prototype::app::{Action, Tool};
+use zellij_launchpad::State;
+use zellij_launchpad_core::app::{Action, Tool};
 use zellij_tile::prelude::Event;
 
 fn config() -> BTreeMap<String, String> {
@@ -17,7 +17,6 @@ fn config() -> BTreeMap<String, String> {
 #[test]
 fn configured_labels_and_errors_are_visible_in_dashboard_and_help() {
     let mut s = State::default();
-    s.app.host_launch = true;
     s.app.configure(&config());
     let frame = s.render_frame(24, 80);
     assert!(frame.contains("Claude in Worktree"), "{frame}");

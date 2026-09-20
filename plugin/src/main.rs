@@ -4,18 +4,18 @@ mod wasm {
     #[cfg(test)]
     use self::tests::{change_host_folder, read_dir, send, set_timeout};
     #[cfg(not(test))]
-    use launchpad_plugin::workers::Engine;
-    use launchpad_plugin::{
-        workers::{Reply, Request},
-        State,
-    };
-    #[cfg(not(test))]
     use serde::{Deserialize, Serialize};
     #[cfg(not(test))]
     use std::fs::read_dir;
     use std::time::{Duration, Instant};
-    use zellij_launchpad_prototype::app::{Action, App, Tool};
-    use zellij_launchpad_prototype::remote::RemoteRequest;
+    #[cfg(not(test))]
+    use zellij_launchpad::workers::Engine;
+    use zellij_launchpad::{
+        workers::{Reply, Request},
+        State,
+    };
+    use zellij_launchpad_core::app::{Action, App, Tool};
+    use zellij_launchpad_core::remote::RemoteRequest;
     use zellij_tile::prelude::*;
     #[cfg(not(test))]
     register_plugin!(Plugin);
@@ -96,7 +96,7 @@ mod wasm {
         launch_serial: u64,
         history_serial: u64,
         history_attempt: Option<String>,
-        history_rows: Vec<launchpad_plugin::history::Entry>,
+        history_rows: Vec<zellij_launchpad::history::Entry>,
         launch_context: Option<std::collections::BTreeMap<String, String>>,
         renamed_tab: Option<(usize, String, String)>,
         work: Option<(u64, Instant)>,
@@ -116,10 +116,10 @@ mod wasm {
                     }
                 }
             }
-            self.state.app.host_launch_rejected();
+            self.state.app.launch_rejected();
             if let Some(attempt) = self.history_attempt.take() {
                 let (token, _) = self.history_token();
-                match launchpad_plugin::history::Store::new(std::path::Path::new("/cache"))
+                match zellij_launchpad::history::Store::new(std::path::Path::new("/cache"))
                     .remove(&attempt, &token)
                 {
                     Ok(()) => self.load_history(),
@@ -132,11 +132,11 @@ mod wasm {
             }
         }
         fn load_history(&mut self) {
-            if self.simulate_launch || self.state.app.is_demo() {
+            if self.simulate_launch {
                 return;
             }
             let (token, _) = self.history_token();
-            let rows = match launchpad_plugin::history::Store::new(std::path::Path::new("/cache"))
+            let rows = match zellij_launchpad::history::Store::new(std::path::Path::new("/cache"))
                 .refresh(&token)
             {
                 Ok(rows) => rows,
@@ -154,20 +154,20 @@ mod wasm {
             self.state.app.history = rows
                 .iter()
                 .enumerate()
-                .map(|(id, row)| zellij_launchpad_prototype::app::Launch {
+                .map(|(id, row)| zellij_launchpad_core::app::Launch {
                     id: id as u64,
                     path: row.path.clone(),
                     tool: row.tool,
-                    age: launchpad_plugin::history::age(row.opened_at, now),
+                    age: zellij_launchpad::history::age(row.opened_at, now),
                 })
                 .collect();
             self.state.app.recent = self.state.app.recent.min(rows.len().saturating_sub(1));
             self.history_rows = rows;
         }
-        fn mutate_history(&mut self, mutation: zellij_launchpad_prototype::app::HistoryMutation) {
-            use zellij_launchpad_prototype::app::HistoryMutation;
+        fn mutate_history(&mut self, mutation: zellij_launchpad_core::app::HistoryMutation) {
+            use zellij_launchpad_core::app::HistoryMutation;
             let (token, _) = self.history_token();
-            let store = launchpad_plugin::history::Store::new(std::path::Path::new("/cache"));
+            let store = zellij_launchpad::history::Store::new(std::path::Path::new("/cache"));
             let result = match mutation {
                 HistoryMutation::Clear => store.clear(&token),
                 HistoryMutation::Remove(id) => self
@@ -203,22 +203,22 @@ mod wasm {
                 now.as_secs(),
             )
         }
-        fn record_history(&mut self, launch: &zellij_launchpad_prototype::app::Launch) {
+        fn record_history(&mut self, launch: &zellij_launchpad_core::app::Launch) {
             let (id, opened_at) = self.history_token();
             self.history_attempt = Some(id.clone());
-            let entry = launchpad_plugin::history::Entry {
+            let entry = zellij_launchpad::history::Entry {
                 id,
                 path: launch.path.clone(),
                 tool: launch.tool,
                 opened_at,
             };
             if let Err(error) =
-                launchpad_plugin::history::Store::new(std::path::Path::new("/cache")).record(entry)
+                zellij_launchpad::history::Store::new(std::path::Path::new("/cache")).record(entry)
             {
                 eprintln!("Launchpad: history not saved: {error}");
             }
         }
-        fn spawn_launch(&mut self, launch: zellij_launchpad_prototype::app::Launch) {
+        fn spawn_launch(&mut self, launch: zellij_launchpad_core::app::Launch) {
             self.record_history(&launch);
             // Target this plugin explicitly, never the last-focused pane.
             // Close rather than suppress it: command exit cannot restore it.
@@ -316,8 +316,8 @@ mod wasm {
                 EventType::ActionComplete,
             ]);
             // Capture before HOME remount; /data is instance-local across reload.
-            if !self.simulate_launch && configuration.get("demo").is_none_or(|v| v != "true") {
-                match launchpad_plugin::cwd::load(
+            if !self.simulate_launch {
+                match zellij_launchpad::cwd::load(
                     std::path::Path::new("/data"),
                     &get_plugin_ids().initial_cwd,
                 ) {
@@ -328,35 +328,24 @@ mod wasm {
                     }
                 }
             }
-            if configuration.get("demo").is_some_and(|v| v == "true") {
-                self.state.app = App::demo();
-            } else {
-                self.state.app.configure(&configuration);
-                self.state.app.host_launch = !self.simulate_launch;
-                self.state.app.search_status = "Waiting for HOME permissions…".into();
-                let mut permissions = vec![
-                    PermissionType::ReadSessionEnvironmentVariables,
-                    PermissionType::FullHdAccess,
-                    PermissionType::ChangeApplicationState,
-                ];
-                if !self.simulate_launch {
-                    permissions.extend([
-                        PermissionType::OpenTerminalsOrPlugins,
-                        PermissionType::RunActionsAsUser,
-                        PermissionType::ReadApplicationState,
-                    ]);
-                }
-                request_permission(&permissions);
+            self.state.app.configure(&configuration);
+            self.state.app.simulate_launch = self.simulate_launch;
+            self.state.app.search_status = "Waiting for HOME permissions…".into();
+            let mut permissions = vec![
+                PermissionType::ReadSessionEnvironmentVariables,
+                PermissionType::FullHdAccess,
+                PermissionType::ChangeApplicationState,
+            ];
+            if !self.simulate_launch {
+                permissions.extend([
+                    PermissionType::OpenTerminalsOrPlugins,
+                    PermissionType::RunActionsAsUser,
+                    PermissionType::ReadApplicationState,
+                ]);
             }
+            request_permission(&permissions);
         }
         fn update(&mut self, event: Event) -> bool {
-            if self.state.app.is_demo() {
-                let changed = self.state.handle(event);
-                if self.state.app.quit {
-                    close_self();
-                }
-                return changed;
-            }
             let mut changed = true;
             match event {
                 Event::PermissionRequestResult(PermissionStatus::Granted)
@@ -434,7 +423,7 @@ mod wasm {
                             if let Some(cwd) = &self.original_cwd {
                                 self.state.app.set_initial_cwd(cwd.clone());
                             }
-                            self.state.app.host_launch = !self.simulate_launch;
+                            self.state.app.simulate_launch = self.simulate_launch;
                             self.load_history();
                             #[cfg(feature = "worker-faults")]
                             if self.silence_worker {
@@ -511,7 +500,7 @@ mod wasm {
                 | Event::PermissionRequestResult(_)
                 | Event::ActionComplete(..) => changed = false,
                 event => {
-                    let quit = matches!(&event, Event::Key(key) if launchpad_plugin::key_action(key.clone()) == Some(Action::Quit));
+                    let quit = matches!(&event, Event::Key(key) if zellij_launchpad::key_action(key.clone()) == Some(Action::Quit));
                     let refresh_before = self.state.app.remote_refresh();
                     if self.ready || quit {
                         changed = self.state.handle(event);
@@ -526,7 +515,7 @@ mod wasm {
             if let Some(mutation) = self.state.app.take_history_mutation() {
                 self.mutate_history(mutation);
             }
-            if let Some(launch) = self.state.app.take_host_launch() {
+            if let Some(launch) = self.state.app.take_launch() {
                 let plugin_id = get_plugin_ids().plugin_id;
                 // Session snapshots can lag a newly opened/replaced plugin.
                 // A synchronous focus tuple is safe ONLY when its pane ID is us.
@@ -539,18 +528,18 @@ mod wasm {
                                 .live_sessions
                                 .into_iter()
                                 .find(|s| s.is_current_session)
-                                .and_then(|s| launchpad_plugin::launch_tab(&s, plugin_id))
+                                .and_then(|s| zellij_launchpad::launch_tab(&s, plugin_id))
                                 .map(|tab| tab.tab_id)
                         })
                     });
                 let tab = tab_id.and_then(get_tab_info);
                 let Some(tab) = tab else {
-                    self.state.app.host_launch_rejected();
+                    self.state.app.launch_rejected();
                     self.state.app.message =
                         Some("Originating tab unavailable; no launch. Retry.".into());
                     return true;
                 };
-                let name = launchpad_plugin::tab_name(
+                let name = zellij_launchpad::tab_name(
                     &launch.path,
                     &self.state.app.tool_label(launch.tool),
                 );

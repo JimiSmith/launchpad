@@ -52,7 +52,7 @@ plus denial and no reload loop. It is a development probe, not a runtime helper.
 
 The first working stage moved `HomeIndex::step(128)` into the worker. Main received
 bounded deltas and still matched/validated synchronously. Its saved binary is
-`target/perf-index-worker/launchpad-plugin.wasm`; `source.patch`, `workers.rs`
+`target/perf-index-worker/zellij-launchpad.wasm`; `source.patch`, `workers.rs`
 and `worker-tests.rs` in the same folder preserve this intermediate stage.
 It passed the real search/mouse/Unicode/refresh harness before stage 2 began.
 The measurements showed virtually no cached-input improvement: matching, not
@@ -65,7 +65,8 @@ not the current UI implementation.
 Frizbee and ordinary HOME directory revalidation. Indexing, matching and HOME validation share one
 persistent worker. This deliberately avoids duplicating the catalogue or sending
 large index deltas between sibling instances under the host's memory ceiling.
-The native adapter retains its cooperative synchronous backend.
+`HomeIndex` still exposes its cooperative synchronous stepping, which the
+worker drives one bounded slice at a time.
 
 `plugin/src/workers.rs` drives scanning with immediate self-messages, with at
 most one continuation queued. Each handler requests at most 128 iterator results
@@ -128,9 +129,9 @@ PY=target/verification-venv/bin/python
 $PY tools/probe_worker_home.py
 $PY tools/probe_worker_home.py --deny
 $PY tools/verify_workers.py
-$PY tools/benchmark_workers.py baseline target/perf-baseline/launchpad-plugin.wasm
-$PY tools/benchmark_workers.py index-worker target/perf-index-worker/launchpad-plugin.wasm
-$PY tools/benchmark_workers.py async-final target/wasm32-wasip1/release/launchpad-plugin.wasm
+$PY tools/benchmark_workers.py baseline target/perf-baseline/zellij-launchpad.wasm
+$PY tools/benchmark_workers.py index-worker target/perf-index-worker/zellij-launchpad.wasm
+$PY tools/benchmark_workers.py async-final target/wasm32-wasip1/release/zellij-launchpad.wasm
 ```
 
 The PTY tools reuse `verify_search.py`'s isolated setup/emulator prefix, changing
@@ -143,10 +144,10 @@ It can deliberately silence replies after the mapping handshake to verify the
 real watchdog, editable failed state, launch rejection and pane unload:
 
 ```sh
-cargo build --locked --release -p launchpad-plugin --bin launchpad-plugin \
+cargo build --locked --release -p zellij-launchpad --bin zellij-launchpad \
   --target wasm32-wasip1 --features worker-faults
 $PY tools/verify_workers.py --fault
 # Always restore the ordinary artifact afterwards:
-cargo build --locked --release -p launchpad-plugin --bin launchpad-plugin \
+cargo build --locked --release -p zellij-launchpad --bin zellij-launchpad \
   --target wasm32-wasip1
 ```

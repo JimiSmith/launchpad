@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use zellij_launchpad_prototype::app::{Action, App, Tool};
+use zellij_launchpad_core::app::{Action, App, Tool};
 
 fn config(items: &[(&str, &str)]) -> BTreeMap<String, String> {
     items
@@ -11,7 +11,6 @@ fn config(items: &[(&str, &str)]) -> BTreeMap<String, String> {
 #[test]
 fn configured_ids_select_real_structured_launch_after_validation() {
     let mut app = App::from_remote("/home/fixture".into());
-    app.host_launch = true;
     app.configure(&config(&[
         ("commands", " worktree, hermes,worktree,, other "),
         ("command_worktree", "claude"),
@@ -29,16 +28,16 @@ fn configured_ids_select_real_structured_launch_after_validation() {
             .collect::<Vec<_>>(),
         vec!["Shell", "Claude in Worktree", "hermes", "other"]
     );
-    app.update(Action::Focus(zellij_launchpad_prototype::app::Focus::Tools));
+    app.update(Action::Focus(zellij_launchpad_core::app::Focus::Tools));
     app.update(Action::Right);
     app.update(Action::Enter);
-    let Some(zellij_launchpad_prototype::remote::RemoteRequest::Validate { generation, .. }) =
+    let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
         app.take_remote_request()
     else {
         panic!("validation missing")
     };
     app.finish_remote_validation(generation, Ok("/home/fixture/literal; $HOME".into()));
-    let launch = app.take_host_launch().unwrap();
+    let launch = app.take_launch().unwrap();
     let definition = app.commands.get(launch.tool).unwrap();
     assert_eq!(definition.id.as_str(), "worktree");
     assert_eq!(definition.executable.as_deref(), Some("claude"));
@@ -164,7 +163,7 @@ fn configuration_bounds_reject_oversize_fields_and_preserve_neighbor_entries() {
 #[test]
 fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
     use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-    use zellij_launchpad_prototype::{
+    use zellij_launchpad_core::{
         app::Focus,
         view::{Pointer, render_with_hits},
     };
@@ -217,7 +216,7 @@ fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
 #[test]
 fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_prototype::{cells::width, view::render_with_hits};
+    use zellij_launchpad_core::{cells::width, view::render_with_hits};
     for label in [
         format!("{} END_OF_LABEL", "x".repeat(243)),
         format!("{} END_OF_LABEL", "界é👩🏽‍💻🇬🇧✈️ ".repeat(5)),
@@ -266,7 +265,7 @@ fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
             let compact = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
             assert_eq!(
                 compact(collected),
-                compact(zellij_launchpad_prototype::help::lines(&app).join("")),
+                compact(zellij_launchpad_core::help::lines(&app).join("")),
                 "all text reachable at {w}x{h}"
             );
             app.update(Action::Home);
@@ -303,14 +302,13 @@ fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
 #[test]
 fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
     use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-    use zellij_launchpad_prototype::{
+    use zellij_launchpad_core::{
         app::{Focus, Launch},
         view::{Pointer, render_with_hits},
     };
     for (w, h) in [(40, 10), (40, 12), (80, 24), (200, 36)] {
         let mut app = App::from_remote("/fixture".into());
         app.take_remote_request();
-        app.host_launch = true;
         app.history.push(Launch {
             id: 7,
             path: "/fixture/old".into(),
@@ -342,30 +340,28 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
         );
         app.update(hits.action(Pointer::Click, x + 4, y, area).unwrap());
         assert_eq!(app.recent, 0);
-        assert!(app.take_host_launch().is_none(), "selection never launches");
+        assert!(app.take_launch().is_none(), "selection never launches");
         app.update(Action::Enter);
-        let Some(zellij_launchpad_prototype::remote::RemoteRequest::Validate {
-            generation, ..
-        }) = app.take_remote_request()
+        let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
+            app.take_remote_request()
         else {
             panic!("history validation missing")
         };
         app.finish_remote_validation(generation, Ok("/fixture/old".into()));
         assert!(app.message.as_ref().unwrap().contains("unavailable"));
-        assert!(app.take_host_launch().is_none());
+        assert!(app.take_launch().is_none());
         app.update(Action::Tab);
         assert_eq!(app.tool.as_str(), "removed-long-id");
         app.update(Action::LaunchForm);
-        let Some(zellij_launchpad_prototype::remote::RemoteRequest::Validate {
-            generation, ..
-        }) = app.take_remote_request()
+        let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
+            app.take_remote_request()
         else {
             panic!("copied path validation missing")
         };
         app.finish_remote_validation(generation, Ok("/fixture/old".into()));
         assert!(app.message.as_ref().unwrap().contains("unavailable"));
         assert!(
-            app.take_host_launch().is_none(),
+            app.take_launch().is_none(),
             "copy must not substitute an available command"
         );
     }

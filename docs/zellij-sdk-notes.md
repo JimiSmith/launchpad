@@ -1,5 +1,10 @@
 # Zellij 0.45.1 integration findings
 
+Reference notes behind the adapter's design decisions, kept with the other
+implementation docs. Statements about run evidence describe the research pass
+that produced them, not the current build; see
+[the current verification record](../verification/plugin-only/REPORT.md).
+
 Research used the published **zellij-tile 0.45.1 / zellij-utils 0.45.1** crates
 and release tag **v0.45.1**, commit
 `efd8fd5a89a20c07a111d248ad7fce53848d2c18`.

@@ -20,7 +20,7 @@ try:
         send('\x15\x1b[200~still-editable\x1b[201~')
         expect('still-editable','failed worker does not freeze editing',5)
         send('\r')
-        check('simulated launch accepted' not in display(),'failed worker never validates a launch')
+        check('Launch suppressed' not in display(),'failed worker never validates a launch')
         snapshot('fault')
     else:
         check('Indexing HOME' in display(),'cold index active before burst')
@@ -42,7 +42,7 @@ try:
         send('\x15mousefresh')
         expect('mousefresh/','mouse reset refreshes the worker catalogue',45)
         send('\x15~\r')
-        expect('simulated launch accepted','async literal validation completes',10)
+        expect('Launch suppressed','async literal validation completes',10)
         send('\x1b');send('\x12');send('\t');pump(1)
         check('Copied to form' in display(),'history copy not overwritten by late replies')
         check('freshneedle/' not in display(),'history copy keeps suggestions closed')

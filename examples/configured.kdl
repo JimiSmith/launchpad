@@ -3,7 +3,7 @@
 layout {
     tab name="Launchpad" focus=true {
         pane borderless=true {
-            plugin location="file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/launchpad-plugin.wasm" {
+            plugin location="file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/zellij-launchpad.wasm" {
                 commands "claude,hermes,codex"
                 command_claude "claude"
                 arguments_claude "-w"

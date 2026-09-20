@@ -10,7 +10,9 @@ use std::{
 };
 mod ignore_rules;
 
-pub fn normalize_in(raw: &str, home: &str, cwd: &str) -> Option<String> {
+/// Lexical only: never consults the host, a shell or the invoking directory.
+/// Relative input resolves against HOME, which is also the only search root.
+pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
     if raw.is_empty()
         || raw.chars().any(char::is_control)
         || (raw.starts_with('~') && raw != "~" && !raw.starts_with("~/"))
@@ -24,7 +26,7 @@ pub fn normalize_in(raw: &str, home: &str, cwd: &str) -> Option<String> {
     } else if raw.starts_with('/') {
         raw.to_owned()
     } else {
-        format!("{cwd}/{raw}")
+        format!("{home}/{raw}")
     };
     let mut parts = Vec::new();
     for p in path.split('/') {
@@ -40,7 +42,7 @@ pub fn normalize_in(raw: &str, home: &str, cwd: &str) -> Option<String> {
 }
 
 /// Embedded Frizbee ranks basename and full path; path order breaks ties.
-pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<usize> {
+pub fn matches_in(raw: &str, dirs: &[Directory], home: &str) -> Vec<usize> {
     use neo_frizbee::{Config, Matcher};
     if raw.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
@@ -54,7 +56,7 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<u
         || raw.starts_with("./")
         || raw.starts_with("../");
     let query = if explicit {
-        normalize_in(raw, home, cwd).unwrap_or_else(|| raw.into())
+        normalize_in(raw, home).unwrap_or_else(|| raw.into())
     } else {
         raw.to_owned()
     };
@@ -63,28 +65,12 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<u
     if query.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
     }
-    let allow_hidden = raw
-        .split('/')
-        .any(|p| p.starts_with('.') && p != "." && p != "..");
-    let candidates: Vec<_> = dirs
+    let paths: Vec<_> = dirs.iter().map(|d| d.path.as_str()).collect();
+    let names: Vec<_> = dirs
         .iter()
-        .enumerate()
-        .filter(|(_, d)| {
-            allow_hidden
-                || !d
-                    .path
-                    .strip_prefix(home)
-                    .unwrap_or(&d.path)
-                    .split('/')
-                    .any(|p| p.starts_with('.'))
-        })
+        .map(|d| d.path.rsplit('/').next().unwrap_or(&d.path))
         .collect();
-    let paths: Vec<_> = candidates.iter().map(|(_, d)| d.path.as_str()).collect();
-    let names: Vec<_> = candidates
-        .iter()
-        .map(|(_, d)| d.path.rsplit('/').next().unwrap_or(&d.path))
-        .collect();
-    let mut scores = vec![None; candidates.len()];
+    let mut scores = vec![None; dirs.len()];
     let mut matcher = Matcher::new(&query, &config);
     for m in matcher
         .match_list(&paths)
@@ -97,7 +83,7 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, cwd: &str) -> Vec<u
     let mut ranked: Vec<_> = scores
         .into_iter()
         .enumerate()
-        .filter_map(|(i, score)| score.map(|s| (candidates[i].0, s)))
+        .filter_map(|(i, score)| score.map(|s| (i, s)))
         .collect();
     ranked.sort_by(|a, b| {
         b.1.cmp(&a.1)

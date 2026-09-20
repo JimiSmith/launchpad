@@ -1,6 +1,6 @@
 //! Bounded, serial worker protocol. State lives inside the worker instance.
 use serde::{Deserialize, Serialize};
-use zellij_launchpad_prototype::{editor::MAX_INPUT_CHARS, search::HomeIndex};
+use zellij_launchpad_core::{editor::MAX_INPUT_CHARS, search::HomeIndex};
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
     Start {
@@ -160,7 +160,7 @@ impl Engine {
                 let paths = if text.chars().count() > MAX_INPUT_CHARS {
                     Vec::new()
                 } else {
-                    zellij_launchpad_prototype::search::matches_in(&text, &index.dirs, home, home)
+                    zellij_launchpad_core::search::matches_in(&text, &index.dirs, home)
                         .into_iter()
                         .take(100)
                         .map(|i| &index.dirs[i].path)
@@ -346,7 +346,7 @@ mod tests {
     }
     #[test]
     fn oversized_queries_are_rejected_without_poisoning_worker() {
-        use zellij_launchpad_prototype::search::Directory;
+        use zellij_launchpad_core::search::Directory;
         let home = "/home/example";
         let mut worker = Engine::default();
         worker.handle(
@@ -405,13 +405,11 @@ mod tests {
         );
         let index = worker.index.as_mut().unwrap();
         for i in 0..400 {
-            index
-                .dirs
-                .push(zellij_launchpad_prototype::search::Directory {
-                    path: format!("/home/example/{}/needle{i}", "x".repeat(1000)),
-                    note: "directory",
-                    error: None,
-                });
+            index.dirs.push(zellij_launchpad_core::search::Directory {
+                path: format!("/home/example/{}/needle{i}", "x".repeat(1000)),
+                note: "directory",
+                error: None,
+            });
         }
         let reply = worker.handle(
             Request::Query {

@@ -21,7 +21,7 @@ import uuid
 import pyte
 
 ROOT = Path(__file__).resolve().parents[1]
-WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'
+WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'
 ARTIFACT_HASH = hashlib.sha256(WASM.read_bytes()).hexdigest()
 ZELLIJ = shutil.which('zellij')
 python = shutil.which('python3')
@@ -284,7 +284,7 @@ try:
         after=panes('panes-after')
         check(before == after,'denial retains exact pane list')
         check(all(r['exe']=='neighbor' for r in records()),'denial executes no launch')
-        check('Terminal placeholder' not in display(),'denial never simulates success')
+        check('Launch suppressed' not in display(),'denial never simulates success')
     else:
         expect('Indexing HOME' if args.during_index else ('~/space' if args.commands_case == 'invalid' else 'HOME indexed'),'real worker ready')
         if args.commands_case == 'shell-only':
@@ -497,7 +497,7 @@ try:
                 stable=['id','terminal_command','pane_command','pane_cwd',*geometry]
                 if args.tab_race: stable.append('tab_name')
                 check(all(new.get(k)==old.get(k) for k in stable),'neighbor identity, command, cwd and geometry unchanged')
-        check('Terminal placeholder' not in display(),'real request never renders a fake terminal')
+        check('Launch suppressed' not in display(),'real request never renders a fake terminal')
         launched=[r for r in records() if r['exe']==expected]
         check(len(launched)==1,'exactly one OS launch')
         check(launched[0]['argv']==expected_argv,'exact configured literal argv including empty arguments')

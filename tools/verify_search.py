@@ -21,7 +21,6 @@ import time
 import uuid
 
 parser = argparse.ArgumentParser(description='Verify search using an isolated HOME fixture.')
-parser.add_argument('--native', action='store_true')
 parser.add_argument('--deny', action='store_true')
 # Wrappers validate their own CLI before supplying explicit search options.
 options = parser.parse_args(globals().get('SEARCH_ARGS'))
@@ -29,12 +28,11 @@ options = parser.parse_args(globals().get('SEARCH_ARGS'))
 import pyte
 
 ROOT = Path(__file__).resolve().parents[1]
-NATIVE = options.native
 DENY = options.deny
 NAME = 'search-' + uuid.uuid4().hex[:8]
 OUT = ROOT / 'target' / ('zj-' + NAME[3:])
 OUT.mkdir(parents=True)
-WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'
+WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'
 assert WASM.is_file(), 'Build the release WASM first'
 for directory in ('home', 'cache', 'config', 'data', 'runtime', 'sock', 'tmp'):
     (OUT / directory).mkdir(mode=0o700)
@@ -88,7 +86,6 @@ def setup():
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 command = ['zellij','--config',str(config),'--layout-string',layout.read_text()]
-if NATIVE: command = [str(ROOT/'target/release/zellij-launchpad-prototype')]
 child = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
                          env=env, cwd=ROOT, preexec_fn=setup)
 class Screen(pyte.Screen):
@@ -191,17 +188,16 @@ def cli(*args):
 
 success = False
 try:
-    if not NATIVE:
-        # Permission prompts do not contain Launchpad and must be handled first.
-        expect('permission', 'host requests permission', timeout=45)
-        snapshot('00-permissions')
-        send('n' if DENY else 'y')
+    # Permission prompts do not contain Launchpad and must be handled first.
+    expect('permission', 'host requests permission', timeout=45)
+    snapshot('00-permissions')
+    send('n' if DENY else 'y')
     expect('Launchpad', 'real dashboard loads', timeout=45)
     if DENY:
         expect('denied', 'permission denial is visible')
         check('· 0 events' in display(), 'denial never invents history')
         send('\x15notes\r')
-        check('Terminal placeholder' not in display(), 'denied search cannot launch')
+        check('Launch suppressed' not in display(), 'denied search cannot launch')
         snapshot('denied')
     else:
         check('· 0 events' in display(), 'real startup history is empty')
@@ -209,7 +205,7 @@ try:
         send('\x15')
         send('\x1b[200~~/' + probe.name + '/team notes/修理\x1b[201~')
         send('\r')
-        expect('simulated launch accepted', 'real Unicode directory validates')
+        expect('Launch suppressed', 'real Unicode directory validates')
         send('\x1b')
         expect('HOME indexed', 'controlled index completes')
         resize(140,24)
@@ -221,7 +217,7 @@ try:
             send('\x15' + kept)
             expect(kept + '/', 'ignore precedence and safe rule loading retain ' + kept)
         send('\x15~/' + probe.name + '/Projects/ignoredneedle/nested\r')
-        expect('simulated launch accepted', 'ignored literal directory still validates')
+        expect('Launch suppressed', 'ignored literal directory still validates')
         send('\x1b')
         send('\x15.git/prunedneedle')
         check('prunedneedle/' not in display(), 'git subtrees excluded even with explicit hidden query')
@@ -234,16 +230,16 @@ try:
         expect('research/notes/', 'bare fuzzy query finds nested real directories')
         snapshot('01-search')
         click('research/notes/')
-        check('Terminal placeholder' not in display(), 'real directory mouse completion never launches')
+        check('Launch suppressed' not in display(), 'real directory mouse completion never launches')
         send('\r')
-        expect('simulated launch accepted', 'accepted directory revalidates')
+        expect('Launch suppressed', 'accepted directory revalidates')
         send('\x1b')
         send('\x15hiddenneedle')
         check('hiddenneedle/' not in display(), 'hidden directories omitted by default')
         send('\x15.archive/hiddenneedle')
         check('hiddenneedle/' not in display(), 'dot query cannot reveal pruned hidden directories')
         send('\x15~/' + probe.name + '/.archive/hiddenneedle\r')
-        expect('simulated launch accepted', 'hidden literal directory still validates')
+        expect('Launch suppressed', 'hidden literal directory still validates')
         send('\x1b')
         send('\x15fileneedle')
         check('fileneedle/' not in display(), 'files never become candidates')
@@ -267,7 +263,7 @@ try:
         send('\x1b[15~')
         expect('limit reached', 'oversized ignore file stops indexing visibly')
         send('\x15~/' + probe.name + '/Projects/research/notes\r')
-        expect('simulated launch accepted', 'literal validation survives the rule-memory limit')
+        expect('Launch suppressed', 'literal validation survives the rule-memory limit')
         snapshot('rule-limit')
         send('\x1b')
         (home/'.ignore').unlink()
@@ -284,21 +280,15 @@ try:
         resize(80,24)
         snapshot('03-final')
     send('\x11')
-    if not NATIVE:
-        records=json.loads(cli('action','list-panes','--all','--json'))
-        check(not any(p.get('plugin_url') == 'file:'+str(WASM) for p in records),
-              'readback confirms plugin pane closed')
-    else:
-        deadline=time.monotonic()+5
-        while child.poll() is None and time.monotonic()<deadline: pump(0.1)
-        check(child.poll()==0, 'native exits cleanly')
+    records=json.loads(cli('action','list-panes','--all','--json'))
+    check(not any(p.get('plugin_url') == 'file:'+str(WASM) for p in records),
+          'readback confirms plugin pane closed')
     success=True
 finally:
     snapshot('last')
     (OUT/'session.ansi').write_bytes(raw)
-    if not NATIVE:
-        subprocess.run(['zellij','--session',NAME,'kill-session',NAME],env=env,
-                       capture_output=True,timeout=10)
+    subprocess.run(['zellij','--session',NAME,'kill-session',NAME],env=env,
+                   capture_output=True,timeout=10)
     pump(0.3)
     if child.poll() is None: child.terminate()
     child.wait(timeout=5)
@@ -307,7 +297,7 @@ finally:
     (probe/'deniedneedle').chmod(0o700)
     shutil.rmtree(probe)
     report={'success':success, 'checks':checks, 'passed':len(checks),
-            'native':NATIVE, 'denied':DENY, 'evidence':str(OUT),
-            'sha256':hashlib.sha256((ROOT/'target/release/zellij-launchpad-prototype' if NATIVE else WASM).read_bytes()).hexdigest()}
+            'denied':DENY, 'evidence':str(OUT),
+            'sha256':hashlib.sha256(WASM.read_bytes()).hexdigest()}
     (OUT/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))

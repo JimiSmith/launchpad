@@ -1,4 +1,4 @@
-use crate::{editor::Editor, fixtures, search::Directory};
+use crate::{editor::Editor, search::Directory};
 
 pub use crate::commands::Tool;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,12 +13,6 @@ pub struct Launch {
     pub path: String,
     pub tool: Tool,
     pub age: String,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Screen {
-    Dashboard,
-    Terminal(Launch),
-    Closed,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -45,7 +39,6 @@ pub enum Action {
     Focus(Focus),
     Help,
     Reset,
-    ToggleCopilot,
     ClearHistory,
     Quit,
 }
@@ -65,28 +58,26 @@ pub struct App {
     pub commands: crate::commands::Commands,
     pub history: Vec<Launch>,
     pub recent: usize,
-    pub screen: Screen,
     pub message: Option<String>,
     pub help: bool,
     pub help_scroll: usize,
     /// Rendered-row limit from the last help frame, not the logical line count.
     pub(crate) help_scroll_max: std::cell::Cell<usize>,
-    pub copilot_available: bool,
     pub quit: bool,
     pub compact: bool,
     pub touched: bool,
     pub confirm_clear: bool,
     cycle: Option<(Vec<usize>, usize)>,
     next_id: u64,
-    demo: bool,
     index: Option<crate::search::HomeIndex>,
     remote: Option<crate::remote::Remote>,
     pub search_status: String,
-    /// Explicit host-adapter opt-in; native and demo remain simulations.
-    pub host_launch: bool,
-    host_request: Option<Launch>,
+    /// `simulate_launch`: validate and record in memory, never spawn a process
+    /// and never touch the shared history store. Development harness only.
+    pub simulate_launch: bool,
+    launch_request: Option<Launch>,
     history_request: Option<HistoryMutation>,
-    host_launch_pending: bool,
+    launch_pending: bool,
     show_suggestions: bool,
     initial_cwd: Option<String>,
 }
@@ -100,38 +91,33 @@ impl Default for App {
     fn default() -> Self {
         let mut editor = Editor::default();
         editor.set("~");
-        let dirs = Vec::new();
-        let suggestions = Vec::new();
         Self {
             editor,
-            dirs,
-            suggestions,
+            dirs: Vec::new(),
+            suggestions: Vec::new(),
             highlighted: None,
             focus: Focus::Path,
             tool: Tool::Shell,
             commands: Default::default(),
             history: Vec::new(),
             recent: 0,
-            screen: Screen::Dashboard,
             message: None,
             help: false,
             help_scroll: 0,
             help_scroll_max: std::cell::Cell::new(usize::MAX),
-            copilot_available: true,
             quit: false,
             compact: false,
             touched: false,
             confirm_clear: false,
             cycle: None,
-            next_id: 10,
-            demo: false,
+            next_id: 0,
             index: None,
             remote: None,
             search_status: "Waiting for HOME access.".into(),
-            host_launch: false,
-            host_request: None,
+            simulate_launch: false,
+            launch_request: None,
             history_request: None,
-            host_launch_pending: false,
+            launch_pending: false,
             show_suggestions: true,
             initial_cwd: None,
         }
@@ -157,11 +143,11 @@ impl App {
     pub fn take_history_mutation(&mut self) -> Option<HistoryMutation> {
         self.history_request.take()
     }
-    pub fn take_host_launch(&mut self) -> Option<Launch> {
-        self.host_request.take()
+    pub fn take_launch(&mut self) -> Option<Launch> {
+        self.launch_request.take()
     }
-    pub fn host_launch_rejected(&mut self) {
-        self.host_launch_pending = false;
+    pub fn launch_rejected(&mut self) {
+        self.launch_pending = false;
         self.message =
             Some("Zellij did not accept the launch. Check permissions and try again.".into());
     }
@@ -198,12 +184,7 @@ impl App {
         if remote.outbound.is_some() {
             return remote.outbound.take();
         }
-        if !remote.dirty
-            || self.help
-            || !self.show_suggestions
-            || self.cycle.is_some()
-            || self.screen != Screen::Dashboard
-            || self.quit
+        if !remote.dirty || self.help || !self.show_suggestions || self.cycle.is_some() || self.quit
         {
             return None;
         }
@@ -250,11 +231,7 @@ impl App {
         let Some(remote) = &mut self.remote else {
             return false;
         };
-        if remote.failed
-            || remote.generation != generation
-            || self.screen != Screen::Dashboard
-            || self.quit
-        {
+        if remote.failed || remote.generation != generation || self.quit {
             return false;
         }
         let Some(kind) = remote.validation.take() else {
@@ -283,7 +260,6 @@ impl App {
             .is_none_or(|r| r.generation != generation)
             || !self.show_suggestions
             || self.cycle.is_some()
-            || self.screen != Screen::Dashboard
             || self.quit
         {
             return false;
@@ -303,7 +279,11 @@ impl App {
             })
             .collect();
         self.suggestions = (0..self.dirs.len()).collect();
-        self.highlighted = selected.and_then(|path| self.dirs.iter().position(|d| d.path == path));
+        // `highlighted` indexes `suggestions`, not `dirs`. Map through both so
+        // a future filtered suggestion list cannot silently shift the highlight.
+        self.highlighted = selected
+            .and_then(|path| self.dirs.iter().position(|d| d.path == path))
+            .and_then(|dir| self.suggestions.iter().position(|&i| i == dir));
         true
     }
     pub fn from_home(home: std::path::PathBuf, root: std::path::PathBuf) -> Self {
@@ -316,9 +296,6 @@ impl App {
             Err(error) => app.search_status = error,
         }
         app
-    }
-    pub fn is_demo(&self) -> bool {
-        self.demo
     }
     pub fn is_indexing(&self) -> bool {
         self.remote.is_none() && self.index.as_ref().is_some_and(|i| i.is_scanning())
@@ -351,33 +328,15 @@ impl App {
         if self.remote.is_some() {
             return Vec::new();
         }
-        if self.demo {
-            return fixtures::matches(&self.editor.text, &self.dirs);
-        }
         let Some(index) = &self.index else {
             return Vec::new();
         };
         let home = index.home.to_str().expect("validated HOME");
-        let mut results = crate::search::matches_in(&self.editor.text, &self.dirs, home, home);
+        let mut results = crate::search::matches_in(&self.editor.text, &self.dirs, home);
         results.truncate(100);
         results
     }
-    pub fn demo() -> Self {
-        let mut app = Self {
-            demo: true,
-            commands: crate::commands::Commands::demo(),
-            dirs: fixtures::directories(),
-            history: fixtures::history(),
-            ..Self::default()
-        };
-        app.editor.set("~/Projects/");
-        app.suggestions = fixtures::matches(&app.editor.text, &app.dirs);
-        app
-    }
     pub fn path_label(&self, path: &str) -> String {
-        if self.demo {
-            return fixtures::short(path);
-        }
         self.index
             .as_ref()
             .and_then(|i| std::path::Path::new(path).strip_prefix(&i.home).ok())
@@ -392,13 +351,12 @@ impl App {
     }
 
     pub fn update(&mut self, action: Action) {
-        if self.host_launch_pending {
+        if self.launch_pending {
             return;
         }
         // Never turn a pending completion into a launch of the old editor.
         // Likewise, repeated submit must not replace an in-flight launch request.
-        if self.host_launch
-            && matches!(action, Action::Enter | Action::LaunchForm)
+        if matches!(action, Action::Enter | Action::LaunchForm)
             && self.remote.as_ref().is_some_and(|r| r.validation.is_some())
         {
             return;
@@ -415,7 +373,6 @@ impl App {
             Action::SelectTool(_)
             | Action::SelectHistory(_)
             | Action::Scroll(ScrollTarget::History, _)
-            | Action::ToggleCopilot
             | Action::ClearHistory => true,
             _ => false,
         };
@@ -459,19 +416,15 @@ impl App {
             let commands = self.commands.clone();
             let initial_cwd = self.initial_cwd.clone();
             let compact = self.compact;
-            let host_launch = self.host_launch;
+            let simulate_launch = self.simulate_launch;
             let remote = self.remote.take();
             let index = self.index.as_ref().map(|i| i.restart());
             let status = self.search_status.clone();
-            *self = if self.demo {
-                Self::demo()
-            } else {
-                Self::default()
-            };
+            *self = Self::default();
             if let Some(index) = index {
                 self.search_status = index.status();
                 self.index = Some(index);
-            } else if !self.demo {
+            } else {
                 self.search_status = status;
             }
             self.commands = commands;
@@ -479,7 +432,7 @@ impl App {
                 self.set_initial_cwd(cwd);
             }
             self.compact = compact;
-            self.host_launch = host_launch;
+            self.simulate_launch = simulate_launch;
             self.remote = remote;
             if let Some(remote) = &mut self.remote {
                 remote.revision = 0;
@@ -520,15 +473,6 @@ impl App {
             }
             return;
         }
-        if self.screen != Screen::Dashboard {
-            if action == Action::Escape {
-                self.screen = Screen::Dashboard;
-                self.tool = Tool::Shell;
-                self.focus = Focus::Path;
-                self.message = None;
-            }
-            return;
-        }
         if action == Action::Escape {
             if self.confirm_clear {
                 self.confirm_clear = false;
@@ -544,11 +488,7 @@ impl App {
             } else if self.message.is_some() {
                 self.message = None;
             } else if !self.touched {
-                if self.host_launch {
-                    self.quit = true;
-                } else {
-                    self.screen = Screen::Closed;
-                }
+                self.quit = true;
             } else {
                 self.message = Some("Form kept. Ctrl+Q quits; F5 resets the form.".into());
             }
@@ -557,27 +497,6 @@ impl App {
         if action != Action::ClearHistory && self.confirm_clear {
             self.confirm_clear = false;
             self.message = None;
-        }
-        if action == Action::ToggleCopilot {
-            if self.host_launch {
-                return;
-            }
-            self.copilot_available = !self.copilot_available;
-            if !self.available(self.tool) {
-                self.tool = Tool::Shell;
-                self.message =
-                    Some("Copilot removed. Reset to Shell; review before launching.".into());
-            } else {
-                self.message = Some(
-                    if self.copilot_available {
-                        "Copilot restored (fixture)."
-                    } else {
-                        "Copilot removed (fixture). History replay will revalidate."
-                    }
-                    .into(),
-                );
-            }
-            return;
         }
         if let Action::Focus(focus) = action {
             self.focus = focus;
@@ -739,21 +658,21 @@ impl App {
                 }
                 Action::Delete => {
                     if let Some(row) = self.history.get(self.recent) {
-                        if self.host_launch {
-                            self.history_request = Some(HistoryMutation::Remove(row.id));
-                        } else {
+                        if self.simulate_launch {
                             self.history.remove(self.recent);
+                        } else {
+                            self.history_request = Some(HistoryMutation::Remove(row.id));
                         }
                     }
                     self.recent = self.recent.min(self.history.len().saturating_sub(1));
                 }
                 Action::ClearHistory => {
                     if self.confirm_clear {
-                        if self.host_launch {
-                            self.history_request = Some(HistoryMutation::Clear);
-                        } else {
+                        if self.simulate_launch {
                             self.history.clear();
                             self.recent = 0;
+                        } else {
+                            self.history_request = Some(HistoryMutation::Clear);
                         }
                         self.confirm_clear = false;
                         self.message = None;
@@ -768,16 +687,10 @@ impl App {
         }
     }
     pub fn visible_tools(&self) -> Vec<Tool> {
-        self.commands
-            .entries
-            .iter()
-            .map(|c| c.id)
-            .filter(|&t| self.available(t))
-            .collect()
+        self.commands.entries.iter().map(|c| c.id).collect()
     }
     pub fn available(&self, tool: Tool) -> bool {
         self.commands.get(tool).is_some()
-            && (!self.demo || tool != Tool::Copilot || self.copilot_available)
     }
     fn complete(&mut self, reverse: bool) {
         let (items, i) = if let Some((items, i)) = self.cycle.take() {
@@ -837,36 +750,14 @@ impl App {
             self.request_validation(raw, crate::remote::Validation::Launch(tool));
             return;
         }
-        let path = if self.demo {
-            let path = fixtures::normalize(&raw);
-            let Some(dir) = self
-                .dirs
-                .iter()
-                .find(|d| Some(d.path.as_str()) == path.as_deref())
-            else {
-                self.message = Some(
-                    "Directory not found. Choose a suggestion or enter a fixture path.".into(),
-                );
-                return;
-            };
-            if let Some(error) = dir.error {
-                self.message = Some(error.into());
-                return;
-            }
-            dir.path.clone()
-        } else if let Some(index) = &self.index {
-            match index.validate(&raw) {
-                Ok(path) => path,
-                Err(error) => {
-                    self.message = Some(error);
-                    return;
-                }
-            }
-        } else {
+        let Some(index) = &self.index else {
             self.message = Some(self.search_status.clone());
             return;
         };
-        self.finish_launch(path, tool);
+        match index.validate(&raw) {
+            Ok(path) => self.finish_launch(path, tool),
+            Err(error) => self.message = Some(error),
+        }
     }
     fn finish_launch(&mut self, path: String, tool: Tool) {
         if !self.available(tool) {
@@ -883,243 +774,336 @@ impl App {
             tool,
             age: "Just now".into(),
         };
-        if self.host_launch {
-            self.host_request = Some(event);
-            self.host_launch_pending = true;
-            self.message = Some("Replacing this pane…".into());
+        if self.simulate_launch {
+            self.message = Some(format!(
+                "Launch suppressed (simulate_launch): {} · {}",
+                self.tool_label(tool),
+                self.path_label(&event.path)
+            ));
+            self.history.insert(0, event);
+            self.history.truncate(10);
+            self.recent = 0;
             return;
         }
-        self.history.insert(0, event.clone());
-        self.history.truncate(10);
-        self.recent = 0;
-        self.message = None;
-        self.screen = Screen::Terminal(event);
+        self.launch_request = Some(event);
+        self.launch_pending = true;
+        self.message = Some("Replacing this pane…".into());
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn query(a: &mut App, text: &str) {
-        a.update(Action::Clear);
-        a.update(Action::Text(text.into()));
+    use crate::remote::RemoteRequest;
+
+    const HOME: &str = "/home/example";
+
+    fn tool(id: &str) -> Tool {
+        Tool::new(id).expect("valid command ID")
     }
+    /// A worker-backed App, exactly as the plugin builds one. No fixtures.
+    fn app() -> App {
+        let mut app = App::from_remote(HOME.into());
+        app.configure(&std::collections::BTreeMap::from([
+            ("commands".into(), "claude,codex".into()),
+            ("command_claude".into(), "claude".into()),
+            ("command_codex".into(), "codex".into()),
+            ("label_codex".into(), "Codex CLI".into()),
+        ]));
+        app
+    }
+    /// Answer the outstanding worker query with these absolute paths.
+    fn results(app: &mut App, paths: &[&str]) -> u64 {
+        let Some(RemoteRequest::Query { generation, .. }) = app.take_remote_request() else {
+            panic!("expected a pending query");
+        };
+        assert!(app.apply_remote_results(generation, paths.iter().map(|p| (*p).into()).collect()));
+        generation
+    }
+    fn validate(app: &mut App, result: Result<String, String>) {
+        let Some(RemoteRequest::Validate { generation, .. }) = app.take_remote_request() else {
+            panic!("expected a pending validation");
+        };
+        assert!(app.finish_remote_validation(generation, result));
+    }
+    fn query(app: &mut App, text: &str) {
+        app.update(Action::Clear);
+        app.update(Action::Text(text.into()));
+    }
+
+    #[test]
+    fn normal_startup_never_invents_directories_or_history() {
+        let app = App::default();
+        assert!(app.history.is_empty());
+        assert!(app.dirs.is_empty());
+        assert_eq!(app.editor.text, "~");
+        assert_eq!(app.visible_tools(), vec![Tool::Shell]);
+        assert!(!app.simulate_launch, "real launching is the default");
+    }
+
     #[test]
     fn remote_index_keeps_only_returned_rows_without_ui_scanning() {
-        let mut a = App::from_remote("/home/example".into());
+        let mut a = app();
         assert!(!a.is_indexing());
         assert!(!a.index_tick());
         a.remote_progress(1, "HOME indexed".into());
-        assert!(a.apply_remote_results(0, vec!["/home/example/research/notes".into()]));
+        query(&mut a, "notes");
+        results(&mut a, &["/home/example/research/notes"]);
         assert_eq!(a.suggestions, vec![0]);
         assert_eq!(a.path_label(&a.dirs[0].path), "~/research/notes");
         a.update(Action::Escape);
         a.remote_progress(2, "HOME indexed".into());
         assert!(a.suggestions.is_empty());
     }
-    #[test]
-    fn normal_startup_never_contains_demo_data() {
-        let app = App::default();
-        assert!(
-            app.history.is_empty(),
-            "real startup must not invent launch history"
-        );
-        assert!(app.dirs.is_empty());
-        assert_eq!(app.editor.text, "~");
-    }
-    #[test]
-    fn hidden_controls_never_launch_and_escape_help_quit_are_safe() {
-        let mut a = App {
-            compact: true,
-            ..App::demo()
-        };
-        a.update(Action::Enter);
-        assert_eq!(a.screen, Screen::Dashboard);
-        a.update(Action::Reset);
-        assert!(a.compact, "reset must not bypass compact guard");
-        a.compact = false;
-        a.update(Action::Help);
-        assert!(a.help);
-        a.update(Action::Enter);
-        assert_eq!(a.screen, Screen::Dashboard);
-        a.update(Action::Escape);
-        assert!(!a.help);
-        a.update(Action::Escape);
-        assert!(a.suggestions.is_empty());
-        a.update(Action::Escape);
-        assert_eq!(a.screen, Screen::Closed);
-        a.update(Action::Escape);
-        assert_eq!(a.screen, Screen::Dashboard);
-        a.update(Action::Quit);
-        assert!(a.quit);
-    }
-    #[test]
-    fn invalid_paths_preserve_form_and_literal_paths_launch_all_five_tools() {
-        let mut a = App::demo();
-        for (path, error) in [
-            ("~/restricted", "Permission"),
-            ("~/broken-link", "symlink"),
-            ("~/Projects/missing", "missing"),
-            ("ntsx", "not found"),
-        ] {
-            query(&mut a, path);
-            a.update(Action::Enter);
-            assert_eq!(a.screen, Screen::Dashboard);
-            assert_eq!(a.editor.text, path);
-            assert!(a.message.as_ref().is_some_and(|s| s.contains(error)));
-            assert_eq!(a.history.len(), 10);
-        }
-        for tool in Tool::ALL {
-            query(&mut a, "~/Projects/it's literal; $HOME");
-            a.tool = tool;
-            a.update(Action::Enter);
-            assert!(
-                matches!(&a.screen, Screen::Terminal(e) if e.tool == tool && e.path.ends_with("it's literal; $HOME"))
-            );
-            a.update(Action::Escape);
-        }
-    }
-    #[test]
-    fn escape_cancels_history_clear_with_default_suggestions() {
-        let mut a = App::demo();
-        let history = a.history.clone();
-        let suggestions = a.suggestions.clone();
-        assert!(!history.is_empty());
-        assert!(!suggestions.is_empty());
 
-        a.update(Action::Focus(Focus::History));
-        a.update(Action::ClearHistory);
-        assert!(a.confirm_clear);
-        let confirmation = a.message.clone();
-        assert!(confirmation.is_some());
-        assert_eq!(a.history, history);
-
-        a.update(Action::Escape);
-        assert!(!a.confirm_clear);
-        assert!(a.message.is_none());
-        assert_eq!(a.suggestions, suggestions);
-        assert_eq!(a.history, history);
-        assert_eq!(a.screen, Screen::Dashboard);
-
-        a.update(Action::ClearHistory);
-        assert_eq!(a.history, history);
-        assert!(a.confirm_clear);
-        assert_eq!(a.message, confirmation);
-    }
     #[test]
-    fn history_replays_copies_prunes_duplicates_and_revalidates_tools() {
-        let mut a = App::demo();
-        assert_eq!(a.history.len(), 10);
-        a.update(Action::Focus(Focus::History));
+    fn highlight_follows_the_selected_path_across_a_later_reply() {
+        let mut a = app();
+        query(&mut a, "notes");
+        let generation = results(&mut a, &["/home/example/a/notes", "/home/example/b/notes"]);
         a.update(Action::Down);
-        a.update(Action::Tab);
+        a.update(Action::Down);
+        assert_eq!(a.highlighted, Some(1));
+        // A later reply for the same query reorders the rows as the scan grows;
+        // the highlight follows the selected path, not its former row number.
+        assert!(a.apply_remote_results(
+            generation,
+            vec![
+                "/home/example/b/notes".into(),
+                "/home/example/a/notes".into(),
+            ],
+        ));
+        assert_eq!(a.highlighted, Some(0));
+        assert_eq!(a.dirs[a.suggestions[0]].path, "/home/example/b/notes");
+    }
+
+    #[test]
+    fn completion_accepts_only_then_validated_enter_requests_one_launch() {
+        let mut a = app();
         assert_eq!(a.focus, Focus::Path);
-        assert_eq!(a.editor.text, "~/Projects/notes");
-        assert_eq!(a.screen, Screen::Dashboard);
-        for _ in 0..12 {
-            a.update(Action::Enter);
-            a.update(Action::Escape);
-        }
-        assert_eq!(a.history.len(), 10);
-        assert!(
-            a.history
-                .iter()
-                .all(|e| e.path == "/home/demo/Projects/notes")
-        );
-        assert!(a.history.windows(2).all(|w| w[0].id > w[1].id));
-        a.update(Action::Reset);
-        a.update(Action::ToggleCopilot);
-        assert!(!a.visible_tools().contains(&Tool::Copilot));
-        a.update(Action::Focus(Focus::History));
-        for _ in 0..5 {
-            a.update(Action::Down);
-        }
+        assert_eq!(a.tool, Tool::Shell);
+        query(&mut a, "nts");
+        results(&mut a, &["/home/example/Projects/notes"]);
+        a.update(Action::Down);
+        assert_eq!(a.highlighted, Some(0));
         a.update(Action::Enter);
-        assert_eq!(a.screen, Screen::Dashboard);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        assert_eq!(a.editor.text, "~/Projects/notes");
+        assert!(a.suggestions.is_empty());
+        assert!(a.take_launch().is_none(), "accepting never launches");
+
+        a.update(Action::Enter);
+        a.update(Action::Enter);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        let launch = a.take_launch().expect("one launch request");
+        assert_eq!(launch.path, "/home/example/Projects/notes");
+        assert_eq!(launch.tool, Tool::Shell);
+        assert!(a.history.is_empty(), "the store owns real history");
+        a.update(Action::Enter);
+        assert!(
+            a.take_launch().is_none(),
+            "the pane is already being replaced"
+        );
+    }
+
+    #[test]
+    fn failed_validation_preserves_the_form_and_launches_nothing() {
+        let mut a = app();
+        for (text, error) in [
+            ("~/restricted", "Permission denied"),
+            ("~/broken-link", "symlinks and files are not supported"),
+            ("~/Projects/missing", "Directory unavailable"),
+        ] {
+            query(&mut a, text);
+            a.update(Action::Enter);
+            validate(&mut a, Err(error.into()));
+            assert_eq!(a.editor.text, text);
+            assert_eq!(a.message.as_deref(), Some(error));
+            assert!(a.take_launch().is_none());
+        }
+    }
+
+    #[test]
+    fn literal_shell_looking_paths_reach_the_host_untouched() {
+        let mut a = app();
+        let literal = "/home/example/Projects/it's literal; $HOME";
+        for id in ["shell", "claude", "codex"] {
+            query(&mut a, "~/Projects/it's literal; $HOME");
+            a.tool = tool(id);
+            a.update(Action::Enter);
+            validate(&mut a, Ok(literal.into()));
+            let launch = a.take_launch().expect("launch request");
+            assert_eq!(launch.path, literal);
+            assert_eq!(launch.tool, tool(id));
+            a.launch_rejected();
+        }
+    }
+
+    #[test]
+    fn simulated_launch_records_in_memory_and_never_reaches_the_host() {
+        let mut a = app();
+        a.simulate_launch = true;
+        query(&mut a, "notes");
+        a.update(Action::Enter);
+        validate(&mut a, Ok("/home/example/notes".into()));
+        assert!(a.take_launch().is_none(), "no host launch when simulating");
+        assert_eq!(a.history.len(), 1);
+        assert_eq!(a.history[0].path, "/home/example/notes");
         assert!(
             a.message
                 .as_ref()
-                .is_some_and(|m| m.contains("Copilot is unavailable"))
+                .is_some_and(|m| m.contains("Launch suppressed"))
+        );
+        for i in 0..12 {
+            query(&mut a, "x");
+            a.update(Action::Enter);
+            validate(&mut a, Ok(format!("/home/example/d{i}")));
+        }
+        assert_eq!(a.history.len(), 10, "in-memory history keeps the same cap");
+        assert!(a.history.windows(2).all(|w| w[0].id > w[1].id));
+    }
+
+    #[test]
+    fn history_mutations_wait_for_the_store_unless_simulating() {
+        let mut a = app();
+        a.history = vec![
+            Launch {
+                id: 0,
+                path: "/home/example/a".into(),
+                tool: Tool::Shell,
+                age: "1h ago".into(),
+            },
+            Launch {
+                id: 1,
+                path: "/home/example/b".into(),
+                tool: tool("claude"),
+                age: "2h ago".into(),
+            },
+        ];
+        a.update(Action::Focus(Focus::History));
+        a.update(Action::Down);
+        a.update(Action::Delete);
+        assert_eq!(a.history.len(), 2, "the store decides, not the UI");
+        assert_eq!(a.take_history_mutation(), Some(HistoryMutation::Remove(1)));
+
+        a.update(Action::ClearHistory);
+        assert!(a.confirm_clear);
+        assert!(a.take_history_mutation().is_none(), "one Ctrl+L only arms");
+        a.update(Action::Escape);
+        assert!(!a.confirm_clear);
+        a.update(Action::ClearHistory);
+        a.update(Action::ClearHistory);
+        assert_eq!(a.history.len(), 2);
+        assert_eq!(a.take_history_mutation(), Some(HistoryMutation::Clear));
+    }
+
+    #[test]
+    fn history_replay_copies_and_never_substitutes_a_removed_command() {
+        let mut a = app();
+        let removed = tool("retired");
+        a.history = vec![Launch {
+            id: 0,
+            path: "/home/example/Projects/notes".into(),
+            tool: removed,
+            age: "12m ago".into(),
+        }];
+        a.update(Action::Focus(Focus::History));
+        a.update(Action::Enter);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        assert!(a.take_launch().is_none(), "the command no longer exists");
+        assert!(
+            a.message
+                .as_ref()
+                .is_some_and(|m| m.contains("retired is unavailable"))
         );
         a.update(Action::Tab);
-        assert_eq!(a.tool, Tool::Copilot, "no silent fallback on history copy");
-        a.update(Action::Enter);
-        assert_eq!(a.history.len(), 10);
+        assert_eq!(a.focus, Focus::Path);
+        assert_eq!(a.editor.text, "~/Projects/notes");
+        assert_eq!(a.tool, removed, "no silent fallback on copy");
         a.update(Action::Focus(Focus::Tools));
         a.update(Action::Right);
         assert_eq!(a.tool, Tool::Shell);
         a.update(Action::Enter);
-        assert!(matches!(a.screen, Screen::Terminal(_)));
-        a.update(Action::Escape);
-        a.update(Action::Focus(Focus::History));
-        a.update(Action::Delete);
-        assert_eq!(a.history.len(), 9);
-        a.update(Action::ClearHistory);
-        assert_eq!(a.history.len(), 9);
-        a.update(Action::ClearHistory);
-        assert!(a.history.is_empty());
-        a.update(Action::Up);
-        a.update(Action::Down);
-        a.update(Action::Tab);
-        a.update(Action::Enter);
-        assert_eq!(a.screen, Screen::Dashboard);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        assert_eq!(a.take_launch().map(|l| l.tool), Some(Tool::Shell));
     }
+
+    #[test]
+    fn hidden_controls_and_help_never_launch_and_escape_closes_once() {
+        let mut a = App {
+            compact: true,
+            ..app()
+        };
+        a.update(Action::Enter);
+        assert!(a.take_launch().is_none());
+        a.update(Action::Reset);
+        assert!(a.compact, "reset must not bypass the compact guard");
+        a.compact = false;
+        a.update(Action::Help);
+        assert!(a.help);
+        a.update(Action::Enter);
+        assert!(a.take_launch().is_none());
+        a.update(Action::Escape);
+        assert!(!a.help);
+        a.update(Action::Escape);
+        assert!(a.suggestions.is_empty());
+        assert!(!a.quit);
+        a.update(Action::Escape);
+        assert!(a.quit, "an untouched dashboard closes its own pane");
+    }
+
     #[test]
     fn focus_navigation_completion_cycle_and_path_keys_are_distinct() {
-        let mut a = App::demo();
+        let mut a = app();
         query(&mut a, "notes");
-        let options = a.suggestions.clone();
+        results(
+            &mut a,
+            &["/home/example/Projects/notes", "/home/example/notes"],
+        );
         a.update(Action::Tab);
-        assert_eq!(a.editor.text, fixtures::short(&a.dirs[options[0]].path));
-        a.update(Action::Tab);
-        assert_eq!(a.editor.text, fixtures::short(&a.dirs[options[1]].path));
-        a.update(Action::BackTab);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
         assert_eq!(a.editor.text, "~/Projects/notes");
-        assert_eq!(a.screen, Screen::Dashboard);
+        a.update(Action::Tab);
+        validate(&mut a, Ok("/home/example/notes".into()));
+        assert_eq!(a.editor.text, "~/notes");
+        a.update(Action::BackTab);
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        assert_eq!(a.editor.text, "~/Projects/notes");
+        assert!(a.take_launch().is_none(), "completion never launches");
+
+        query(&mut a, "notes");
+        results(&mut a, &["/home/example/notes"]);
+        a.update(Action::Down);
+        a.update(Action::Down);
+        assert_eq!(a.focus, Focus::Path, "Down cycles suggestions, not focus");
+        a.update(Action::Escape);
         a.update(Action::Down);
         assert_eq!(a.focus, Focus::Tools);
         a.update(Action::Right);
-        assert_eq!(a.tool, Tool::Claude);
+        assert_eq!(a.tool, tool("claude"));
         a.update(Action::Down);
         assert_eq!(a.focus, Focus::History);
         let text = a.editor.text.clone();
         a.update(Action::Text("q".into()));
-        assert_eq!(a.editor.text, text);
-        a.update(Action::Focus(Focus::Path));
-        a.update(Action::Home);
-        a.update(Action::Delete);
-        a.update(Action::Text("~".into()));
-        a.update(Action::End);
-        a.update(Action::Left);
-        a.update(Action::Right);
-        a.update(Action::Backspace);
-        a.update(Action::Text("sq".into()));
-        assert_eq!(a.editor.text, "~/Projects/notesq");
-        assert!(!a.quit);
+        assert_eq!(a.editor.text, text, "typing is path-focus only");
     }
+
     #[test]
-    fn completion_accepts_only_then_validated_enter_simulates_launch() {
-        let mut a = App::demo();
-        assert_eq!(a.focus, Focus::Path);
+    fn reset_restores_the_invoking_cwd_and_shell_but_keeps_configuration() {
+        let mut a = app();
+        a.set_initial_cwd("/home/example/Projects".into());
+        assert_eq!(a.editor.text, "~/Projects");
+        query(&mut a, "elsewhere");
+        a.update(Action::Focus(Focus::Tools));
+        a.update(Action::Right);
+        assert_eq!(a.tool, tool("claude"));
+        let refresh = a.remote_refresh();
+
+        a.update(Action::Reset);
+        assert_eq!(a.editor.text, "~/Projects");
         assert_eq!(a.tool, Tool::Shell);
-        query(&mut a, "nts");
-        a.update(Action::Enter);
-        assert_eq!(a.screen, Screen::Dashboard);
-        assert!(a.message.as_ref().is_some_and(|s| s.contains("not found")));
-        a.update(Action::Down);
-        assert!(a.highlighted.is_some());
-        a.update(Action::Enter);
-        assert_eq!(a.editor.text, "~/Projects/notes");
-        assert_eq!(a.screen, Screen::Dashboard);
-        assert!(a.suggestions.is_empty());
-        a.update(Action::Enter);
-        assert!(matches!(a.screen, Screen::Terminal(_)));
-        assert_eq!(a.history[0].path, "/home/demo/Projects/notes");
-        let count = a.history.len();
-        a.update(Action::Enter);
-        assert_eq!(
-            a.history.len(),
-            count,
-            "duplicate Enter ignored in terminal placeholder"
-        );
+        assert_eq!(a.focus, Focus::Path);
+        assert!(!a.touched);
+        assert_eq!(a.tool_label(tool("codex")), "Codex CLI", "config survives");
+        assert_eq!(a.remote_refresh(), refresh + 1, "reset rebuilds the index");
     }
 }

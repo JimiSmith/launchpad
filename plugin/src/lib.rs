@@ -1,4 +1,4 @@
-//! Zellij 0.45.1 event adapter; UI and fixtures remain in the shared crate.
+//! Zellij 0.45.1 event adapter; the UI and its state live in the core crate.
 pub mod cwd;
 pub mod history;
 pub mod workers;
@@ -27,7 +27,7 @@ pub fn tab_name(path: &str, label: &str) -> String {
         .unwrap_or("/");
     format!("{basename} · {label}")
 }
-use zellij_launchpad_prototype::app::{Action, Focus};
+use zellij_launchpad_core::app::{Action, Focus};
 use zellij_tile::prelude::{BareKey, KeyModifier, KeyWithModifier};
 
 pub fn key_action(key: KeyWithModifier) -> Option<Action> {
@@ -66,24 +66,23 @@ pub fn key_action(key: KeyWithModifier) -> Option<Action> {
         Esc => Action::Escape,
         F(1) => Action::Help,
         F(5) => Action::Reset,
-        F(6) => Action::ToggleCopilot,
         _ => return None,
     })
 }
 
 #[derive(Default)]
 pub struct State {
-    pub app: zellij_launchpad_prototype::app::App,
-    hits: zellij_launchpad_prototype::view::HitMap,
+    pub app: zellij_launchpad_core::app::App,
+    hits: zellij_launchpad_core::view::HitMap,
     area: ratatui::layout::Rect,
     pointer: Option<(u16, u16)>,
     mouse_quiet_since: Option<std::time::Instant>,
     pending_home: Option<std::path::PathBuf>,
 }
 impl State {
-    pub fn replace_app(&mut self, mut app: zellij_launchpad_prototype::app::App) {
+    pub fn replace_app(&mut self, mut app: zellij_launchpad_core::app::App) {
         app.commands = self.app.commands.clone();
-        app.host_launch = self.app.host_launch;
+        app.simulate_launch = self.app.simulate_launch;
         self.app = app;
     }
     pub fn prepare_home(&mut self, home: Option<String>) -> bool {
@@ -95,7 +94,7 @@ impl State {
         };
         let path = std::path::PathBuf::from(home);
         if let Err(error) =
-            zellij_launchpad_prototype::search::HomeIndex::new(path.clone(), "/host".into())
+            zellij_launchpad_core::search::HomeIndex::new(path.clone(), "/host".into())
         {
             self.app.search_status = error;
             return false;
@@ -105,7 +104,7 @@ impl State {
         true
     }
     pub fn handle(&mut self, event: zellij_tile::prelude::Event) -> bool {
-        use zellij_launchpad_prototype::view::Pointer;
+        use zellij_launchpad_core::view::Pointer;
         use zellij_tile::prelude::{Event, Mouse};
         if matches!(event, Event::Mouse(_)) {
             if let Some(since) = self.mouse_quiet_since {
@@ -128,10 +127,7 @@ impl State {
             Event::HostFolderChanged(home) => {
                 if self.pending_home.as_ref() == Some(&home) {
                     self.pending_home = None;
-                    self.replace_app(zellij_launchpad_prototype::app::App::from_home(
-                        home,
-                        "/host".into(),
-                    ));
+                    self.replace_app(zellij_launchpad_core::app::App::from_remote(home));
                     return true;
                 }
                 return false;
@@ -189,7 +185,7 @@ impl State {
 
     pub fn render_frame(&mut self, rows: usize, cols: usize) -> String {
         use ratatui::{backend::TestBackend, layout::Rect, style::Modifier, Terminal};
-        use zellij_launchpad_prototype::{ansi, view};
+        use zellij_launchpad_core::{ansi, view};
         let width = cols.min(u16::MAX as usize) as u16;
         let height = rows.min(u16::MAX as usize) as u16;
         let area = Rect::new(0, 0, width, height);
@@ -221,27 +217,69 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn demo_state() -> State {
+    use zellij_launchpad_core::app::{App, Launch, Tool};
+    use zellij_launchpad_core::remote::RemoteRequest;
+
+    const HOME: &str = "/home/example";
+
+    /// A worker-backed State with a settled suggestion list and recent rows,
+    /// built the way the plugin builds one. There are no fixture directories.
+    fn state() -> State {
+        let mut app = App::from_remote(HOME.into());
+        app.simulate_launch = true;
+        app.configure(&std::collections::BTreeMap::from([
+            ("commands".into(), "claude,codex".into()),
+            ("command_claude".into(), "claude".into()),
+            ("command_codex".into(), "codex".into()),
+        ]));
+        app.update(zellij_launchpad_core::app::Action::Text("notes".into()));
+        let Some(RemoteRequest::Query { generation, .. }) = app.take_remote_request() else {
+            panic!("expected a pending query");
+        };
+        assert!(app.apply_remote_results(
+            generation,
+            (0..6)
+                .map(|i| format!("{HOME}/Projects/notes-{i}"))
+                .collect(),
+        ));
+        app.history = (0..6)
+            .map(|i| Launch {
+                id: i,
+                path: format!("{HOME}/Projects/recent-{i}"),
+                tool: if i % 2 == 0 {
+                    Tool::Shell
+                } else {
+                    Tool::new("claude").unwrap()
+                },
+                age: format!("{}h ago", i + 1),
+            })
+            .collect();
         State {
-            app: zellij_launchpad_prototype::app::App::demo(),
+            app,
             ..State::default()
         }
     }
+
     #[test]
-    fn home_access_waits_for_ack_and_denial_is_not_demo() {
+    fn home_access_waits_for_ack_and_denial_never_indexes() {
         use zellij_tile::prelude::{Event, PermissionStatus};
         let mut state = State::default();
-        assert!(!state.app.is_indexing());
         state.handle(Event::PermissionRequestResult(PermissionStatus::Denied));
         assert!(state.app.search_status.contains("denied"));
         assert!(state.app.history.is_empty());
-        assert!(!state.app.is_indexing());
-        assert!(state.prepare_home(Some("/home/example".into())));
+        assert!(state.prepare_home(Some(HOME.into())));
         state.handle(Event::HostFolderChanged("/somewhere/else".into()));
-        assert!(!state.app.is_indexing(), "never index a non-HOME mount");
-        state.handle(Event::HostFolderChanged("/home/example".into()));
-        assert!(state.app.is_indexing());
+        assert_eq!(
+            state.app.search_status, "Opening HOME filesystem…",
+            "a non-HOME mount is not our remount"
+        );
+        state.handle(Event::HostFolderChanged(HOME.into()));
+        assert!(
+            state.app.take_remote_request().is_some(),
+            "the accepted mount hands the index to the worker"
+        );
     }
+
     #[test]
     fn missing_home_and_failed_remount_stay_restricted() {
         use zellij_tile::prelude::Event;
@@ -253,106 +291,145 @@ mod tests {
         ] {
             let mut state = State::default();
             assert!(!state.prepare_home(home));
-            assert!(!state.app.is_indexing());
             assert!(state.app.search_status.contains("HOME"));
         }
         let mut state = State::default();
-        state.prepare_home(Some("/home/example".into()));
+        state.prepare_home(Some(HOME.into()));
         state.handle(Event::FailedToChangeHostFolder(Some("denied".into())));
         assert!(state.app.search_status.contains("unavailable"));
-        assert!(!state.app.is_indexing());
     }
+
     #[test]
     fn sdk_click_hold_release_and_paste_obey_domain_contract() {
-        use zellij_launchpad_prototype::app::{Screen, Tool};
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = demo_state();
+        let mut s = state();
         s.render_frame(24, 80);
         s.handle(Event::Key(key(BareKey::Char('u'), &[KeyModifier::Ctrl])));
         s.handle(Event::PastedText("notes\n\t".into()));
         assert_eq!(s.app.editor.text, "notes");
-        s.handle(Event::Key(key(BareKey::Down, &[])));
-        s.handle(Event::Key(key(BareKey::Enter, &[])));
-        assert_eq!(s.app.screen, Screen::Dashboard);
-        assert_eq!(s.app.history[0].id, 10);
+
         s.render_frame(24, 80);
-        s.handle(Event::Mouse(Mouse::LeftClick(9, 26)));
-        assert_eq!(s.app.tool, Tool::Codex);
+        let tools = hit(&s, Action::SelectTool(Tool::new("codex").unwrap()));
+        s.handle(Event::Mouse(Mouse::LeftClick(tools.1, tools.0 as usize)));
+        assert_eq!(s.app.tool, Tool::new("codex").unwrap());
+        assert!(s.app.take_launch().is_none(), "selection never launches");
+
+        let launch = hit(&s, Action::LaunchForm);
         for m in [
-            Mouse::Hold(9, 68),
-            Mouse::Release(9, 68),
-            Mouse::RightClick(9, 68),
-            Mouse::LeftClick(-1, 68),
+            Mouse::Hold(launch.1, launch.0 as usize),
+            Mouse::Release(launch.1, launch.0 as usize),
+            Mouse::RightClick(launch.1, launch.0 as usize),
+            Mouse::LeftClick(-1, launch.0 as usize),
         ] {
             s.handle(Event::Mouse(m));
         }
-        assert_eq!(s.app.screen, Screen::Dashboard);
-        s.handle(Event::Mouse(Mouse::LeftClick(9, 68)));
-        assert!(matches!(s.app.screen, Screen::Terminal(_)));
-        let id = s.app.history[0].id;
-        s.handle(Event::Mouse(Mouse::Hold(9, 68)));
-        s.handle(Event::Mouse(Mouse::Release(9, 68)));
-        s.handle(Event::Key(key(BareKey::Enter, &[])));
-        assert_eq!(s.app.history[0].id, id);
+        assert!(
+            !matches!(
+                s.app.take_remote_request(),
+                Some(RemoteRequest::Validate { .. })
+            ),
+            "drag, release, right click and off-screen clicks are inert"
+        );
+        s.handle(Event::Mouse(Mouse::LeftClick(launch.1, launch.0 as usize)));
+        assert!(
+            matches!(
+                s.app.take_remote_request(),
+                Some(RemoteRequest::Validate { .. })
+            ),
+            "an explicit launch click validates first"
+        );
     }
+
     #[test]
     fn wheel_uses_last_known_section_and_forgets_it_on_resize() {
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = demo_state();
+        let mut s = state();
         s.render_frame(24, 80);
         s.handle(Event::Mouse(Mouse::ScrollDown(3)));
         assert_eq!(
             s.app.recent, 0,
             "no guessed wheel focus without coordinates"
         );
-        s.handle(Event::Mouse(Mouse::Hover(14, 10)));
+        let history = wheel(&s, ScrollTarget::History);
+        s.handle(Event::Mouse(Mouse::Hover(history.1, history.0 as usize)));
         s.handle(Event::Mouse(Mouse::ScrollDown(3)));
         assert_eq!(s.app.recent, 3);
         s.handle(Event::Mouse(Mouse::Hover(0, 0)));
         s.handle(Event::Mouse(Mouse::ScrollDown(3)));
-        assert_eq!(s.app.recent, 3);
-        s.handle(Event::Mouse(Mouse::Hover(14, 10)));
+        assert_eq!(s.app.recent, 3, "the title bar is not a scroll target");
+        s.handle(Event::Mouse(Mouse::Hover(history.1, history.0 as usize)));
         s.render_frame(36, 120);
         s.handle(Event::Mouse(Mouse::ScrollDown(3)));
-        assert_eq!(s.app.recent, 3);
+        assert_eq!(s.app.recent, 3, "a resize forgets the pointer");
     }
+
     #[test]
     fn queued_mouse_is_quarantined_after_resize() {
-        use zellij_launchpad_prototype::{app::Screen, view::Pointer};
         use zellij_tile::prelude::{Event, Mouse};
-        let mut s = demo_state();
+        let mut s = state();
         s.render_frame(24, 80);
         s.render_frame(36, 120);
-        let (x, y) = (0..36)
-            .flat_map(|y| (0..120).map(move |x| (x, y)))
-            .find(|&(x, y)| s.hits.action(Pointer::Click, x, y, s.area) == Some(Action::LaunchForm))
-            .unwrap();
-        s.handle(Event::Mouse(Mouse::LeftClick(y as isize, x as usize)));
-        assert_eq!(
-            s.app.screen,
-            Screen::Dashboard,
-            "coordinates queued against old frame cannot activate new controls"
+        let (x, y) = hit(&s, Action::LaunchForm);
+        s.handle(Event::Mouse(Mouse::LeftClick(y, x as usize)));
+        assert!(
+            s.app.take_remote_request().is_none(),
+            "coordinates queued against the old frame cannot activate new controls"
         );
     }
+
     #[test]
     fn renders_shared_ui_caret_hits_and_resizes_to_guard() {
-        use zellij_launchpad_prototype::view::Pointer;
-        let mut state = demo_state();
-        let frame = state.render_frame(24, 80);
+        let mut s = state();
+        let frame = s.render_frame(24, 80);
         assert!(frame.contains("Launchpad"));
         assert!(frame.contains("\x1b[7m"), "synthetic caret is visible");
-        assert_eq!(
-            state.hits.action(Pointer::Click, 68, 9, state.area),
-            Some(Action::LaunchForm)
-        );
-        let narrow = state.render_frame(8, 30);
+        let launch = hit(&s, Action::LaunchForm);
+        let narrow = s.render_frame(8, 30);
         assert!(narrow.contains("Resize to at least"));
-        assert!(state.app.compact);
-        assert_eq!(state.hits.action(Pointer::Click, 68, 9, state.area), None);
-        assert_eq!(state.render_frame(0, 0), "");
-        assert!(state.render_frame(36, 120).contains("Launchpad"));
-        assert!(!state.app.compact);
+        assert!(s.app.compact);
+        assert_eq!(
+            s.hits
+                .action(Pointer::Click, launch.0, launch.1 as u16, s.area),
+            None
+        );
+        assert_eq!(s.render_frame(0, 0), "");
+        assert!(s.render_frame(36, 120).contains("Launchpad"));
+        assert!(!s.app.compact);
     }
+
+    #[test]
+    fn simulate_launch_is_labelled_and_real_mode_says_it_replaces_the_pane() {
+        let mut s = state();
+        assert!(s.render_frame(36, 120).contains("launch suppressed"));
+        s.app.simulate_launch = false;
+        let frame = s.render_frame(36, 120);
+        assert!(frame.contains("replace this pane"));
+        assert!(!frame.contains("suppressed"));
+    }
+
+    use zellij_launchpad_core::app::ScrollTarget;
+    use zellij_launchpad_core::view::Pointer;
+
+    /// First screen cell whose click maps to `action`, as (x, y).
+    fn hit(s: &State, action: Action) -> (u16, isize) {
+        (0..s.area.height)
+            .flat_map(|y| (0..s.area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| s.hits.action(Pointer::Click, x, y, s.area) == Some(action.clone()))
+            .map(|(x, y)| (x, y as isize))
+            .unwrap_or_else(|| panic!("no hit region for {action:?}"))
+    }
+    /// First screen cell whose wheel maps to `target`, as (x, y).
+    fn wheel(s: &State, target: ScrollTarget) -> (u16, isize) {
+        (0..s.area.height)
+            .flat_map(|y| (0..s.area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                s.hits.action(Pointer::ScrollDown, x, y, s.area)
+                    == Some(Action::Scroll(target, true))
+            })
+            .map(|(x, y)| (x, y as isize))
+            .expect("no wheel region")
+    }
+
     fn key(bare_key: BareKey, modifiers: &[KeyModifier]) -> KeyWithModifier {
         KeyWithModifier {
             bare_key,
@@ -376,5 +453,10 @@ mod tests {
         }
         assert_eq!(key_action(key(Char('q'), &[Alt])), None);
         assert_eq!(key_action(key(Char('u'), &[Super])), None);
+        assert_eq!(
+            key_action(key(F(6), &[])),
+            None,
+            "no fixture toggle remains"
+        );
     }
 }

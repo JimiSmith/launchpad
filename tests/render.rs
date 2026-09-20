@@ -1,5 +1,8 @@
+mod common;
+
+use common::app;
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
-use zellij_launchpad_prototype::{
+use zellij_launchpad_core::{
     app::{Action, App, Focus},
     theme, view,
 };
@@ -14,7 +17,7 @@ fn text(b: &Buffer) -> String {
 }
 #[test]
 fn remote_results_stay_visible_between_edit_and_latest_reply() {
-    use zellij_launchpad_prototype::remote::RemoteRequest;
+    use zellij_launchpad_core::remote::RemoteRequest;
     let mut app = App::from_remote("/home/example".into());
     app.take_remote_request();
     assert!(app.apply_remote_results(0, vec!["/home/example/notes".into()]));
@@ -63,11 +66,14 @@ fn remote_results_stay_visible_between_edit_and_latest_reply() {
 
 #[test]
 fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
-    let mut a = App::demo();
+    let mut a = app();
     a.update(Action::Help);
     a.update(Action::End);
     let b = draw(&a, 40, 12);
-    assert!(text(&b).contains("memory only"));
+    assert!(
+        text(&b).contains("hermes: Hermes"),
+        "End reaches the configured command list at the end of help"
+    );
     a.update(Action::Escape);
     a.update(Action::Clear);
     a.update(Action::Text("~/Projects/修理".into()));
@@ -90,17 +96,18 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
     use ratatui::layout::Rect;
     use view::Pointer;
 
-    let mut states = vec![App::demo()];
-    let mut help = App::demo();
+    let mut states = vec![app()];
+    let mut help = app();
     help.update(Action::Help);
     states.push(help);
-    let mut terminal = App::demo();
-    terminal.update(Action::Enter);
-    states.push(terminal);
-    let mut closed = App::demo();
-    closed.update(Action::Escape);
-    closed.update(Action::Escape);
-    states.push(closed);
+    // Validating: the status paragraph replaces the suggestion list.
+    let mut validating = app();
+    validating.update(Action::Enter);
+    states.push(validating);
+    // Empty history: the dashboard renders its empty state instead of rows.
+    let mut empty = app();
+    empty.history.clear();
+    states.push(empty);
 
     for app in states {
         for height in [24, 36] {
@@ -153,7 +160,7 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
 
 #[test]
 fn minimum_usable_view_keeps_selected_history_visible() {
-    let mut a = App::demo();
+    let mut a = app();
     a.update(Action::Focus(Focus::History));
     a.update(Action::End);
     let s = text(&draw(&a, 40, 10));
@@ -161,14 +168,14 @@ fn minimum_usable_view_keeps_selected_history_visible() {
 }
 #[test]
 fn roomy_layout_uses_spare_rows_for_history_rhythm() {
-    let b = draw(&App::demo(), 120, 36);
+    let b = draw(&app(), 120, 36);
     assert_eq!(b[(2, 34)].symbol(), "1");
     assert_eq!(b[(3, 34)].symbol(), "0");
 }
 #[test]
 fn dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes() {
     for (w, h) in [(80, 24), (120, 36)] {
-        let b = draw(&App::demo(), w, h);
+        let b = draw(&app(), w, h);
         let s = text(&b);
         for label in [
             "Launchpad",
@@ -189,7 +196,7 @@ fn dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes() {
 }
 #[test]
 fn narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls() {
-    let mut a = App::demo();
+    let mut a = app();
     a.update(Action::Focus(Focus::History));
     a.update(Action::End);
     let s = text(&draw(&a, 40, 12));

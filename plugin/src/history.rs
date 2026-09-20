@@ -18,7 +18,7 @@ struct Snapshot {
     version: u32,
     entries: Vec<Entry>,
 }
-use zellij_launchpad_prototype::app::Tool;
+use zellij_launchpad_core::app::Tool;
 
 pub struct Store {
     root: PathBuf,
@@ -413,7 +413,7 @@ mod tests {
     fn unreadable_record_fails_refresh_without_replacing_good_projection() {
         use std::os::unix::fs::PermissionsExt;
         let store = fixture("unreadable-record");
-        let row = entry(1, "/fixture/a", Tool::Hermes);
+        let row = entry(1, "/fixture/a", Tool::new("hermes").unwrap());
         store.record(row.clone()).unwrap();
         let projection = store.root.join("history.json");
         let saved = fs::read(&projection).unwrap();
@@ -450,7 +450,7 @@ mod tests {
     fn prune_failure_is_reported_without_losing_authoritative_records() {
         use std::os::unix::fs::PermissionsExt;
         let store = fixture("prune-denied");
-        let newest = entry(3, "/fixture/a", Tool::Hermes);
+        let newest = entry(3, "/fixture/a", Tool::new("hermes").unwrap());
         let other = entry(2, "/fixture/b", Tool::Shell);
         store.record(other.clone()).unwrap();
         store.record(newest.clone()).unwrap();
@@ -596,12 +596,14 @@ mod tests {
     #[test]
     fn rejection_removes_only_its_exact_attempt_not_concurrent_updates() {
         let store = fixture("rollback");
-        let rejected = entry(1, "/fixture/a", Tool::Claude);
+        let rejected = entry(1, "/fixture/a", Tool::new("claude").unwrap());
         store.record(rejected.clone()).unwrap();
         store.remove(&rejected.id, "rollback1").unwrap();
         assert!(store.read().unwrap().is_empty());
-        store.record(entry(2, "/fixture/a", Tool::Claude)).unwrap();
-        let newer = entry(3, "/fixture/a", Tool::Codex);
+        store
+            .record(entry(2, "/fixture/a", Tool::new("claude").unwrap()))
+            .unwrap();
+        let newer = entry(3, "/fixture/a", Tool::new("codex").unwrap());
         let other = entry(4, "/fixture/b", Tool::Shell);
         store.record(newer.clone()).unwrap();
         store.record(other.clone()).unwrap();
@@ -614,7 +616,7 @@ mod tests {
     fn clear_persists_and_does_not_erase_a_newer_concurrent_launch() {
         let store = fixture("clear");
         store.record(entry(1, "/fixture/old", Tool::Shell)).unwrap();
-        let newer = entry(3, "/fixture/new", Tool::Hermes);
+        let newer = entry(3, "/fixture/new", Tool::new("hermes").unwrap());
         store.record(newer.clone()).unwrap();
         store.clear(&entry(2, "", Tool::Shell).id).unwrap();
         assert_eq!(store.read().unwrap(), vec![newer]);
@@ -633,7 +635,11 @@ mod tests {
                     scope.spawn(move || {
                         gate.wait();
                         store
-                            .record(entry(round * 8 + n, &format!("/fixture/{n}"), Tool::Claude))
+                            .record(entry(
+                                round * 8 + n,
+                                &format!("/fixture/{n}"),
+                                Tool::new("claude").unwrap(),
+                            ))
                             .unwrap();
                     });
                 }
@@ -654,10 +660,15 @@ mod tests {
                 .record(entry(n, &format!("/fixture/{n}"), Tool::Shell))
                 .unwrap();
         }
-        store.record(entry(13, "/fixture/8", Tool::Codex)).unwrap();
+        store
+            .record(entry(13, "/fixture/8", Tool::new("codex").unwrap()))
+            .unwrap();
         let rows = store.read().unwrap();
         assert_eq!(rows.len(), 10);
-        assert_eq!(rows[0], entry(13, "/fixture/8", Tool::Codex));
+        assert_eq!(
+            rows[0],
+            entry(13, "/fixture/8", Tool::new("codex").unwrap())
+        );
         assert_eq!(
             rows.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
             vec![
@@ -678,7 +689,11 @@ mod tests {
     fn real_store_survives_a_new_reader_with_timestamp_and_tool() {
         let store = fixture("reopen");
         assert!(store.read().unwrap().is_empty());
-        let expected = entry(100, "/fixture/修理 it's literal; $HOME", Tool::Hermes);
+        let expected = entry(
+            100,
+            "/fixture/修理 it's literal; $HOME",
+            Tool::new("hermes").unwrap(),
+        );
         store.record(expected.clone()).unwrap();
         assert_eq!(Store::new(&store.root).read().unwrap(), vec![expected]);
         let json: serde_json::Value =

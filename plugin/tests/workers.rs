@@ -1,4 +1,4 @@
-use launchpad_plugin::workers::{Engine, Reply, Request};
+use zellij_launchpad::workers::{Engine, Reply, Request};
 #[test]
 fn worker_refuses_wrong_mapping_and_steps_only_current_epoch() {
     let mut worker = Engine::default();

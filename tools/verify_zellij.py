@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = 'lp-' + uuid.uuid4().hex[:8]
 OUT = ROOT / 'target' / ('zj-' + NAME[3:])
 OUT.mkdir(parents=True)
-WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'
+WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'
 assert WASM.is_file(), 'Build the release WASM first'
 for directory in ('home', 'cache', 'config', 'data', 'runtime', 'sock', 'tmp'):
     (OUT / directory).mkdir(mode=0o700)
@@ -38,7 +38,21 @@ env.update(TERM='xterm-256color', COLORTERM='truecolor', HOME=str(OUT/'home'),
 config = OUT/'config.kdl'
 layout = OUT/'layout.kdl'
 config.write_text((ROOT/'examples/locked.kdl').read_text() + f'\nsession_name "{NAME}"\n')
-layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace('.wasm"', '.wasm" { demo "true"; }'))
+# The dashboard has no built-in directories: seed a disposable HOME instead.
+FIXTURES = ('Projects/launchpad', 'Projects/notes', 'Projects/research/notes',
+            'Projects/service/api', 'Projects/team notes', 'Projects/修理',
+            'Projects/café', "Projects/it's literal; $HOME", 'Documents')
+for fixture in FIXTURES:
+    (OUT/'home'/fixture).mkdir(parents=True, exist_ok=True)
+# Four configured commands after the built-in Shell. Nothing is ever spawned:
+# simulate_launch validates the directory and records the attempt in memory.
+SETTINGS = ('simulate_launch "true"; commands "claude,codex,copilot,hermes"; '
+            'command_claude "claude"; label_claude "Claude"; '
+            'command_codex "codex"; label_codex "Codex"; '
+            'command_copilot "copilot"; label_copilot "Copilot"; '
+            'command_hermes "hermes"; label_hermes "Hermes";')
+layout.write_text((ROOT/'examples/launchpad.kdl').read_text()
+                  .replace('.wasm"', '.wasm" { ' + SETTINGS + ' }'))
 master, slave = pty.openpty()
 original = termios.tcgetattr(slave)
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH',24,80,0,0))
@@ -49,7 +63,7 @@ def setup():
 
 command = ['zellij','--config',str(config),'--layout-string',layout.read_text()]
 child = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
-                         env=env, cwd=ROOT, preexec_fn=setup)
+                         env=env, cwd=str(OUT/'home'/'Projects'), preexec_fn=setup)
 class Screen(pyte.Screen):
     # Zellij probes private DSRs; pyte 0.8.2's handler lacks this keyword.
     # Raw bytes are retained unchanged for xterm.js replay.
@@ -149,7 +163,11 @@ def cli(*args):
 
 success=False
 try:
-    expect('Launchpad','actual WASM loads with no permission prompt',timeout=45)
+    expect('permission','actual WASM requests its host permissions',timeout=45)
+    snapshot('00-permissions')
+    send('y')
+    expect('Launchpad','actual WASM loads after the grant',timeout=45)
+    expect('HOME indexed','worker finishes the disposable HOME index',timeout=60)
     snapshot('01-initial-80x24')
     send('\x15notes')
     expect('~/Projects/research/notes','embedded fuzzy results')
@@ -157,31 +175,31 @@ try:
     send('\x1b[B')
     send('\r')
     expect('Enter launches','completion is separate from launch')
-    check('Terminal placeholder' not in display(),'completion never launches')
+    check('Launch suppressed' not in display(),'completion never launches')
     send('\x14')
     send('\x1b[C')
     expect('[ Claude ]','locked mode delivers Ctrl+T and arrows')
     send('\r')
-    expect('Claude · simulated launch accepted','selected tool simulation')
-    snapshot('03-terminal')
+    expect('Launch suppressed (simulate_launch): Claude','selected tool is validated, not spawned')
+    snapshot('03-suppressed')
     send('\x1b')
-    expect('Launchpad','keyboard back')
+    expect('01 Directory','keyboard dismisses the launch notice')
     send('\x12')
     send('\t')
     expect('Copied to form','history copy without launch')
     send('\x12')
     send('\r')
-    expect('Terminal placeholder','history replay')
+    expect('Launch suppressed','history replay')
     send('\x1b')
     send('\x1bOP')
     expect('Launchpad / help','F1 help')
     snapshot('04-help')
     send('\x1b')
     send('\x10\x15~/Projects/missing\r')
-    expect('Directory missing','invalid path preserved')
+    expect('Directory unavailable','invalid path preserved')
     snapshot('05-invalid')
     send('\x1b[15~')
-    expect('~/Projects/','F5 fixture reset')
+    expect('[ Shell ]','F5 resets the form to Shell')
     send('\x15nts')
     expect('~/Projects/notes','noncontiguous fuzzy matching in WASM')
     send('\x1b[15~')
@@ -189,7 +207,7 @@ try:
     mouse(12,6)
     mouse(12,6,release=True)
     expect('Enter launches','mouse suggestion completes without launch')
-    check('Terminal placeholder' not in display(),'suggestion click is completion only')
+    check('Launch suppressed' not in display(),'suggestion click is completion only')
     mouse(26,9)
     mouse(26,9,release=True)
     expect('[ Codex ]','mouse tool selection')
@@ -199,21 +217,17 @@ try:
     mouse(68,9,release=True)
     check(display()==before,'mouse hold/release cannot launch')
     click('Enter ↵')
-    expect('Codex · simulated launch accepted','explicit mouse form launch')
-    send('\r\r')
-    click('Esc back')
-    expect('Launchpad','mouse back')
-    check(display().count('Just now')==1,'repeated Enter in simulation adds no extra history events')
-    mouse(15,14)
-    mouse(15,14,release=True)
+    expect('Launch suppressed (simulate_launch): Codex','explicit mouse form launch')
+    send('\x1b')
+    expect('01 Directory','mouse launch notice dismissed')
+    click('01 Codex')
     expect('Tab copy','mouse history selection without launch')
     click('Tab copy')
     expect('Copied to form','mouse copy into form')
-    mouse(15,14)
-    mouse(15,14,release=True)
+    click('01 Codex')
     click('Enter replay')
-    expect('Terminal placeholder','explicit mouse history replay')
-    click('Esc back')
+    expect('Launch suppressed','explicit mouse history replay')
+    send('\x1b')
     click('F5 reset')
     send('\x15')
     send('\x1b[200~~/Projects/修理/e\u0301\n\t\x1b[201~')
@@ -229,6 +243,10 @@ try:
     check(screen.buffer[4][117].data=='│','wide layout right border stays aligned')
     snapshot('07-wide-120x36')
     click('F5 reset')
+    # F5 also clears the in-memory attempts, so seed one row for the wheel.
+    send('\x15~/Projects/notes\r')
+    expect('Launch suppressed','a recent row exists for the wheel checks')
+    send('\x1b')
     # SDK wheel events contain a count but no position: send hover first.
     mouse(10,0,button=35)
     before=display()
@@ -254,9 +272,6 @@ try:
     check('No launch' in display(),'small guard blocks launch')
     snapshot('10-guard-30x8')
     resize(80,24)
-    send('\x1b[15~')
-    send('\x1b[17~')
-    expect('Copilot removed','availability fixture toggle')
     send('\x1b[15~')
     # Prove host interception and recovery, rather than claiming normal-mode parity.
     send('\x07')  # unlock
@@ -287,7 +302,7 @@ try:
     send("printf 'SURVIVOR_OK\\n'\r")
     expect('SURVIVOR_OK','ordinary shell pane remains usable')
     snapshot('12-surviving-shell')
-    reopened=cli('action','launch-plugin','--configuration','demo=true','file:'+str(WASM)).strip()
+    reopened=cli('action','launch-plugin','--configuration','simulate_launch=true','file:'+str(WASM)).strip()
     (OUT/'reopened-plugin.txt').write_text(reopened+'\n')
     expect('Launchpad','WASM reloads in split alongside surviving ordinary pane')
     snapshot('13-split-before-key-quit')

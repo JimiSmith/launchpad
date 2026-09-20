@@ -2,8 +2,8 @@
 """Isolated real Zellij gate for automatic worker HOME remapping."""
 from pathlib import Path
 source=Path(__file__).with_name('verify_search.py').read_text().split('success = False')[0]
-source=source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/launchpad-plugin.wasm'", "WASM = ROOT / 'target/wasm32-wasip1/release/worker-probe.wasm'")
-source=source.replace("shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)", "layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace('launchpad-plugin.wasm', 'worker-probe.wasm'))\n(home/'worker-home-witness').mkdir()")
+source=source.replace("WASM = ROOT / 'target/wasm32-wasip1/release/zellij-launchpad.wasm'", "WASM = ROOT / 'target/wasm32-wasip1/release/worker-probe.wasm'")
+source=source.replace("shutil.copyfile(ROOT/'examples/launchpad.kdl', layout)", "layout.write_text((ROOT/'examples/launchpad.kdl').read_text().replace('zellij-launchpad.wasm', 'worker-probe.wasm'))\n(home/'worker-home-witness').mkdir()")
 exec(compile(source, str(Path(__file__).with_name('verify_search.py')), 'exec'))
 success=False
 try:

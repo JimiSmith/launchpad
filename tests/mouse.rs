@@ -1,8 +1,26 @@
+mod common;
+
+use common::app;
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-use zellij_launchpad_prototype::{
-    app::{Action, App, Focus, Screen},
+use zellij_launchpad_core::{
+    app::{Action, App, Focus},
+    remote::RemoteRequest,
     view::{self, HitMap, Pointer},
 };
+
+/// Take the outstanding validation request as (generation, raw path).
+fn pending(app: &mut App) -> (u64, String) {
+    match app.take_remote_request() {
+        Some(RemoteRequest::Validate { generation, raw }) => (generation, raw),
+        other => panic!("expected a pending validation, got {other:?}"),
+    }
+}
+/// Take the outstanding validation and answer it with `result`.
+fn settle(app: &mut App, result: Result<String, String>) -> String {
+    let (generation, raw) = pending(app);
+    assert!(app.finish_remote_validation(generation, result));
+    raw
+}
 
 fn draw(app: &App, w: u16, h: u16) -> HitMap {
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -40,23 +58,26 @@ fn click_label(app: &mut App, w: u16, h: u16, label: &str) {
 #[test]
 fn history_click_selects_only_then_copy_or_replay_is_explicit() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
-        let mut app = App::demo();
+        let mut app = app();
         app.recent = 9;
         app.update(Action::Escape); // dismiss completions before choosing a history path
         click_label(&mut app, w, h, "it's");
         assert_eq!(app.focus, Focus::History);
         assert_eq!(app.recent, 9);
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert!(app.take_launch().is_none());
         let event = app.history[9].clone();
         click_label(&mut app, w, h, "Tab copy");
         assert_eq!(app.focus, Focus::Path);
         assert_eq!(app.tool, event.tool);
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert!(app.take_launch().is_none());
         app.update(Action::Focus(Focus::History));
         click_label(&mut app, w, h, "Enter replay");
-        assert!(
-            matches!(&app.screen, Screen::Terminal(e) if e.path == event.path && e.tool == event.tool)
-        );
+        let raw = settle(&mut app, Ok(event.path.clone()));
+        assert_eq!(raw, event.path, "replay revalidates the stored path first");
+        let launch = app
+            .take_launch()
+            .expect("replay hands one launch to the host");
+        assert_eq!((launch.path, launch.tool), (event.path, event.tool));
     }
 }
 fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
@@ -71,7 +92,7 @@ fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
 }
 #[test]
 fn wheel_is_section_local_and_clamped() {
-    let mut app = App::demo();
+    let mut app = app();
     wheel(&mut app, 80, 24, 10, 5, true);
     assert_eq!(app.highlighted, Some(0));
     for _ in 0..30 {
@@ -110,17 +131,21 @@ fn wheel_is_section_local_and_clamped() {
     app.update(Action::Home);
     wheel(&mut app, 40, 10, 5, 3, false);
     assert_eq!(app.help_scroll, 0);
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
 #[test]
 fn explicit_launch_back_help_reset_and_quit_controls() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
-        let mut app = App::demo();
+        let mut app = app();
         app.update(Action::Down); // highlighted completion must not hijack explicit launch
         click_label(&mut app, w, h, "Enter ↵");
-        assert!(matches!(&app.screen, Screen::Terminal(e) if e.path == "/home/demo/Projects"));
-        click_label(&mut app, w, h, "Esc back");
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert_eq!(
+            pending(&mut app).1,
+            "notes",
+            "explicit launch validates the typed path, not the highlight"
+        );
+        app.update(Action::Escape); // abandon the pending validation
+        assert!(app.take_launch().is_none());
         click_label(&mut app, w, h, "F1");
         assert!(app.help);
         click_label(&mut app, w, h, "Esc back");
@@ -133,34 +158,41 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
 }
 #[test]
 fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
-    use zellij_launchpad_prototype::app::Tool;
+    use zellij_launchpad_core::app::Tool;
     for (w, h, x, y) in [(80, 24, 26, 9), (120, 36, 26, 12), (40, 12, 4, 6)] {
-        let mut app = App::demo();
+        let mut app = app();
         click(&mut app, w, h, x, y);
         assert_eq!(app.focus, Focus::Tools, "{w}x{h}");
-        assert_eq!(app.tool, if w == 40 { Tool::Copilot } else { Tool::Codex });
-        assert_eq!(app.screen, Screen::Dashboard);
+        assert_eq!(
+            app.tool,
+            if w == 40 {
+                Tool::new("copilot").unwrap()
+            } else {
+                Tool::new("codex").unwrap()
+            }
+        );
+        assert!(app.take_launch().is_none());
     }
 }
 #[test]
 fn suggestion_click_accepts_without_launching() {
-    let mut app = App::demo();
-    app.update(Action::Clear);
-    app.update(Action::Text("notes".into()));
+    let mut app = app();
     click(&mut app, 80, 24, 12, 6);
-    assert_eq!(app.editor.text, "~/Projects/research/notes");
     assert_eq!(app.focus, Focus::Path);
+    let raw = settle(&mut app, Ok(common::DIRECTORIES[1].into()));
+    assert_eq!(raw, common::DIRECTORIES[1], "the second visible row");
+    assert_eq!(app.editor.text, "~/Projects/notes");
     assert!(app.suggestions.is_empty());
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none(), "accepting never launches");
     assert_ne!(app.history[0].age, "Just now");
 }
 #[test]
 fn scrolled_input_maps_visible_origin_and_clipped_tail() {
-    use zellij_launchpad_prototype::cells::{input_cursor, input_window};
+    use zellij_launchpad_core::cells::{input_cursor, input_window};
     // Still wider than both viewports, with room under the input cap to edit.
     let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(80));
     for (w, h, x, y, budget) in [(80, 24, 6, 3, 70), (40, 10, 4, 2, 34)] {
-        let mut app = App::demo();
+        let mut app = app();
         app.editor.set(&text);
         let (visible, _) = input_window(&text, text.len(), budget);
         let start = text.len() - visible.len();
@@ -175,7 +207,7 @@ fn scrolled_input_maps_visible_origin_and_clipped_tail() {
 }
 #[test]
 fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
-    let app = App::demo();
+    let app = app();
     let map = draw(&app, 80, 24);
     for pointer in [Pointer::Click, Pointer::ScrollDown, Pointer::ScrollUp] {
         for (x, y) in [(0, 0), (79, 23), (80, 24), (u16::MAX, u16::MAX)] {
@@ -195,33 +227,38 @@ fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
         map.action(Pointer::Click, 20, 10, Rect::new(0, 0, 80, 24)),
         None
     ); // separator
-    let mut closed = App::demo();
-    closed.update(Action::Escape);
-    closed.update(Action::Escape);
-    assert_eq!(closed.screen, Screen::Closed);
-    click_label(&mut closed, 40, 10, "Esc reopen");
-    assert_eq!(closed.screen, Screen::Dashboard);
 }
 #[test]
 fn scrolled_suggestions_click_the_visible_result() {
-    let mut app = App::demo();
+    let mut app = app();
     app.highlighted = Some(app.suggestions.len() - 1);
-    let expected = app.path_label(&app.dirs[*app.suggestions.last().unwrap()].path);
+    let last = app.dirs[*app.suggestions.last().unwrap()].path.clone();
+    let expected = app.path_label(&last);
     click(&mut app, 40, 10, 10, 3);
+    let raw = settle(&mut app, Ok(last.clone()));
+    assert_eq!(raw, last, "the scrolled-to row, not the first");
     assert_eq!(app.editor.text, expected);
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
 #[test]
 fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
-    let mut app = App::demo();
-    app.update(Action::ToggleCopilot);
-    app.update(Action::SelectHistory(app.history[5].id));
+    let mut app = app();
+    // This instance's configuration no longer defines the copilot command.
+    app.configure(&std::collections::BTreeMap::from([
+        ("commands".to_string(), "claude".to_string()),
+        ("command_claude".to_string(), "claude".to_string()),
+    ]));
+    let row = app.history[5].clone();
+    assert!(!app.available(row.tool));
+    app.update(Action::SelectHistory(row.id));
     click_label(&mut app, 80, 24, "Enter replay");
-    assert_eq!(app.screen, Screen::Dashboard);
+    settle(&mut app, Ok(row.path.clone()));
+    assert!(app.take_launch().is_none(), "no silent substitution");
     assert!(app.message.as_ref().unwrap().contains("unavailable"));
     click_label(&mut app, 80, 24, "Tab copy");
     click_label(&mut app, 80, 24, "Enter ↵");
-    assert_eq!(app.screen, Screen::Dashboard);
+    settle(&mut app, Ok(row.path));
+    assert!(app.take_launch().is_none());
     app.history.clear();
     app.suggestions.clear();
     app.focus = Focus::History;
@@ -231,11 +268,11 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
     app.update(Action::SelectHistory(u64::MAX));
     app.update(Action::AcceptSuggestion(usize::MAX));
     app.update(Action::PathCursor(usize::MAX));
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
 #[test]
 fn path_click_uses_cells_graphemes_padding_and_focus() {
-    let mut app = App::demo();
+    let mut app = app();
     app.editor.set("修理/e\u{301}👩🏽‍💻");
     app.focus = Focus::Tools;
     click(&mut app, 80, 24, 9, 3); // second cell of 理: before the whole grapheme
@@ -249,5 +286,5 @@ fn path_click_uses_cells_graphemes_padding_and_focus() {
     assert_eq!(app.editor.cursor, 0);
     click(&mut app, 80, 24, 74, 3);
     assert_eq!(app.editor.cursor, app.editor.text.len());
-    assert_eq!(app.screen, Screen::Dashboard);
+    assert!(app.take_launch().is_none());
 }
