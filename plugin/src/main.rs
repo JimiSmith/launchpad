@@ -2,7 +2,7 @@
 #[cfg(any(target_family = "wasm", test))]
 mod wasm {
     #[cfg(test)]
-    use self::tests::{change_host_folder, read_dir, send, set_timeout};
+    use self::tests::{change_host_folder, now, read_dir, send, set_timeout};
     #[cfg(not(test))]
     use serde::{Deserialize, Serialize};
     #[cfg(not(test))]
@@ -17,6 +17,11 @@ mod wasm {
     use zellij_launchpad_core::app::{Action, App, Tool};
     use zellij_launchpad_core::remote::RemoteRequest;
     use zellij_tile::prelude::*;
+    const SEARCH_DEBOUNCE: Duration = Duration::from_millis(120);
+    #[cfg(not(test))]
+    fn now() -> Instant {
+        Instant::now()
+    }
     #[cfg(not(test))]
     register_plugin!(Plugin);
     #[cfg(not(test))]
@@ -86,7 +91,8 @@ mod wasm {
         ready: bool,
         scanning: bool,
         pending: Option<Instant>,
-        timer_pending: bool,
+        timer_due: Option<Instant>,
+        search_due: Option<Instant>,
         remounting: bool,
         // Host remounts have no request IDs. Keep the outstanding operation
         // across App resets; its epoch decides whether the result is still live.
@@ -104,6 +110,19 @@ mod wasm {
         silence_worker: bool,
     }
     impl Plugin {
+        fn arm_timer(&mut self, deadline: Instant, now: Instant) {
+            // Timers have no IDs and cannot be cancelled. An earlier wakeup may
+            // supersede the watchdog; late callbacks must not clear a newer timer.
+            if self.timer_due.is_none_or(|due| deadline < due) {
+                set_timeout(
+                    deadline
+                        .saturating_duration_since(now)
+                        .as_secs_f64()
+                        .max(0.001),
+                );
+                self.timer_due = Some(deadline);
+            }
+        }
         fn reject_launch(&mut self) {
             if let Some((id, previous, written)) = self.renamed_tab.take() {
                 // Do not undo a later name observed from the user/another plugin.
@@ -271,9 +290,10 @@ mod wasm {
             self.ready = false;
             self.scanning = false;
             self.work = None;
+            self.search_due = None;
             self.failed = false;
 
-            self.pending = Some(Instant::now());
+            self.pending = Some(now());
             self.state.app.search_status = "Verifying worker HOME mapping…".into();
             send(Request::Start {
                 epoch: self.epoch,
@@ -284,6 +304,7 @@ mod wasm {
             self.state.app.remote_failed(message);
             self.failed = true;
             self.work = None;
+            self.search_due = None;
             self.pending = None;
             self.scanning = false;
         }
@@ -346,6 +367,7 @@ mod wasm {
             request_permission(&permissions);
         }
         fn update(&mut self, event: Event) -> bool {
+            let now = now();
             let mut changed = true;
             match event {
                 Event::PermissionRequestResult(PermissionStatus::Granted)
@@ -360,7 +382,7 @@ mod wasm {
                             self.fail("Worker HOME reload failed. Reopen the plugin.".into());
                         } else {
                             self.remounting = true;
-                            self.pending = Some(Instant::now());
+                            self.pending = Some(now);
                             change_host_folder(self.home.clone().unwrap().into());
                         }
                     }
@@ -416,7 +438,7 @@ mod wasm {
                         Ok(Reply::Ready { epoch, cwd })
                             if epoch == self.epoch && Some(&cwd) == self.home.as_ref() =>
                         {
-                            self.pending = Some(Instant::now());
+                            self.pending = Some(now);
                             self.ready = true;
                             self.scanning = true;
                             self.state.replace_app(App::from_remote(cwd.into()));
@@ -438,7 +460,7 @@ mod wasm {
                             status,
                             scanning,
                         }) if epoch == self.epoch => {
-                            self.pending = scanning.then(Instant::now);
+                            self.pending = scanning.then_some(now);
                             self.scanning = scanning;
                             self.state.app.remote_progress(revision, status);
                         }
@@ -471,14 +493,16 @@ mod wasm {
                     }
                 }
                 Event::Timer(_) => {
-                    self.timer_pending = false;
+                    if self.timer_due.is_some_and(|due| now >= due) {
+                        self.timer_due = None;
+                    }
                     changed = false;
                     if self
                         .pending
-                        .is_some_and(|t| t.elapsed() > Duration::from_secs(15))
-                        || self
-                            .work
-                            .is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(15))
+                        .is_some_and(|t| now.saturating_duration_since(t) > Duration::from_secs(15))
+                        || self.work.is_some_and(|(_, t)| {
+                            now.saturating_duration_since(t) > Duration::from_secs(15)
+                        })
                     {
                         self.fail("Worker timed out. Reopen the plugin; no scan fallback.".into());
                         changed = true;
@@ -501,11 +525,29 @@ mod wasm {
                 | Event::ActionComplete(..) => changed = false,
                 event => {
                     let quit = matches!(&event, Event::Key(key) if zellij_launchpad::key_action(key.clone()) == Some(Action::Quit));
+                    let edit = match &event {
+                        Event::PastedText(_) => true,
+                        Event::Key(key) => matches!(
+                            zellij_launchpad::key_action(key.clone()),
+                            Some(
+                                Action::Text(_)
+                                    | Action::Backspace
+                                    | Action::Delete
+                                    | Action::Clear
+                            )
+                        ),
+                        _ => false,
+                    };
                     let refresh_before = self.state.app.remote_refresh();
                     if self.ready || quit {
                         changed = self.state.handle(event);
                     } else {
                         changed = false;
+                    }
+                    // Include repeats at the start of an empty field and at the
+                    // input limit: they must not turn into immediate searches.
+                    if edit && self.ready && !self.failed {
+                        self.search_due = Some(now + SEARCH_DEBOUNCE);
                     }
                     if self.state.app.remote_refresh() != refresh_before && self.ready {
                         self.start();
@@ -557,23 +599,28 @@ mod wasm {
             }
             // Drain the anonymous host acknowledgement before taking any new
             // validation, even after F5 recreated App with reused generations.
+            if self.search_due.is_some_and(|due| now >= due) {
+                self.search_due = None;
+            }
             if self.ready
                 && !self.failed
                 && self.work.is_none()
                 && self.cwd_validation.is_none()
                 && !self.state.app.quit
             {
-                if let Some(request) = self.state.app.take_remote_request() {
-                    self.work = Some((request.generation(), Instant::now()));
+                if let Some(request) = self
+                    .state
+                    .app
+                    .take_remote_request_with_search(self.search_due.is_none())
+                {
+                    self.work = Some((request.generation(), now));
                     if let RemoteRequest::Validate { generation, raw } = &request {
+                        self.search_due = None;
                         if let Some(cwd) = &self.original_cwd {
                             if raw == cwd || *raw == self.state.app.path_label(cwd) {
                                 self.cwd_validation = Some((self.epoch, *generation));
                                 change_host_folder(cwd.into());
-                                if !self.timer_pending {
-                                    set_timeout(1.0);
-                                    self.timer_pending = true;
-                                }
+                                self.arm_timer(now + Duration::from_secs(1), now);
                                 return true;
                             }
                         }
@@ -592,16 +639,17 @@ mod wasm {
                     });
                 }
             }
-            if (self.pending.is_some() || self.scanning || self.work.is_some())
-                && !self.timer_pending
-            {
-                // Watchdog only: worker continuations, not UI timers, drive the scan.
-                set_timeout(1.0);
-                self.timer_pending = true;
-            }
             if self.state.app.quit {
                 close_self();
                 return false;
+            }
+            if let Some(due) = self.search_due {
+                self.arm_timer(due, now);
+            }
+            if self.pending.is_some() || self.scanning || self.work.is_some() {
+                // Worker continuations still drive scanning; timers only wake a
+                // debounced search or check for a missing worker response.
+                self.arm_timer(now + Duration::from_secs(1), now);
             }
             changed
         }

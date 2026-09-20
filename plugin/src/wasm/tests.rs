@@ -7,6 +7,8 @@ struct Host {
     remounts: Vec<PathBuf>,
     requests: Vec<Request>,
     directory_reads: usize,
+    time: Option<Instant>,
+    timers: Vec<f64>,
 }
 thread_local! {
     static HOST: RefCell<Host> = RefCell::new(Host::default());
@@ -17,7 +19,17 @@ pub(super) fn change_host_folder(path: PathBuf) {
 pub(super) fn send(request: Request) {
     HOST.with_borrow_mut(|host| host.requests.push(request));
 }
-pub(super) fn set_timeout(_: f64) {}
+pub(super) fn set_timeout(seconds: f64) {
+    HOST.with_borrow_mut(|host| host.timers.push(seconds));
+}
+pub(super) fn now() -> Instant {
+    HOST.with_borrow_mut(|host| *host.time.get_or_insert_with(Instant::now))
+}
+fn advance(plugin: &mut Plugin, millis: u64) {
+    let next = now() + Duration::from_millis(millis);
+    HOST.with_borrow_mut(|host| host.time = Some(next));
+    plugin.update(Event::Timer(millis as f64 / 1000.0));
+}
 pub(super) fn read_dir(path: &str) -> std::io::Result<()> {
     assert_eq!(path, "/host");
     HOST.with_borrow_mut(|host| host.directory_reads += 1);
@@ -71,6 +83,131 @@ fn plugin() -> Plugin {
     plugin.start();
     ready(&mut plugin);
     plugin
+}
+
+fn query_count() -> usize {
+    HOST.with_borrow(|h| {
+        h.requests
+            .iter()
+            .filter(|r| matches!(r, Request::Query { .. }))
+            .count()
+    })
+}
+
+#[test]
+fn repeated_backspace_edits_immediately_and_searches_once_after_quiet() {
+    let mut plugin = plugin();
+    let before = query_count();
+    // Also exercise repeats after the field has become empty.
+    for _ in 0..25 {
+        let previous = plugin.state.app.editor.text.len();
+        assert!(plugin.update(Event::Key(KeyWithModifier::new(BareKey::Backspace))));
+        assert_eq!(
+            plugin.state.app.editor.text.len(),
+            previous.saturating_sub(1)
+        );
+        advance(&mut plugin, 30);
+        assert_eq!(query_count(), before);
+    }
+    advance(&mut plugin, 89);
+    assert_eq!(query_count(), before);
+    advance(&mut plugin, 1);
+    assert_eq!(query_count(), before + 1);
+    HOST.with_borrow(|h| {
+        assert!(matches!(h.requests.last(), Some(Request::Query { text, .. }) if text.is_empty()))
+    });
+    // The outstanding worker request continues to provide backpressure.
+    advance(&mut plugin, 1000);
+    assert_eq!(query_count(), before + 1);
+}
+
+#[test]
+fn progress_and_stale_results_do_not_bypass_edit_debounce() {
+    let mut plugin = plugin();
+    key(&mut plugin, BareKey::Char('a'));
+    advance(&mut plugin, 120);
+    let (epoch, generation) = HOST.with_borrow(|h| match h.requests.last().unwrap() {
+        Request::Query {
+            epoch, generation, ..
+        } => (*epoch, *generation),
+        other => panic!("expected query, got {other:?}"),
+    });
+    let before = query_count();
+    key(&mut plugin, BareKey::Char('b'));
+    advance(&mut plugin, 60);
+    reply(
+        &mut plugin,
+        Reply::Progress {
+            epoch,
+            revision: 1,
+            status: "Indexing HOME".into(),
+            scanning: true,
+        },
+    );
+    reply(
+        &mut plugin,
+        Reply::Results {
+            epoch,
+            generation,
+            revision: 1,
+            paths: vec!["/fixture/home/stale".into()],
+        },
+    );
+    assert!(plugin.state.app.suggestions.is_empty());
+    assert_eq!(query_count(), before);
+    advance(&mut plugin, 59);
+    assert_eq!(query_count(), before);
+    advance(&mut plugin, 1);
+    assert_eq!(query_count(), before + 1);
+    HOST.with_borrow(|h| {
+        assert!(
+            matches!(h.requests.last(), Some(Request::Query { text, .. }) if text.ends_with("ab"))
+        )
+    });
+}
+
+#[test]
+fn paste_then_submit_bypasses_search_delay() {
+    let mut plugin = plugin();
+    let before = query_count();
+    plugin.update(Event::PastedText("/new-target".into()));
+    key(&mut plugin, BareKey::Enter);
+    assert_eq!(query_count(), before);
+    HOST.with_borrow(|h| assert!(matches!(h.requests.last(), Some(Request::Validate { raw, .. }) if raw == "/fixture/original/new-target")));
+    assert!(plugin.search_due.is_none());
+}
+
+#[test]
+fn obsolete_timer_does_not_clear_a_newer_timer_or_hide_worker_timeout() {
+    let mut plugin = plugin();
+    key(&mut plugin, BareKey::Char('a'));
+    advance(&mut plugin, 120); // search dispatched, watchdog remains necessary
+    let timer = plugin.timer_due;
+    let scheduled = HOST.with_borrow(|h| h.timers.len());
+    advance(&mut plugin, 1); // a callback from an older timer
+    assert_eq!(plugin.timer_due, timer);
+    assert_eq!(HOST.with_borrow(|h| h.timers.len()), scheduled);
+    advance(&mut plugin, 15000);
+    assert!(plugin.failed);
+    assert!(plugin.state.app.search_status.contains("timed out"));
+}
+
+#[test]
+fn dismiss_and_reset_do_not_resurrect_a_deferred_query() {
+    let mut plugin = plugin();
+    let before = query_count();
+    key(&mut plugin, BareKey::Char('a'));
+    key(&mut plugin, BareKey::Esc);
+    advance(&mut plugin, 120);
+    assert_eq!(query_count(), before);
+    key(&mut plugin, BareKey::Char('b'));
+    key(&mut plugin, BareKey::F(5));
+    assert!(plugin.search_due.is_none());
+    ready(&mut plugin);
+    let after_reset = query_count();
+    advance(&mut plugin, 120);
+    assert_eq!(query_count(), after_reset);
+    assert_eq!(plugin.state.app.editor.text, "/fixture/original");
 }
 fn failed_ack(plugin: &mut Plugin) {
     plugin.update(Event::FailedToChangeHostFolder(Some("missing".into())));

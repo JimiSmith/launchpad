@@ -45,11 +45,14 @@ against the exact release source below, then exercised in the installed host.
   instead be interpreted as the first press by the host.
 - The same file's `handle_plugin_bytes` clears the viewport/scrollback and resets
   the cursor for **every render**. Therefore Ratatui incremental diffs alone
-  would be wrong. We create a full in-memory Ratatui frame and serialize every
+  would be wrong. We clear and reuse one Ratatui cell buffer and serialize every
   visible cell, skipping coordinates covered by wide glyphs. CUP starts each
   row explicitly; there is no newline at row ends or after the bottom-right
   cell. Styles reset initially, on transitions and at the end. Real styled
-  spaces are retained. No raw mode, alternate screen or Crossterm in WASI.
+  spaces are retained. The plugin draws widgets directly into that buffer,
+  bypassing terminal diffing and backend copies; printable ASCII cells bypass
+  Unicode normalization and temporary string allocation. No raw mode, alternate
+  screen or Crossterm in WASI.
 - [`grid.rs`](https://github.com/zellij-org/zellij/blob/v0.45.1/zellij-server/src/panes/grid.rs),
   around lines 2457–2463: Zellij deliberately drops zero-width scalars and notes
   this breaks grapheme segmentation (upstream issue #1538). Live PTY output

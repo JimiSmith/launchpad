@@ -6,13 +6,32 @@ use crate::{
 };
 use ratatui::{
     Frame,
-    layout::Rect,
+    buffer::Buffer,
+    layout::{Position, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
 
-fn row(f: &mut Frame, area: Rect, text: &str, style: Style) {
+// Draw directly into a buffer; plugin output does not need a terminal backend
+// or Ratatui's diff against a previous frame.
+struct Canvas<'a> {
+    buffer: &'a mut Buffer,
+    cursor: Option<Position>,
+}
+impl Canvas<'_> {
+    fn area(&self) -> Rect {
+        self.buffer.area
+    }
+    fn render_widget(&mut self, widget: impl Widget, area: Rect) {
+        widget.render(area, self.buffer);
+    }
+    fn set_cursor_position(&mut self, position: impl Into<Position>) {
+        self.cursor = Some(position.into());
+    }
+}
+
+fn row(f: &mut Canvas, area: Rect, text: &str, style: Style) {
     if area.width > 0 && area.height > 0 {
         f.render_widget(
             Paragraph::new(clip(text, area.width as usize)).style(style),
@@ -23,7 +42,7 @@ fn row(f: &mut Frame, area: Rect, text: &str, style: Style) {
 fn at(area: Rect, y: u16, height: u16) -> Rect {
     Rect::new(area.x, y, area.width, height).intersection(area)
 }
-fn pair(f: &mut Frame, area: Rect, left: &str, right: &str, style: Style) {
+fn pair(f: &mut Canvas, area: Rect, left: &str, right: &str, style: Style) {
     let rw = (width(right) as u16).min(area.width);
     row(
         f,
@@ -38,11 +57,11 @@ fn pair(f: &mut Frame, area: Rect, left: &str, right: &str, style: Style) {
         style,
     );
 }
-fn section(f: &mut Frame, a: Rect, label: &str, hint: &str, active: bool) {
+fn section(f: &mut Canvas, a: Rect, label: &str, hint: &str, active: bool) {
     pair(f, a, label, hint, if active { accent() } else { muted() });
 }
 
-fn controls(f: &mut Frame, hits: &mut HitMap, area: Rect, items: &[(&str, Action)]) {
+fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Action)]) {
     let mut x = area.x;
     for (i, (label, action)) in items.iter().enumerate() {
         if i > 0 {
@@ -106,17 +125,29 @@ impl HitMap {
     }
 }
 pub fn render_with_hits(f: &mut Frame, app: &App) -> HitMap {
+    let (hits, cursor) = render_buffer(f.buffer_mut(), app);
+    if let Some(cursor) = cursor {
+        f.set_cursor_position(cursor);
+    }
+    hits
+}
+/// Draw a complete dashboard into a caller-owned, cleared buffer.
+pub fn render_buffer(buffer: &mut Buffer, app: &App) -> (HitMap, Option<Position>) {
     let mut hits = HitMap {
-        area: f.area(),
+        area: buffer.area,
         ..HitMap::default()
     };
-    render_ui(f, app, &mut hits);
-    hits
+    let mut canvas = Canvas {
+        buffer,
+        cursor: None,
+    };
+    render_ui(&mut canvas, app, &mut hits);
+    (hits, canvas.cursor)
 }
 pub fn render(f: &mut Frame, app: &App) {
     render_with_hits(f, app);
 }
-fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
+fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
     let viewport = f.area();
     f.render_widget(Block::default().style(base()), viewport);
     let width = viewport.width.min(160);
@@ -149,7 +180,7 @@ fn render_ui(f: &mut Frame, app: &App, hits: &mut HitMap) {
     dashboard(f, app, area, hits);
 }
 
-fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
+fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let short = area.height < 18;
     let roomy = area.height >= 30;
     let narrow = area.width < 60;
@@ -502,7 +533,7 @@ fn dashboard(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
     }
 }
 
-fn suggestions(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
+fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     if app.suggestions.is_empty() {
         row(
             f,
@@ -552,7 +583,7 @@ fn suggestions(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
 
 #[allow(clippy::too_many_arguments)]
 fn history_row(
-    f: &mut Frame,
+    f: &mut Canvas,
     a: Rect,
     marker: &str,
     tool: &str,
@@ -576,7 +607,7 @@ fn history_row(
     }
 }
 
-fn help(f: &mut Frame, app: &App, area: Rect, hits: &mut HitMap) {
+fn help(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     hits.wheels.push((
         Rect::new(area.x, area.y + 1, area.width, area.height - 2),
         ScrollTarget::Help,

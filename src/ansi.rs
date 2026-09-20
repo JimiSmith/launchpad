@@ -11,13 +11,19 @@ pub fn serialize(buffer: &Buffer) -> String {
         ratatui::style::Color::Reset,
         ratatui::style::Modifier::empty(),
     );
-    let mut out = String::from("\x1b[0m");
+    let mut out = String::with_capacity(buffer.content.len() + buffer.area.height as usize * 8);
+    out.push_str("\x1b[0m");
     for y in buffer.area.y..buffer.area.bottom() {
         write!(out, "\x1b[{};1H", y - buffer.area.y + 1).unwrap();
         let mut x = buffer.area.x;
         while x < buffer.area.right() {
             let cell = &buffer[(x, y)];
-            let w = crate::cells::width(cell.symbol()).max(1);
+            let ascii = matches!(cell.symbol().as_bytes(), [b' '..=b'~']);
+            let w = if ascii {
+                1
+            } else {
+                crate::cells::width(cell.symbol()).max(1)
+            };
             if (cell.fg, cell.bg, cell.modifier) != style {
                 style = (cell.fg, cell.bg, cell.modifier);
                 out.push_str("\x1b[0m");
@@ -39,6 +45,13 @@ pub fn serialize(buffer: &Buffer) -> String {
                         write!(out, "\x1b[{code}m").unwrap();
                     }
                 }
+            }
+            // Most cells (including all background spaces) need neither Unicode
+            // segmentation/normalization nor a temporary string allocation.
+            if ascii {
+                out.push_str(cell.symbol());
+                x += 1;
+                continue;
             }
             use unicode_normalization::UnicodeNormalization;
             use unicode_width::UnicodeWidthChar;

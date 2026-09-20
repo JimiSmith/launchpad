@@ -78,6 +78,7 @@ pub struct State {
     pointer: Option<(u16, u16)>,
     mouse_quiet_since: Option<std::time::Instant>,
     pending_home: Option<std::path::PathBuf>,
+    frame: Option<ratatui::buffer::Buffer>,
 }
 impl State {
     pub fn replace_app(&mut self, mut app: zellij_launchpad_core::app::App) {
@@ -184,7 +185,7 @@ impl State {
     }
 
     pub fn render_frame(&mut self, rows: usize, cols: usize) -> String {
-        use ratatui::{backend::TestBackend, layout::Rect, style::Modifier, Terminal};
+        use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
         use zellij_launchpad_core::{ansi, view};
         let width = cols.min(u16::MAX as usize) as u16;
         let height = rows.min(u16::MAX as usize) as u16;
@@ -197,20 +198,21 @@ impl State {
         }
         self.area = area;
         self.app.compact = width < 40 || height < 10;
-        // TestBackend is Ratatui's in-memory backend: no raw mode, tty or OS IO.
-        // A fresh full buffer is required: Zellij clears the viewport every render.
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal
-            .draw(|f| self.hits = view::render_with_hits(f, &self.app))
-            .unwrap();
-        let backend = terminal.backend();
-        let mut buffer = backend.buffer().clone();
-        if backend.cursor_visible() {
-            if let Some(cell) = buffer.cell_mut(backend.cursor_position()) {
+        // Zellij clears the viewport each render, so emit a complete frame while
+        // reusing its allocation. No terminal diff, backend copy or buffer clone.
+        let buffer = self.frame.get_or_insert_with(|| Buffer::empty(area));
+        if buffer.area != area {
+            buffer.resize(area);
+        }
+        buffer.reset();
+        let (hits, cursor) = view::render_buffer(buffer, &self.app);
+        self.hits = hits;
+        if let Some(cursor) = cursor {
+            if let Some(cell) = buffer.cell_mut(cursor) {
                 cell.modifier.insert(Modifier::REVERSED);
             }
         }
-        ansi::serialize(&buffer)
+        ansi::serialize(buffer)
     }
 }
 
@@ -405,6 +407,54 @@ mod tests {
         let frame = s.render_frame(36, 120);
         assert!(frame.contains("replace this pane"));
         assert!(!frame.contains("suppressed"));
+    }
+
+    #[test]
+    fn reused_buffer_matches_terminal_output_across_edits_focus_help_and_resize() {
+        use ratatui::{backend::TestBackend, layout::Rect, style::Modifier, Terminal};
+        use zellij_launchpad_core::{ansi, view};
+        let mut s = state();
+        for (width, height) in [(80, 24), (240, 60), (40, 10), (0, 0), (120, 36)] {
+            for action in [
+                Action::Clear,
+                Action::Text("a e\u{301}修👩🏽‍💻".into()),
+                Action::Backspace,
+                Action::Focus(Focus::Tools),
+                Action::Help,
+                Action::Help,
+                Action::Focus(Focus::Path),
+            ] {
+                s.app.compact = width < 40 || height < 10;
+                s.app.update(action);
+                // Preserve the previous terminal/backend path as an output oracle:
+                // reusing a buffer must not retain old text, styles, or the caret.
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                let mut hits = view::HitMap::default();
+                terminal
+                    .draw(|f| hits = view::render_with_hits(f, &s.app))
+                    .unwrap();
+                let backend = terminal.backend();
+                let mut buffer = backend.buffer().clone();
+                if backend.cursor_visible() {
+                    if let Some(cell) = buffer.cell_mut(backend.cursor_position()) {
+                        cell.modifier.insert(Modifier::REVERSED);
+                    }
+                }
+                assert_eq!(
+                    s.render_frame(height as usize, width as usize),
+                    ansi::serialize(&buffer)
+                );
+                let area = Rect::new(0, 0, width, height);
+                for y in 0..height {
+                    for x in 0..width {
+                        assert_eq!(
+                            s.hits.action(Pointer::Click, x, y, area),
+                            hits.action(Pointer::Click, x, y, area)
+                        );
+                    }
+                }
+            }
+        }
     }
 
     use zellij_launchpad_core::app::ScrollTarget;

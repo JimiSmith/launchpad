@@ -177,6 +177,14 @@ impl App {
             .is_some_and(|r| !r.failed && revision >= r.revision)
     }
     pub fn take_remote_request(&mut self) -> Option<crate::remote::RemoteRequest> {
+        self.take_remote_request_with_search(true)
+    }
+    /// Defer search while the host's edit debounce is active. Explicit directory
+    /// validation always bypasses the debounce.
+    pub fn take_remote_request_with_search(
+        &mut self,
+        allow_search: bool,
+    ) -> Option<crate::remote::RemoteRequest> {
         let remote = self.remote.as_mut()?;
         if remote.failed {
             return None;
@@ -184,7 +192,12 @@ impl App {
         if remote.outbound.is_some() {
             return remote.outbound.take();
         }
-        if !remote.dirty || self.help || !self.show_suggestions || self.cycle.is_some() || self.quit
+        if !allow_search
+            || !remote.dirty
+            || self.help
+            || !self.show_suggestions
+            || self.cycle.is_some()
+            || self.quit
         {
             return None;
         }

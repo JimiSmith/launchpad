@@ -77,14 +77,23 @@ a second continuation; an already queued old-epoch step only wakes the current
 scan. Queries and validation can interleave between scan slices.
 
 Only periodic progress (at most once per 100 ms) reaches the UI; completion,
-including a limit or IO error, is immediate. The main timer is a one-second
-watchdog check, not scan pacing. Start and progress reset its existing 15-second
+including a limit or IO error, is immediate. The main timer wakes deferred searches
+and checks the worker watchdog at one-second intervals; it does not pace scanning.
+Start and progress reset the existing 15-second
 missing-response deadline. The worker asks the host for its CWD only at Start.
 
 `plugin/src/main.rs` permits one outstanding query/validation request.
 `src/remote.rs` and `src/app.rs` keep only the latest unsent demand, so edits
 replace pending queries instead of filling Zellij's unbounded queue. No persistent
 index cache, extra worker, external scanner or artificial scan sleep is used.
+
+Typing, paste, backspace, delete and clear defer searching until 120 ms after the
+last editing event. The field still edits and renders immediately. Progress and
+stale replies cannot bypass this delay; explicit directory validation (including
+Enter and completion) bypasses it. A single earliest-deadline timer tracks the
+quiet period and watchdog. Since host timers cannot be cancelled or identified,
+obsolete callbacks are harmless and edits extend the deadline without creating
+a timer for every keypress.
 
 - Refresh uses an index epoch; both keyboard and mouse reset start a new epoch.
 - Query/action generations reject obsolete results and validation completions.
