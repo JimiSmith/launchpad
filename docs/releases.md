@@ -23,11 +23,11 @@ First commit and push the intended release source **including the workflow**.
 Tag the exact reviewed commit; uncommitted files are never included:
 
 ```sh
-git tag -a v0.2 -m "Launchpad 0.2" <reviewed-commit>
-git push origin v0.2
+git tag -a v0.3 -m "Launchpad 0.3" <reviewed-commit>
+git push origin v0.3
 ```
 
-Keep the crates' Cargo version and the tag in step: `0.2.0` ships as `v0.2`.
+Keep the crates' Cargo version and the tag in step: `0.3.0` ships as `v0.3`.
 Both workspace members carry the same version. Do not move a published tag to a
 different commit.
 
@@ -38,13 +38,13 @@ Check the Actions run and release assets before announcing a release:
 
 ```sh
 gh run list --workflow release.yml
-gh release view v0.2
+gh release view v0.3
 ```
 
 Download and verify into an empty directory:
 
 ```sh
-gh release download v0.2 --repo JimiSmith/zellij-launchpad \
+gh release download v0.3 --repo JimiSmith/zellij-launchpad \
   --pattern 'zellij-launchpad.wasm*'
 sha256sum --check zellij-launchpad.wasm.sha256
 ```
