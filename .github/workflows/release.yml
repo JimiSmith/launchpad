@@ -13,11 +13,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-24.04
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            binary: zellij-launchpad
+          - os: windows-2022
+            platform: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            binary: zellij-launchpad.exe
+          - os: macos-15-intel
+            platform: macos-x86_64
+            target: x86_64-apple-darwin
+            binary: zellij-launchpad
+          - os: macos-15
+            platform: macos-aarch64
+            target: aarch64-apple-darwin
+            binary: zellij-launchpad
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    permissions:
-      contents: write
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+      ARCHIVE_BASE: zellij-launchpad-${{ matrix.platform }}
     defaults:
       run:
         shell: bash
@@ -27,22 +49,74 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned Rust
-        run: rustup show active-toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add "$CARGO_BUILD_TARGET"
       - name: Check native release
         run: |
           cargo fmt --all --check
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo build --locked --release -p zellij-launchpad
-      - name: Package native binary and checksum
+      - name: Stage native binary and documentation
+        env:
+          BINARY: ${{ matrix.binary }}
         run: |
           mkdir -p dist/package
-          cp target/release/zellij-launchpad README.md examples/config.toml dist/package/
+          cp "target/$CARGO_BUILD_TARGET/release/$BINARY" README.md examples/config.toml dist/package/
           cp -r docs examples dist/package/
-          tar -czf dist/zellij-launchpad-linux-x86_64.tar.gz -C dist/package zellij-launchpad README.md config.toml docs examples
+      - name: Package Unix archive and checksum
+        if: runner.os != 'Windows'
+        run: |
+          tar -czf "dist/$ARCHIVE_BASE.tar.gz" -C dist/package zellij-launchpad README.md config.toml docs examples
           cd dist
-          sha256sum zellij-launchpad-linux-x86_64.tar.gz > zellij-launchpad-linux-x86_64.tar.gz.sha256
-          sha256sum --check zellij-launchpad-linux-x86_64.tar.gz.sha256
+          shasum -a 256 "$ARCHIVE_BASE.tar.gz" > "$ARCHIVE_BASE.tar.gz.sha256"
+          shasum -a 256 --check "$ARCHIVE_BASE.tar.gz.sha256"
+      - name: Package Windows archive and checksum
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "$env:ARCHIVE_BASE.zip"
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/$archive"
+          $hash = (Get-FileHash "dist/$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content "dist/$archive.sha256" -Encoding ascii
+      - name: Upload release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Verify all release assets
+        working-directory: dist
+        run: |
+          for archive in \
+            zellij-launchpad-linux-x86_64.tar.gz \
+            zellij-launchpad-windows-x86_64.zip \
+            zellij-launchpad-macos-x86_64.tar.gz \
+            zellij-launchpad-macos-aarch64.tar.gz; do
+            test -s "$archive"
+            sha256sum --check "$archive.sha256"
+          done
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,7 +126,7 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --generate-notes
           fi
-          gh release upload "$RELEASE_TAG" dist/zellij-launchpad-linux-x86_64.tar.gz dist/zellij-launchpad-linux-x86_64.tar.gz.sha256 --clobber
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 --clobber
           prerelease=false
           if [[ "$RELEASE_TAG" == *-* ]]; then
             prerelease=true

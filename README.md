@@ -5,16 +5,21 @@ Shell or a configured command, and replace the dashboard's pane with that tool.
 Launchpad names the originating tab `directory · command label`; tool panes close
 on exit without returning to the dashboard.
 
-Runs on Linux and Windows with **Zellij 0.45.0 or newer**. Launchpad must run inside a
+Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**. Launchpad must run inside a
 Zellij terminal pane. No plugin, WASM runtime, or plugin permissions are needed.
 
 ## Install and run
 
-Build from this checkout with the pinned Rust toolchain:
+Tagged releases provide archives for Linux x64, Windows x64, macOS Intel x64 and
+macOS Apple Silicon ARM64, each with a SHA-256 checksum. See
+[release packaging](docs/releases.md) for archive names and platform details.
+
+Or build from this checkout with the pinned Rust toolchain. On Linux and macOS:
 
 ```sh
 cargo build --release --locked -p zellij-launchpad
-install -Dm755 target/release/zellij-launchpad ~/.local/bin/zellij-launchpad
+mkdir -p ~/.local/bin
+install -m755 target/release/zellij-launchpad ~/.local/bin/zellij-launchpad
 ```
 
 On Windows, build with the same Cargo command, then run from PowerShell inside
@@ -27,8 +32,7 @@ Zellij:
 Launchpad uses `HOME`, falling back to `USERPROFILE`, then `HOMEDRIVE` +
 `HOMEPATH`. Windows paths accept drive letters, UNC shares, and either slash style;
 `~` refers to that home directory. Drive-relative paths such as `C:notes` are
-rejected. The published release archive currently targets Linux; build Windows
-from source.
+rejected.
 
 Run `zellij-launchpad` inside Zellij, or start it in its own pane:
 

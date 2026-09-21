@@ -1,23 +1,33 @@
 # Native releases
 
-Tags beginning with `v` run the release workflow. It builds the native executable
-on Ubuntu 24.04 for Linux x86_64 using the pinned Rust toolchain and locked Cargo
-dependencies. The GNU binary requires a compatible glibc (Ubuntu 24.04 or newer).
+Tags beginning with `v` run the release workflow. It builds and tests each native
+executable on a matching runner using the pinned Rust toolchain and locked Cargo
+dependencies:
 
-Assets:
+| Platform | Rust target | Runner | Archive |
+| --- | --- | --- | --- |
+| Linux x64 | `x86_64-unknown-linux-gnu` | Ubuntu 24.04 | `zellij-launchpad-linux-x86_64.tar.gz` |
+| Windows x64 | `x86_64-pc-windows-msvc` | Windows 2022 | `zellij-launchpad-windows-x86_64.zip` |
+| macOS Intel x64 | `x86_64-apple-darwin` | macOS 15 Intel | `zellij-launchpad-macos-x86_64.tar.gz` |
+| macOS Apple Silicon ARM64 | `aarch64-apple-darwin` | macOS 15 ARM64 | `zellij-launchpad-macos-aarch64.tar.gz` |
 
-- `zellij-launchpad-linux-x86_64.tar.gz` (executable, documentation, layouts and example config)
-- `zellij-launchpad-linux-x86_64.tar.gz.sha256`
+The Linux GNU binary requires a compatible glibc (Ubuntu 24.04 or newer).
 
-New releases remain drafts until both assets upload. Hyphenated tags are marked
-prereleases. Reruns replace matching assets; publication is not atomic for an
-already published release. No WASM artifact is built or distributed.
+Each archive includes the executable (`zellij-launchpad.exe` on Windows), README,
+documentation, layouts and example config. Every archive has a matching `.sha256`
+checksum file.
+
+Publication starts only after all four builds pass formatting, tests and Clippy,
+and all downloaded archives pass checksum verification. New releases remain
+drafts until all eight assets upload. Hyphenated tags are marked prereleases.
+Reruns replace matching assets; publication is not atomic for an already published
+release. No WASM artifact is built or distributed.
 
 Before tagging, run `bash tools/verify_native.sh`. Keep both Cargo package versions
 and the release tag aligned. Commit and push the reviewed source before tagging;
 do not move published tags. Implementation of this migration does not itself tag,
 push, or publish a release.
 
-Extract the archive, verify its checksum, and install the binary on the Zellij
+Verify the archive's checksum, extract it, and install the binary on the Zellij
 server's PATH. Existing plugin users must update layouts and move configuration
 to TOML; native history starts fresh in XDG state storage.
