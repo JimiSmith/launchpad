@@ -1,3 +1,5 @@
+ignore = ["/home/james/cache", "/home/james/old-projects"]
+
 [[commands]]
 id = "claude"
 label = "Claude in Worktree"

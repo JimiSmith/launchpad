@@ -58,6 +58,7 @@ pub struct App {
     pub commands: crate::commands::Commands,
     pub theme: crate::theme::Theme,
     pub theme_errors: Vec<String>,
+    pub ignore_errors: Vec<String>,
     pub history: Vec<Launch>,
     pub recent: usize,
     pub message: Option<String>,
@@ -103,6 +104,7 @@ impl Default for App {
             commands: Default::default(),
             theme: Default::default(),
             theme_errors: Vec::new(),
+            ignore_errors: Vec::new(),
             history: Vec::new(),
             recent: 0,
             message: None,
@@ -140,7 +142,11 @@ impl App {
         (self.theme, self.theme_errors) = crate::theme::Theme::parse(configuration);
     }
     pub fn config_errors(&self) -> impl Iterator<Item = &String> {
-        self.commands.errors.iter().chain(&self.theme_errors)
+        self.commands
+            .errors
+            .iter()
+            .chain(&self.theme_errors)
+            .chain(&self.ignore_errors)
     }
     pub fn tool_label(&self, tool: Tool) -> String {
         self.commands
@@ -432,6 +438,7 @@ impl App {
             let commands = self.commands.clone();
             let theme = self.theme;
             let theme_errors = std::mem::take(&mut self.theme_errors);
+            let ignore_errors = std::mem::take(&mut self.ignore_errors);
             let initial_cwd = self.initial_cwd.clone();
             let compact = self.compact;
             let simulate_launch = self.simulate_launch;
@@ -448,6 +455,7 @@ impl App {
             self.commands = commands;
             self.theme = theme;
             self.theme_errors = theme_errors;
+            self.ignore_errors = ignore_errors;
             if let Some(cwd) = initial_cwd {
                 self.set_initial_cwd(cwd);
             }

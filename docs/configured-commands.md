@@ -5,6 +5,28 @@ Read `$XDG_CONFIG_HOME/zellij-launchpad/config.toml`, falling back to
 explicit paths resolve from the invoking cwd. Relative XDG environment values
 are ignored. The file is limited to 1 MiB and loaded once per invocation.
 
+An optional top-level `ignore` array lists absolute directory paths to exclude
+from indexing, including all descendants. Declare it before any `[[commands]]`
+or `[theme]` tables, for example:
+
+```toml
+ignore = ["/home/james/cache", "/home/james/old-projects"]
+```
+
+Entries are literal paths, not patterns: no expansion of `~`, environment
+variables, or globs. Separators, trailing separators, `.` and `..` are normalized
+lexically without resolving symlinks or requiring directories to exist. Matching
+uses path components and existing host case rules (case-sensitive on Unix,
+ASCII case-insensitive on Windows, including drive and UNC paths).
+Ignoring HOME or an ancestor empties the index; unrelated paths outside HOME
+have no effect. Duplicate and overlapping exclusions are harmless.
+
+Invalid entries (including non-strings, relative paths, paths over 4096 bytes,
+and paths with controls) are skipped with visible configuration errors and F1
+details; valid entries remain active. Error positions are one-based. A non-array
+`ignore` value fails startup. Omitted or empty arrays add no exclusions.
+Literal path entry and history launches retain their usual validation rules.
+
 An ordered `[[commands]]` array holds `id`, `executable`, optional `label`, and
 optional `arguments` (a string array). Shell is always first; `shell` is reserved.
 Labels default to IDs and arguments default to an empty array. First duplicate
@@ -19,7 +41,7 @@ ID wins; at most 64 unique configured IDs are accepted.
 Invalid individual definitions produce visible errors and are skipped. Missing
 default files mean Shell-only; explicit missing files, unreadable files, malformed
 TOML and invalid top-level structure fail startup. Unknown top-level settings are
-errors. F1 lists per-command and theme errors.
+errors. F1 lists per-command, theme and ignore errors.
 
 `[theme]` accepts `background`, `surface`, `raised`, `border`, `text`, `muted`,
 `accent`, `on_accent`, and `error`, with `#RRGGBB` or `default` strings. Invalid
@@ -28,4 +50,4 @@ Unknown colour names are reported. See [the complete example](../examples/config
 
 Stable IDs are stored in history; executables and argument lists are never stored
 there. Current configuration controls replay. Removed IDs remain unavailable.
-F5 preserves commands and colours; reopen after editing configuration.
+F5 preserves commands, colours and exclusions; reopen after editing configuration.

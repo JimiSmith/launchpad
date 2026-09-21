@@ -16,7 +16,7 @@ const LINES: &[&str] = &[
     "RECENT ↑ / ↓ select · Home / End · Enter replay",
     "Tab copy path + tool · Delete remove · Ctrl+L clear (confirm)",
     "",
-    "F5  Refresh HOME / reset form; command and theme settings are preserved",
+    "F5  Refresh HOME / reset form; loaded configuration is preserved",
     "Esc dismisses transient UI, then quits an untouched dashboard",
     "The dashboard closes on launch; it does not return on command exit.",
     "",

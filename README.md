@@ -65,6 +65,8 @@ preserves the loaded configuration. Missing default configuration means Shell-on
 An explicit missing file, unreadable file, or malformed TOML is a startup error.
 
 ```toml
+ignore = ["/home/james/cache", "/home/james/old-projects"]
+
 [[commands]]
 id = "claude"
 label = "Claude in Worktree"
@@ -122,6 +124,13 @@ Hidden attribute (including AppData). Their descendants are pruned too; F5
 rechecks attribute changes. The exact invoking cwd is the sole exception for
 outside-HOME or symlink directories. Deleted/inaccessible directories fail visibly
 without fallback.
+
+The optional top-level `ignore` array excludes absolute directory paths and their
+descendants from indexing, even if ignore files explicitly include them. Put it
+before any TOML tables. Paths are literal: `~`, environment variables and globs
+are not expanded. Invalid entries are skipped with visible configuration warnings;
+valid entries remain active. Ignored directories can still be entered literally.
+Reopen after editing the configuration; F5 preserves the loaded exclusions.
 
 Typing/paste is capped at 100 Unicode scalar values; completed, invoking, and
 history paths are never truncated. Index limits are 200,000 directories,

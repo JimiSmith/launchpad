@@ -15,9 +15,17 @@ Hidden directories are pruned. Symlinks are not followed.
 Dot-prefixed entries are hidden on every platform. On Windows, the native walker
 also checks `FILE_ATTRIBUTE_HIDDEN`; hidden entries and their descendants are
 pruned without consuming the index's entry or retained-path budgets.
-Ignore-file negations cannot reveal them. HOME itself is always scanned even if
-it has the Hidden attribute. F5 rebuilds the index and rechecks attributes;
+Ignore-file negations cannot reveal them. The Hidden attribute alone does not
+prevent HOME itself from being scanned. F5 rebuilds the index and rechecks attributes;
 explicit hidden paths remain valid launch targets.
+
+The configuration's top-level `ignore` array adds absolute displayed host paths
+whose directory trees are pruned before entry and retained-path budgets. Matching
+uses complete path components: excluding `cache` does not exclude `cache-old`.
+Ignore-file negations cannot override these exclusions. Ignoring HOME or an
+ancestor skips traversal entirely, including for hidden HOME directories.
+F5 keeps the loaded exclusions; reopen to load configuration edits. Literal
+validation, invoking-directory exceptions and history replay are unaffected.
 
 Traversal cooperatively yields after at most 128 entries or its existing 5 ms
 budget. Limits are 200,000 retained directories, 2,000,000 visited entries,

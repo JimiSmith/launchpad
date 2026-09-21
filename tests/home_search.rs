@@ -5,6 +5,107 @@ use std::{
 };
 use zellij_launchpad_core::search::HomeIndex;
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn custom_ignores_prune_trees_before_budgets_and_survive_restart() {
+    let tree = Tree::new();
+    tree.dir("cache-old");
+    tree.dir("archive/deep");
+    for i in 0..100 {
+        tree.dir(&format!("cache/entry-{i}/deep"));
+    }
+    fs::write(tree.0.join(".ignore"), "!cache/\n!archive/\n").unwrap();
+    let mut index = HomeIndex::new_with_ignore(
+        "/logical/home".into(),
+        tree.0.clone(),
+        [
+            "/logical/home/cache/",
+            "/logical/home/cache",
+            "/logical/home/cache/entry-0",
+            "/logical/home/tmp/../archive/./",
+            "/logical/home/missing",
+            "/elsewhere",
+        ]
+        .map(str::to_owned)
+        .into(),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        index.limits.max_entries = 2;
+        index.limits.max_bytes = 200;
+        while index.is_scanning() {
+            index.step(128);
+        }
+        assert_eq!(index.status(), "HOME indexed · 1 dirs · F5 refresh");
+        assert_eq!(index.dirs[0].path, "/logical/home/cache-old");
+        assert_eq!(
+            index.validate("~/cache/entry-0/deep").unwrap(),
+            "/logical/home/cache/entry-0/deep"
+        );
+        index = index.restart();
+    }
+}
+
+#[test]
+fn custom_ignores_handle_home_ancestors_and_empty_lists() {
+    let tree = Tree::new();
+    tree.dir("visible/nested");
+    for ignore in ["/logical/home", "/logical", "/"] {
+        let mut index =
+            HomeIndex::new_with_ignore("/logical/home".into(), tree.0.clone(), vec![ignore.into()])
+                .unwrap();
+        index.step(1);
+        assert!(!index.is_scanning());
+        assert_eq!(index.status(), "HOME indexed · 0 dirs · F5 refresh");
+        assert!(index.validate("~/visible/nested").is_ok());
+    }
+    for ignore in [
+        vec![],
+        vec!["/logical/home/elsewhere".into()],
+        vec!["/logical/home-old".into()],
+    ] {
+        let mut index =
+            HomeIndex::new_with_ignore("/logical/home".into(), tree.0.clone(), ignore).unwrap();
+        while index.is_scanning() {
+            index.step(128);
+        }
+        assert_eq!(index.dirs.len(), 2);
+    }
+    assert!(
+        HomeIndex::new_with_ignore(
+            "/logical/home".into(),
+            tree.0.clone(),
+            vec!["~/visible".into()]
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn custom_ignores_follow_host_path_rules_independently_of_filesystem_root() {
+    let tree = Tree::new();
+    tree.dir("Cache/deep");
+    tree.dir("Cache-old");
+    for (home, ignore, count) in [
+        ("/logical/home", "/logical/home/cache", 3),
+        ("/logical/home", "/logical/home/Cache", 1),
+        (r"C:\Users\Ada", "c:/users/ada/cache/", 1),
+        (r"\\server\share\Ada", r"\\?\UNC\SERVER\SHARE\ada\cache", 1),
+        (r"C:\Users\Ada", r"D:\Users\Ada\Cache", 3),
+        (r"C:\Users\Ada", "c:/users/", 0),
+        (r"\\server\share\Ada", r"\\SERVER\SHARE\", 0),
+    ] {
+        let mut index =
+            HomeIndex::new_with_ignore(home.into(), tree.0.clone(), vec![ignore.into()]).unwrap();
+        while index.is_scanning() {
+            index.step(128);
+        }
+        assert_eq!(index.dirs.len(), count, "{home}: {ignore}");
+        if count == 1 {
+            assert!(index.dirs[0].path.ends_with("Cache-old"));
+        }
+    }
+}
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {

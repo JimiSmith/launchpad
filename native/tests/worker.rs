@@ -89,3 +89,84 @@ fn background_index_progress_search_and_refresh_use_epochs() {
         }
     }
 }
+
+#[test]
+fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation() {
+    let f = Fixture::new("configured-ignores");
+    let home = f.0.join("home");
+    std::fs::create_dir_all(home.join("needle/deep")).unwrap();
+    std::fs::create_dir(home.join("needle-old")).unwrap();
+    let config: zellij_launchpad::config::Config = toml::from_str(&format!(
+        "ignore = [{}]",
+        toml::Value::String(home.join("needle").to_str().unwrap().into())
+    ))
+    .unwrap();
+    let ignore = config.apply(&mut zellij_launchpad_core::app::App::default());
+    let worker =
+        Worker::start_with_ignore(home.clone(), home.to_str().unwrap().into(), ignore).unwrap();
+    for epoch in [0, 1] {
+        worker
+            .requests
+            .send(Request {
+                epoch,
+                request: RemoteRequest::Validate {
+                    generation: 17,
+                    raw: "~/needle/deep".into(),
+                },
+            })
+            .unwrap();
+        let (mut complete, mut validated) = (false, false);
+        while !complete || !validated {
+            match worker.replies.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Reply::Progress {
+                    epoch: response,
+                    status,
+                    ..
+                } if response == epoch => {
+                    complete = status.contains("HOME indexed");
+                }
+                Reply::Validated {
+                    epoch: response,
+                    result,
+                    ..
+                } => {
+                    assert_eq!(response, epoch);
+                    assert_eq!(
+                        result.unwrap(),
+                        home.join("needle").join("deep").to_str().unwrap()
+                    );
+                    validated = true;
+                }
+                Reply::Failed(error) => panic!("{error}"),
+                _ => {}
+            }
+        }
+        worker
+            .requests
+            .send(Request {
+                epoch,
+                request: RemoteRequest::Query {
+                    generation: 18,
+                    text: "needle".into(),
+                },
+            })
+            .unwrap();
+        loop {
+            match worker.replies.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Reply::Results {
+                    epoch: response,
+                    generation,
+                    paths,
+                    ..
+                } => {
+                    assert_eq!(response, epoch);
+                    assert_eq!(generation, 18);
+                    assert_eq!(paths, [home.join("needle-old").to_str().unwrap()]);
+                    break;
+                }
+                Reply::Failed(error) => panic!("{error}"),
+                _ => {}
+            }
+        }
+    }
+}

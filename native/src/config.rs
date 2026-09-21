@@ -14,6 +14,7 @@ use zellij_launchpad_core::{
 pub struct Config {
     commands: Vec<toml::Value>,
     theme: BTreeMap<String, String>,
+    ignore: Vec<toml::Value>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +44,22 @@ impl Config {
         }
         toml::from_str(&text).map_err(|e| format!("Invalid config {}: {e}", path.display()))
     }
-    pub fn apply(self, app: &mut App) {
+    /// Apply UI settings and return validated exclusions for the search worker.
+    pub fn apply(self, app: &mut App) -> Vec<String> {
+        let mut ignore = Vec::new();
+        app.ignore_errors.clear();
+        for (index, value) in self.ignore.iter().enumerate() {
+            match value
+                .as_str()
+                .and_then(zellij_launchpad_core::host_path::normalize_absolute)
+            {
+                Some(path) => ignore.push(path),
+                None => app.ignore_errors.push(format!(
+                    "ignore[{}]: require a literal absolute path of at most 4096 bytes without controls; entry skipped",
+                    index + 1
+                )),
+            }
+        }
         let mut commands = Commands::default();
         let mut seen = HashSet::new();
         for value in self.commands {
@@ -90,6 +106,7 @@ impl Config {
             app.theme_errors
                 .push(format!("Unknown theme colour: {key}"));
         }
+        ignore
     }
 }
 impl Definition {

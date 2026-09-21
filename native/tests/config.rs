@@ -2,6 +2,62 @@ use zellij_launchpad::config::Config;
 use zellij_launchpad_core::{app::App, commands::Tool};
 
 #[test]
+fn ignore_entries_are_validated_individually_and_warnings_survive_reset() {
+    use zellij_launchpad_core::app::Action;
+    let config: Config = toml::from_str(r#"
+ignore = ["/home/ada/cache/../archive/./", "~/cache", "cache", 42, "", "/bad\nname", "C:relative", 'C:\Users\Ada\cache', '/home/ada/$HOME/*']
+"#).unwrap();
+    let mut app = App::default();
+    assert_eq!(
+        config.apply(&mut app),
+        [
+            "/home/ada/archive",
+            r"C:\Users\Ada\cache",
+            "/home/ada/$HOME/*"
+        ]
+    );
+    assert_eq!(app.ignore_errors.len(), 6);
+    assert!(app.ignore_errors[0].starts_with("ignore[2]:"));
+    let warnings = app.ignore_errors.clone();
+    app.update(Action::Reset);
+    assert_eq!(app.ignore_errors, warnings);
+    assert_eq!(app.config_errors().count(), 6);
+    let help = zellij_launchpad_core::help::lines(&app).join("\n");
+    assert!(help.contains("Config error: ignore[2]:"));
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+    terminal
+        .draw(|f| zellij_launchpad_core::view::render(f, &app))
+        .unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(screen.contains("ignore[2]:"));
+}
+
+#[test]
+fn ignore_defaults_structure_and_size_validation() {
+    let mut app = App::default();
+    for text in ["", "ignore = []"] {
+        let config: Config = toml::from_str(text).unwrap();
+        assert!(config.apply(&mut app).is_empty());
+        assert!(app.ignore_errors.is_empty());
+    }
+    for text in ["ignore = '/absolute/path'", "ignore = 42", "[ignore]"] {
+        assert!(toml::from_str::<Config>(text).is_err());
+    }
+    let text = format!("ignore = ['/{}']", "a".repeat(4096));
+    let config: Config = toml::from_str(&text).unwrap();
+    assert!(config.apply(&mut app).is_empty());
+    assert_eq!(app.ignore_errors.len(), 1);
+    Config::default().apply(&mut app);
+    assert!(app.ignore_errors.is_empty());
+}
+
+#[test]
 fn toml_arguments_remain_literal_and_invalid_entries_do_not_hide_valid_commands() {
     let config: Config = toml::from_str(
         r##"

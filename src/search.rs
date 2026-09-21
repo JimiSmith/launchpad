@@ -128,6 +128,7 @@ pub struct HomeIndex {
     pub dirs: Vec<Directory>,
     pub home: PathBuf,
     root: PathBuf,
+    ignore: Vec<crate::host_path::HostPath>,
     pub limits: Limits,
     visited: usize,
     retained_bytes: usize,
@@ -148,6 +149,14 @@ impl std::fmt::Debug for HomeIndex {
 impl HomeIndex {
     /// `home` is the displayed path; `root` is its filesystem root (normally identical).
     pub fn new(home: PathBuf, root: PathBuf) -> Result<Self, String> {
+        Self::new_with_ignore(home, root, Vec::new())
+    }
+    /// Exclusions are absolute displayed host paths, independent of `root`.
+    pub fn new_with_ignore(
+        home: PathBuf,
+        root: PathBuf,
+        ignore: Vec<String>,
+    ) -> Result<Self, String> {
         if home.to_str().and_then(crate::host_path::HostPath::parse)
             .is_none_or(|p| !p.is_home())
             // /host is a WASI mount, including in native adapter tests.
@@ -159,6 +168,14 @@ impl HomeIndex {
             dirs: Vec::new(),
             home,
             root,
+            ignore: ignore
+                .iter()
+                .map(|raw| {
+                    crate::host_path::normalize_absolute(raw)
+                        .and_then(|path| crate::host_path::HostPath::parse(&path))
+                        .ok_or_else(|| "Ignore entries must be supported absolute paths.".into())
+                })
+                .collect::<Result<_, String>>()?,
             limits: Limits::default(),
             visited: 0,
             retained_bytes: 0,
@@ -224,7 +241,9 @@ impl HomeIndex {
         format!("{state} · {} dirs · F5 refresh", self.dirs.len())
     }
     pub fn restart(&self) -> Self {
-        Self::new(self.home.clone(), self.root.clone()).expect("validated HOME")
+        let mut index = Self::new(self.home.clone(), self.root.clone()).expect("validated HOME");
+        index.ignore = self.ignore.clone();
+        index
     }
     pub fn is_scanning(&self) -> bool {
         !self.started || self.walker.is_some()
@@ -239,17 +258,39 @@ impl HomeIndex {
         let started = std::time::Instant::now();
         if !self.started {
             self.started = true;
+            let home = self.host_path();
+            if self.ignore.iter().any(|path| path.contains(&home)) {
+                return;
+            }
             if let Err(error) = self.validate("~") {
                 self.error = Some(error);
                 return;
             }
             let mut builder = ignore::WalkBuilder::new(&self.root);
+            let root = self.root.clone();
+            let ignore = self.ignore.clone();
             builder
                 .follow_links(false)
                 .max_depth(Some(self.limits.max_depth))
                 .filter_entry(move |entry| {
                     if entry.depth() == 0 {
                         return true;
+                    }
+                    if !ignore.is_empty() {
+                        let Some(parts) = entry.path().strip_prefix(&root).ok().and_then(|path| {
+                            path.components()
+                                .map(|part| part.as_os_str().to_str().map(str::to_owned))
+                                .collect::<Option<Vec<_>>>()
+                        }) else {
+                            return false;
+                        };
+                        let Some(path) = crate::host_path::HostPath::parse(&home.join(&parts))
+                        else {
+                            return false;
+                        };
+                        if ignore.iter().any(|ignored| ignored.contains(&path)) {
+                            return false;
+                        }
                     }
                     entry
                         .file_name()

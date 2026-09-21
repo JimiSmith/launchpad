@@ -87,7 +87,7 @@ fn run(args: Args) -> Result<(), String> {
         .map_or(args.config.is_some(), |h| h.explicit_config);
     let config = Config::load(&config_path, explicit_config)?;
     let mut app = App::from_remote(home.clone());
-    config.apply(&mut app);
+    let ignore = config.apply(&mut app);
     app.set_initial_cwd(cwd.clone());
     let root = xdg_path("XDG_STATE_HOME", ".local/state", &home);
     // Failure remains nonfatal: history is optional, launching is not.
@@ -120,7 +120,7 @@ fn run(args: Args) -> Result<(), String> {
         }
         app.message = Some(message);
     }
-    let worker = Worker::start(home, cwd).map_err(|e| e.to_string())?;
+    let worker = Worker::start_with_ignore(home, cwd, ignore).map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for signal in [

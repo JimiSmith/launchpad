@@ -37,12 +37,19 @@ pub struct Worker {
 }
 impl Worker {
     pub fn start(home: PathBuf, cwd: String) -> std::io::Result<Self> {
+        Self::start_with_ignore(home, cwd, Vec::new())
+    }
+    pub fn start_with_ignore(
+        home: PathBuf,
+        cwd: String,
+        ignore: Vec<String>,
+    ) -> std::io::Result<Self> {
         let (requests, demand) = mpsc::sync_channel::<Request>(1);
         let (responses, replies) = mpsc::sync_channel(4);
         thread::Builder::new()
             .name("home-search".into())
             .spawn(move || {
-                if let Err(error) = run(home, cwd, demand, &responses) {
+                if let Err(error) = run(home, cwd, ignore, demand, &responses) {
                     let _ = responses.send(Reply::Failed(error));
                 }
             })?;
@@ -52,10 +59,11 @@ impl Worker {
 fn run(
     home: PathBuf,
     cwd: String,
+    ignore: Vec<String>,
     demand: Receiver<Request>,
     responses: &SyncSender<Reply>,
 ) -> Result<(), String> {
-    let mut index = HomeIndex::new(home.clone(), home.clone())?;
+    let mut index = HomeIndex::new_with_ignore(home.clone(), home.clone(), ignore)?;
     let mut epoch = 0;
     let mut progress = Instant::now() - Duration::from_secs(1);
     loop {
@@ -78,7 +86,7 @@ fn run(
         {
             if requested != epoch {
                 epoch = requested;
-                index = HomeIndex::new(home.clone(), home.clone())?;
+                index = index.restart();
             }
             let reply = match request {
                 RemoteRequest::Query { generation, text } => {

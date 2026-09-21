@@ -109,6 +109,12 @@ impl HostPath {
     }
 
     fn strip(&self, path: &Self) -> Option<Vec<String>> {
+        self.contains(path)
+            .then(|| path.parts[self.parts.len()..].to_vec())
+    }
+
+    /// Component-wise containment, including equality, with host case rules.
+    pub fn contains(&self, path: &Self) -> bool {
         let equal = |a: &str, b: &str| {
             if self.windows {
                 a.eq_ignore_ascii_case(b)
@@ -121,9 +127,9 @@ impl HostPath {
             || path.parts.len() < self.parts.len()
             || !self.parts.iter().zip(&path.parts).all(|(a, b)| equal(a, b))
         {
-            return None;
+            return false;
         }
-        Some(path.parts[self.parts.len()..].to_vec())
+        true
     }
 
     pub fn join(&self, relative: &[String]) -> String {
@@ -136,6 +142,12 @@ impl HostPath {
             path
         }
     }
+}
+
+/// Normalize a literal absolute path without filesystem access or expansion.
+pub fn normalize_absolute(raw: &str) -> Option<String> {
+    HostPath::parse(raw)?;
+    normalize(raw, raw)
 }
 
 pub fn label(path: &str, home: &str) -> Option<String> {
