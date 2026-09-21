@@ -45,9 +45,12 @@ signals also restore terminal state.
 
 Zellij 0.45.x can report a missing executable as exit 0 with no created pane ID.
 The adapter checks that the original pane survived the completed action before
-reporting rejection and restoring the form. Timeouts and malformed/unavailable
-pane responses are unknown outcomes, never automatic retries. History is written
-before replacement because the original process may not survive a success reply.
+reporting rejection and restoring the form. A CLI terminated by a signal is also
+an unknown outcome: replacing a pane can hang up the interactive shell's process
+group after the launch has succeeded. It must not trigger a history rollback.
+Timeouts and malformed/unavailable pane responses are unknown outcomes, never
+automatic retries. History is written before replacement because the original
+process may not survive a success reply.
 
 Known rejection removes only the attempt's history ID. A previous tab name is
 restored only when readback still matches this attempt's rename. There is no
@@ -59,3 +62,5 @@ atomic compare-and-swap rename or filesystem validation/spawn guarantee.
 and session sockets. Its fixture tools record literal argv/cwd and accept only
 inert exit instructions. The CLI-only `--probe` verifies the upstream behavior
 independently of the native UI. Evidence is kept in `target/native-*`.
+The suite also launches from an interactive Bash shell and checks that Shell and
+configured-command replacements retain history in tiled and floating panes.

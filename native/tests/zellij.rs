@@ -146,6 +146,22 @@ fn persistently_empty_pane_response_obeys_the_deadline() {
     assert!(started.elapsed() < Duration::from_millis(800));
 }
 #[test]
+#[cfg(unix)]
+fn interrupted_cli_is_unknown_and_must_not_roll_back_a_launch() {
+    for signal in ["HUP", "TERM", "INT"] {
+        let f = Fixture::new(&format!("signal-{signal}"), &format!("kill -{signal} $$"));
+        let result = f.host().launch("/tmp", &tool());
+        assert!(matches!(result, Err(Failure::Unknown(_))), "{result:?}");
+    }
+}
+#[test]
+#[cfg(unix)]
+fn explicit_cli_error_is_still_a_rejection() {
+    let f = Fixture::new("rejected", "echo 'action rejected' >&2\nexit 1");
+    let result = f.host().launch("/tmp", &tool());
+    assert!(matches!(result, Err(Failure::Rejected(_))), "{result:?}");
+}
+#[test]
 fn supported_versions() {
     assert!(supported_version("zellij 0.45.0\n"));
     assert!(supported_version("zellij 0.45.1"));

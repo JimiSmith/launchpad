@@ -114,8 +114,16 @@ impl Zellij {
             }
         }
         if !status.success() {
+            // Replacing an interactive shell's pane can hang up its foreground
+            // process group, including this CLI child, after Zellij accepts the
+            // action. A signal is not a rejection and must not undo history.
+            if status.code().is_none() {
+                return Err(Failure::Unknown(format!(
+                    "Launch outcome unknown: Zellij CLI interrupted ({status}). Quit/reopen; do not automatically retry."
+                )));
+            }
             return Err(Failure::Rejected(format!(
-                "Zellij rejected the action: {}",
+                "Zellij rejected the action ({status}): {}",
                 clean(&stderr)
             )));
         }

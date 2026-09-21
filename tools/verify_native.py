@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import shlex
 import shutil
 import signal
 import struct
@@ -32,7 +33,7 @@ class Screen(pyte.Screen):
 
 
 class Session:
-    def __init__(self, floating=False, probe=False, only=False, outside=False):
+    def __init__(self, floating=False, probe=False, only=False, outside=False, interactive=False):
         self.name = 'native-' + uuid.uuid4().hex[:8]
         self.out = ROOT / 'target' / self.name
         for name in ['home', 'bin', 'cache', 'config', 'data', 'state', 'runtime', 'sock']:
@@ -51,6 +52,8 @@ class Session:
                         **{'XDG_' + key + '_HOME': str(self.out / value) for key, value in
                            [('CONFIG', 'config'), ('CACHE', 'cache'), ('DATA', 'data'), ('STATE', 'state')]},
                         XDG_RUNTIME_DIR=str(self.out / 'runtime'))
+        if interactive:
+            self.env['PS1'] = 'LAUNCHPAD_TEST_SHELL> '
         (self.out / 'bin/zellij').symlink_to(ZELLIJ)
         (self.out / 'bin/zellij-launchpad').symlink_to(BINARY)
         for name in ['default-shell', 'neighbor', 'fixture']:
@@ -70,9 +73,13 @@ id = "missing"
 executable = "missing"
 ''')
         command = str(self.out / 'bin/fixture') if probe else str(BINARY)
+        if interactive:
+            command = '/bin/bash'
         pane = f'pane name="launchpad" focus=true command={json.dumps(command)} cwd={json.dumps(str(self.cwd), ensure_ascii=False)}'
         if floating:
             pane += ' width=120 height=30'
+        if interactive:
+            pane += ' { args "--noprofile" "--norc" "-i"; }'
         neighbor = f'pane name="neighbor" command="{self.out}/bin/neighbor"'
         layout = (f'layout {{ tab {{ {neighbor}; floating_panes {{ {pane}; }}; }}; }}' if floating
                   else f'layout {{ pane split_direction="vertical" {{ {neighbor}; {pane}; }}; }}')
@@ -252,6 +259,43 @@ def native():
                 s.close()
 
 
+def interactive_shell_history_cases():
+    # A shell can hang up the CLI's foreground process group after a successful
+    # replacement. Launching the binary directly as a pane command misses this.
+    for floating in [False, True]:
+        for selected in ['Shell', 'Fixture']:
+            s = Session(floating=floating, interactive=True)
+            try:
+                s.expect('LAUNCHPAD_TEST_SHELL>')
+                state_root = s.out / 'state/zellij-launchpad'
+                journal = state_root / 'history.d'
+                journal.mkdir(parents=True)
+                previous = dict(id='000000000000000000000000000000000000001-seed',
+                                path=str(s.home), tool='shell', opened_at=1)
+                (journal / (previous['id'] + '.json')).write_text(
+                    json.dumps(dict(version=2, id=previous['id'], entry=previous)))
+                log = s.out / 'launcher.stderr'
+                s.send(shlex.quote(str(BINARY)) +
+                       ' 2>' + shlex.quote(str(log)) + '\n')
+                s.expect('HOME indexed')
+                if selected == 'Fixture':
+                    s.send('\x14\x1b[C')
+                s.send('\r')
+                s.pump(1)
+                launched = 'default-shell' if selected == 'Shell' else 'fixture'
+                assert any(r['exe'] == launched and r['cwd'] == str(s.cwd)
+                           for r in s.records()), (s.records(), log.read_text(), s.display())
+                state = json.loads((state_root / 'history.json').read_text())
+                assert len(state['entries']) == 2, (state, log.read_text())
+                assert state['entries'][0]['path'] == str(s.cwd), (state, log.read_text())
+                assert state['entries'][0]['tool'] == selected.lower()
+                assert state['entries'][1] == previous
+                print('PASS interactive shell preserves history', selected,
+                      'floating' if floating else 'tiled', s.out, flush=True)
+            finally:
+                s.close()
+
+
 def recovery_cases():
     s = Session()
     try:
@@ -412,5 +456,6 @@ if __name__ == '__main__':
     else:
         terminal_cases()
         native()
+        interactive_shell_history_cases()
         recovery_cases()
         history_and_layout_cases()

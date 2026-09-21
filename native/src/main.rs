@@ -130,7 +130,7 @@ fn run(args: Args) -> Result<(), String> {
     ] {
         signal_hook::flag::register(signal, stop.clone()).map_err(|e| e.to_string())?;
     }
-    let mut screen = Screen::new().map_err(|e| e.to_string())?;
+    let mut screen = Screen::new().map_err(|e| format!("Initialize terminal: {e}"))?;
     let mut hits = HitMap::default();
     let mut area = ratatui::layout::Rect::default();
     let mut dirty = true;
@@ -253,7 +253,14 @@ fn run(args: Args) -> Result<(), String> {
                         launch_unknown = true;
                     }
                     app.message = Some(message);
-                    screen.enter().map_err(|e| e.to_string())?;
+                    // Pane replacement may hang up the shell and CLI before a
+                    // reply arrives. Do not re-enter the now-closed terminal.
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    screen
+                        .enter()
+                        .map_err(|e| format!("Restore launcher terminal: {e}"))?;
                     dirty = true;
                 }
             }
@@ -284,11 +291,13 @@ fn run(args: Args) -> Result<(), String> {
                     app.compact = area.width < 40 || area.height < 10;
                     hits = view::render_with_hits(frame, &app);
                 })
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("Draw launcher: {e}"))?;
             dirty = false;
         }
-        if event::poll(Duration::from_millis(16)).map_err(|e| e.to_string())? {
-            let action = match event::read().map_err(|e| e.to_string())? {
+        if event::poll(Duration::from_millis(16))
+            .map_err(|e| format!("Poll terminal input: {e}"))?
+        {
+            let action = match event::read().map_err(|e| format!("Read terminal input: {e}"))? {
                 Event::Key(key) => input::key_action(key),
                 Event::Paste(text) => Some(Action::Text(text)),
                 Event::Resize(_, _) => {
