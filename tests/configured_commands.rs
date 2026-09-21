@@ -351,19 +351,8 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
         assert!(app.message.as_ref().unwrap().contains("unavailable"));
         assert!(app.take_launch().is_none());
         app.update(Action::Tab);
-        assert_eq!(app.tool.as_str(), "removed-long-id");
-        app.update(Action::LaunchForm);
-        let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
-            app.take_remote_request()
-        else {
-            panic!("copied path validation missing")
-        };
-        app.finish_remote_validation(generation, Ok("/fixture/old".into()));
-        assert!(app.message.as_ref().unwrap().contains("unavailable"));
-        assert!(
-            app.take_launch().is_none(),
-            "copy must not substitute an available command"
-        );
+        assert_eq!(app.focus, Focus::Path);
+        assert_eq!(app.tool, Tool::Shell, "Tab does not copy the history tool");
     }
 }
 

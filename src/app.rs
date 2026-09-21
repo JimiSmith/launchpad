@@ -70,7 +70,6 @@ pub struct App {
     pub compact: bool,
     pub touched: bool,
     pub confirm_clear: bool,
-    cycle: Option<(Vec<usize>, usize)>,
     next_id: u64,
     index: Option<crate::search::HomeIndex>,
     remote: Option<crate::remote::Remote>,
@@ -115,7 +114,6 @@ impl Default for App {
             compact: false,
             touched: false,
             confirm_clear: false,
-            cycle: None,
             next_id: 0,
             index: None,
             remote: None,
@@ -208,13 +206,7 @@ impl App {
         if remote.outbound.is_some() {
             return remote.outbound.take();
         }
-        if !allow_search
-            || !remote.dirty
-            || self.help
-            || !self.show_suggestions
-            || self.cycle.is_some()
-            || self.quit
-        {
+        if !allow_search || !remote.dirty || self.help || !self.show_suggestions || self.quit {
             return None;
         }
         remote.dirty = false;
@@ -250,7 +242,6 @@ impl App {
         self.message = None;
         self.suggestions.clear();
         self.highlighted = None;
-        self.cycle = None;
     }
     pub fn finish_remote_validation(
         &mut self,
@@ -269,7 +260,6 @@ impl App {
         match result {
             Err(error) => {
                 self.message = Some(error);
-                self.cycle = None;
             }
             Ok(path) => match kind {
                 crate::remote::Validation::Accept => {
@@ -288,7 +278,6 @@ impl App {
             .as_ref()
             .is_none_or(|r| r.generation != generation)
             || !self.show_suggestions
-            || self.cycle.is_some()
             || self.quit
         {
             return false;
@@ -342,7 +331,7 @@ impl App {
         index.step(128);
         self.dirs.extend_from_slice(&index.dirs[self.dirs.len()..]);
         self.search_status = index.status();
-        if self.show_suggestions && self.cycle.is_none() {
+        if self.show_suggestions {
             let selected = self
                 .highlighted
                 .and_then(|i| self.suggestions.get(i))
@@ -384,7 +373,7 @@ impl App {
             return;
         }
         // Cursor motion keeps the validated path/tool intact. Focus, tool and
-        // history changes instead abandon the pending completion or launch.
+        // history changes instead abandon the pending selection or launch.
         let changes_validation_intent = match &action {
             Action::Focus(focus) => *focus != self.focus,
             Action::PathCursor(_) => self.focus != Focus::Path,
@@ -395,7 +384,9 @@ impl App {
             Action::SelectTool(_)
             | Action::SelectHistory(_)
             | Action::Scroll(ScrollTarget::History, _)
-            | Action::ClearHistory => true,
+            | Action::ClearHistory
+            | Action::Tab
+            | Action::BackTab => true,
             _ => false,
         };
         if let Some(remote) = &mut self.remote
@@ -407,8 +398,6 @@ impl App {
                         | Action::Backspace
                         | Action::Delete
                         | Action::Enter
-                        | Action::Tab
-                        | Action::BackTab
                         | Action::AcceptSuggestion(_)
                         | Action::LaunchForm
                         | Action::Escape
@@ -423,10 +412,6 @@ impl App {
                 self.message = None;
                 self.show_suggestions = true;
                 self.highlighted = None;
-                // Repeated Tab replaces validation but keeps its candidate cycle.
-                if self.focus != Focus::Path || !matches!(action, Action::Tab | Action::BackTab) {
-                    self.cycle = None;
-                }
             }
             remote.outbound = None;
         }
@@ -506,13 +491,11 @@ impl App {
                 self.confirm_clear = false;
                 self.message = None;
             } else if !self.suggestions.is_empty()
-                || self.cycle.is_some()
                 || (self.remote.is_some() && self.show_suggestions)
             {
                 self.suggestions.clear();
                 self.show_suggestions = false;
                 self.highlighted = None;
-                self.cycle = None;
             } else if self.message.is_some() {
                 self.message = None;
             } else if !self.touched {
@@ -528,6 +511,18 @@ impl App {
         }
         if let Action::Focus(focus) = action {
             self.focus = focus;
+            return;
+        }
+        if matches!(action, Action::Tab | Action::BackTab) {
+            self.focus = match (self.focus, action) {
+                (Focus::Path, Action::Tab) => Focus::Tools,
+                (Focus::Tools, Action::Tab) => Focus::History,
+                (Focus::History, Action::Tab) => Focus::Path,
+                (Focus::Path, Action::BackTab) => Focus::History,
+                (Focus::Tools, Action::BackTab) => Focus::Path,
+                (Focus::History, Action::BackTab) => Focus::Tools,
+                _ => unreachable!("only Tab actions reach this branch"),
+            };
             return;
         }
         if action == Action::LaunchForm {
@@ -576,7 +571,6 @@ impl App {
             if self.suggestions.contains(&index) && index < self.dirs.len() {
                 self.accept(index);
                 self.focus = Focus::Path;
-                self.cycle = None;
             }
             return;
         }
@@ -625,7 +619,6 @@ impl App {
                         }));
                 }
                 Action::Down => self.focus = Focus::Tools,
-                Action::Tab | Action::BackTab => self.complete(action == Action::BackTab),
                 Action::Enter => {
                     if let Some(&index) = self.highlighted.and_then(|i| self.suggestions.get(i)) {
                         self.accept(index);
@@ -664,26 +657,6 @@ impl App {
                         self.launch(e.path, e.tool);
                     }
                 }
-                Action::Tab => {
-                    if let Some(e) = self.history.get(self.recent) {
-                        self.editor.set(&self.path_label(&e.path));
-                        self.tool = e.tool;
-                        self.focus = Focus::Path;
-                        self.touched = true;
-                        self.suggestions.clear();
-                        self.show_suggestions = false;
-                        self.highlighted = None;
-                        self.cycle = None;
-                        self.message = Some(if self.available(e.tool) {
-                            "Copied to form. Enter launches; edit freely.".into()
-                        } else {
-                            format!(
-                                "{} is unavailable. Choose a tool with Ctrl+T.",
-                                self.tool_label(e.tool)
-                            )
-                        });
-                    }
-                }
                 Action::Delete => {
                     if let Some(row) = self.history.get(self.recent) {
                         if self.simulate_launch {
@@ -720,29 +693,10 @@ impl App {
     pub fn available(&self, tool: Tool) -> bool {
         self.commands.get(tool).is_some()
     }
-    fn complete(&mut self, reverse: bool) {
-        let (items, i) = if let Some((items, i)) = self.cycle.take() {
-            let n = items.len();
-            (items, (i + if reverse { n - 1 } else { 1 }) % n)
-        } else if !self.suggestions.is_empty() {
-            let n = self.suggestions.len();
-            let i = self
-                .highlighted
-                .map_or(if reverse { n - 1 } else { 0 }, |i| {
-                    (i + if reverse { n - 1 } else { 1 }) % n
-                });
-            (self.suggestions.clone(), i)
-        } else {
-            return;
-        };
-        self.accept(items[i]);
-        self.cycle = Some((items, i));
-    }
     fn edited(&mut self) {
         self.touched = true;
         self.message = None;
         self.highlighted = None;
-        self.cycle = None;
         self.show_suggestions = true;
         // Async replies replace the previous results atomically. Clearing here
         // would render an empty list between every keystroke and its reply.
@@ -790,7 +744,7 @@ impl App {
     fn finish_launch(&mut self, path: String, tool: Tool) {
         if !self.available(tool) {
             self.message = Some(format!(
-                "{} is unavailable. Tab copies; Ctrl+T chooses a tool.",
+                "{} is unavailable. Choose a tool with Ctrl+T.",
                 self.tool_label(tool)
             ));
             return;
@@ -1041,7 +995,7 @@ mod tests {
     }
 
     #[test]
-    fn history_replay_copies_and_never_substitutes_a_removed_command() {
+    fn history_replay_never_substitutes_a_removed_command() {
         let mut a = app();
         let removed = tool("retired");
         a.history = vec![Launch {
@@ -1061,11 +1015,8 @@ mod tests {
         );
         a.update(Action::Tab);
         assert_eq!(a.focus, Focus::Path);
-        assert_eq!(a.editor.text, "~/Projects/notes");
-        assert_eq!(a.tool, removed, "no silent fallback on copy");
-        a.update(Action::Focus(Focus::Tools));
-        a.update(Action::Right);
-        assert_eq!(a.tool, Tool::Shell);
+        assert_eq!(a.editor.text, "~", "Tab only changes sections");
+        assert_eq!(a.tool, Tool::Shell, "replay keeps the current form tool");
         a.update(Action::Enter);
         validate(&mut a, Ok("/home/example/Projects/notes".into()));
         assert_eq!(a.take_launch().map(|l| l.tool), Some(Tool::Shell));
@@ -1096,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_navigation_completion_cycle_and_path_keys_are_distinct() {
+    fn tab_cycles_sections_and_path_keys_are_distinct() {
         let mut a = app();
         query(&mut a, "notes");
         results(
@@ -1104,18 +1055,15 @@ mod tests {
             &["/home/example/Projects/notes", "/home/example/notes"],
         );
         a.update(Action::Tab);
-        validate(&mut a, Ok("/home/example/Projects/notes".into()));
-        assert_eq!(a.editor.text, "~/Projects/notes");
+        assert_eq!(a.focus, Focus::Tools);
         a.update(Action::Tab);
-        validate(&mut a, Ok("/home/example/notes".into()));
-        assert_eq!(a.editor.text, "~/notes");
+        assert_eq!(a.focus, Focus::History);
         a.update(Action::BackTab);
-        validate(&mut a, Ok("/home/example/Projects/notes".into()));
-        assert_eq!(a.editor.text, "~/Projects/notes");
-        assert!(a.take_launch().is_none(), "completion never launches");
+        assert_eq!(a.focus, Focus::Tools);
+        a.update(Action::BackTab);
+        assert_eq!(a.focus, Focus::Path);
+        assert_eq!(a.editor.text, "notes", "Tab does not alter the path");
 
-        query(&mut a, "notes");
-        results(&mut a, &["/home/example/notes"]);
         a.update(Action::Down);
         a.update(Action::Down);
         assert_eq!(a.focus, Focus::Path, "Down cycles suggestions, not focus");

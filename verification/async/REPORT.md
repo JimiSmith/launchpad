@@ -3,7 +3,7 @@
 ## Outcome
 
 Both stages work in a real Zellij PTY. The final plugin performs HOME traversal,
-Frizbee matching and completion/submission validation in a persistent worker;
+Frizbee matching and suggestion-selection/submission validation in a persistent worker;
 the UI receives capped rows and status only. The native adapter remains
 cooperative/synchronous. No real launch, external helper, or non-HOME traversal
 was added. Nothing was committed or pushed; baseline HEAD remains
@@ -71,7 +71,7 @@ Raw samples: `target/zj-rch-8313b0d8/benchmark.json`. The same benchmark caveats
 4. **Worker stress:** `tools/verify_workers.py` passed 13 assertions against the
    prior measured hash: editing/backspaces during indexing, latest-query results,
    dismissal, F5 during in-flight work, new epoch, **mouse refresh discovering a
-   newly created directory**, asynchronous validation, history copy, and exact
+   newly created directory**, asynchronous validation, history replay, and exact
    pane-list readback after closing with outstanding work.
 5. **Missing responses:** a development-only `worker-faults` build silences the
    worker after its mapping handshake. The real 15-second watchdog fired; field
@@ -86,7 +86,7 @@ Raw samples: `target/zj-rch-8313b0d8/benchmark.json`. The same benchmark caveats
    history events. These are actual rendered captures, not reconstructed UI.
 
 Unit regressions additionally cover stale query/action generations, revision
-rejection, bounded rows/bytes, denied worker mapping, stale epochs, completion
+rejection, bounded rows/bytes, denied worker mapping, stale epochs, suggestion selection
 versus submission, tool/history state, reset/quit/failure, and navigation not
 resubmitting searches or losing the selected path.
 
@@ -96,21 +96,21 @@ Only `src/app.rs` and `tests/async_search.rs` changed for these two fixes; the
 async worker implementation and `spikes/` were preserved.
 
 - **Selected result followed by worker failure:** failure now clears highlight
-  and completion cycle; Enter uses checked suggestion lookup. The exact
+  without retaining a selection cycle; Enter uses checked suggestion lookup. The exact
   results → Down → failure → Enter regression first failed with
   `index out of bounds: the len is 0 but the index is 0`, then passed. A separate
   stale-highlight test independently failed before adding the checked lookup.
 - **Validation followed by navigation:** path cursor movement and same-focus
   navigation retain pending validation. Focus/tool/action changes cancel it,
-  clear pending status and stale cycles, and allow a fresh query; Escape/help/
-  quit still suppress work appropriately. Repeated Tab preserves cycling while
-  replacing validation. The delayed Tab → Left → successful reply test first
-  failed on rejected completion; cancellation via Focus(Tools) separately failed
+  clear pending status and stale selection state, and allow a fresh query; Escape/help/
+  quit still suppress work appropriately. Tab / Shift+Tab switches sections without
+  selecting a suggestion. The delayed selection → Left → successful reply test first
+  failed on rejected selection; cancellation via Focus(Tools) separately failed
   on the stuck `Validating directory…` message. Both passed after their fixes.
 - Eight additional regressions bring `async_search` to **13 passing tests**.
-  They cover delayed/unsent completion and launch, cursor/focus/tool changes,
+  They cover delayed/unsent selection and launch, cursor/focus/tool changes,
   editing, dismissal/help/reset/quit, stale replies, timeout after a selected
-  result, timeout during completion, fresh suggestions and repeated Tab.
+  result, timeout during selection, fresh suggestions and section navigation.
   **Post-selection timeout is deterministically injected at the App boundary;
   no new live post-selection watchdog/fault run is claimed.** The prior live
   fault harness silenced the worker before results, as described above.

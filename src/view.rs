@@ -544,22 +544,15 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         Rect::new(foot.right() - global_width, foot.y, global_width, 1),
         &global,
     );
-    if app.focus == Focus::History {
-        controls(
-            f,
-            hits,
-            left,
-            &[("Tab copy", Action::Tab), ("Enter replay", Action::Enter)],
-        );
-    } else {
-        let hints = match (app.focus, narrow) {
-            (Focus::Path, true) => "PATH Tab complete · ↑↓",
-            (Focus::Path, false) => "PATH Tab complete · ↑↓ select",
-            (_, true) => "TOOLS ←→ · Enter",
-            (_, false) => "TOOLS ←→ choose · ↑ path · ↓ recent · Enter",
-        };
-        row(f, left, hints, theme.accent().bg(theme.surface));
-    }
+    let hints = match (app.focus, narrow) {
+        (Focus::Path, true) => "PATH Tab next · ↑↓",
+        (Focus::Path, false) => "PATH Tab next section · ↑↓ select",
+        (Focus::Tools, true) => "TOOLS Tab next · ←→",
+        (Focus::Tools, false) => "TOOLS Tab next · ←→ choose · Enter",
+        (Focus::History, true) => "RECENT Tab next · ↑↓",
+        (Focus::History, false) => "RECENT Tab next · ↑↓ select · Enter replay",
+    };
+    row(f, left, hints, theme.accent().bg(theme.surface));
 }
 
 fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {

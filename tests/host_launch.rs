@@ -111,13 +111,13 @@ fn rejected_host_request_retains_form_and_requires_explicit_resubmission() {
     assert!(app.take_launch().is_some());
 }
 #[test]
-fn rapid_submit_during_completion_does_not_launch_the_old_editor_path() {
+fn rapid_submit_during_selection_does_not_launch_the_old_editor_path() {
     for submit in [Action::Enter, Action::LaunchForm] {
         let mut app = app();
         app.apply_remote_results(0, vec!["/home/fixture/selected".into()]);
-        app.update(Action::Tab);
+        app.update(Action::AcceptSuggestion(0));
         let Some(RemoteRequest::Validate { generation, raw }) = app.take_remote_request() else {
-            panic!("expected completion validation");
+            panic!("expected selection validation");
         };
         assert_eq!(raw, "/home/fixture/selected");
         app.update(submit);

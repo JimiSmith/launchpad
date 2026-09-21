@@ -26,7 +26,7 @@ fn async_search_coalesces_edits_and_rejects_dismissed_or_stale_results() {
 fn validation_runs_off_ui_and_late_selection_or_launch_cannot_win() {
     let mut app = App::from_remote("/home/example".into());
     assert!(app.apply_remote_results(0, vec!["/home/example/notes".into()]));
-    app.update(Action::Tab);
+    app.update(Action::AcceptSuggestion(0));
     let RemoteRequest::Validate { generation, raw } = app.take_remote_request().unwrap() else {
         panic!()
     };
@@ -101,7 +101,7 @@ fn enter_with_stale_highlight_does_not_index_missing_result() {
 }
 
 #[test]
-fn delayed_completion_survives_path_cursor_navigation() {
+fn delayed_selection_survives_path_cursor_navigation() {
     use zellij_launchpad_core::app::Focus;
     for action in [
         Action::Left,
@@ -114,7 +114,7 @@ fn delayed_completion_survives_path_cursor_navigation() {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
         assert!(app.apply_remote_results(0, vec!["/home/example/notes".into()]));
-        app.update(Action::Tab);
+        app.update(Action::AcceptSuggestion(0));
         let RemoteRequest::Validate { generation, raw } = app.take_remote_request().unwrap() else {
             panic!()
         };
@@ -134,7 +134,7 @@ fn delayed_completion_survives_path_cursor_navigation() {
 #[test]
 fn cancelling_delayed_validation_clears_status_and_restores_search() {
     use zellij_launchpad_core::app::{Focus, Tool};
-    for start in [Action::Tab, Action::LaunchForm] {
+    for start in [Action::AcceptSuggestion(0), Action::LaunchForm] {
         for action in [
             Action::Focus(Focus::Tools),
             Action::Focus(Focus::History),
@@ -174,32 +174,29 @@ fn cancelling_delayed_validation_clears_status_and_restores_search() {
             assert_eq!(query, text);
             assert!(app.apply_remote_results(next, vec!["/home/example/fresh".into()]));
             app.update(Action::Focus(Focus::Path));
-            app.update(Action::Tab);
+            app.update(Action::AcceptSuggestion(0));
             let Some(RemoteRequest::Validate { raw, .. }) = app.take_remote_request() else {
-                panic!("fresh completion must be possible")
+                panic!("fresh selection must be possible")
             };
             assert_eq!(
                 raw, "/home/example/fresh",
-                "cancelled cycle must not survive"
+                "cancelled selection must not survive"
             );
         }
     }
 }
 
 #[test]
-fn timeout_during_completion_discards_cycle_and_delayed_reply() {
+fn timeout_during_selection_discards_delayed_reply() {
     let mut app = App::from_remote("/home/example".into());
     app.take_remote_request();
     app.apply_remote_results(0, vec!["/home/example/notes".into()]);
-    app.update(Action::Tab);
+    app.update(Action::AcceptSuggestion(0));
     let generation = app.take_remote_request().unwrap().generation();
     app.remote_failed("Worker timed out".into());
     assert!(!app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
     app.update(Action::Tab);
-    assert_eq!(
-        app.message, None,
-        "Tab must not retry a failed completion cycle"
-    );
+    assert_eq!(app.message, None, "Tab must not retry a failed selection");
     assert_eq!(app.editor.text, "~");
     assert!(app.take_remote_request().is_none());
     assert!(app.take_launch().is_none());
@@ -208,7 +205,7 @@ fn timeout_during_completion_discards_cycle_and_delayed_reply() {
 #[test]
 fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
     use zellij_launchpad_core::app::{Focus, Tool};
-    for start in [Action::Tab, Action::LaunchForm] {
+    for start in [Action::AcceptSuggestion(0), Action::LaunchForm] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
         app.apply_remote_results(0, vec!["/home/example/notes".into()]);
@@ -218,7 +215,7 @@ fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
             panic!("cursor motion must preserve even an unsent validation")
         };
         assert!(app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
-        if start == Action::Tab {
+        if start == Action::AcceptSuggestion(0) {
             assert_eq!(app.message, None);
             assert_eq!(app.editor.text, "~/notes");
             assert!(app.take_launch().is_none());
@@ -264,7 +261,7 @@ fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
 
 #[test]
 fn dismissing_delayed_validation_cannot_accept_or_launch_late() {
-    for start in [Action::Tab, Action::LaunchForm] {
+    for start in [Action::AcceptSuggestion(0), Action::LaunchForm] {
         for action in [Action::Escape, Action::Help, Action::Quit, Action::Reset] {
             let mut app = App::from_remote("/home/example".into());
             app.take_remote_request();
@@ -297,26 +294,17 @@ fn dismissing_delayed_validation_cannot_accept_or_launch_late() {
 }
 
 #[test]
-fn repeated_tab_replaces_delayed_validation_without_losing_cycle() {
+fn tab_cycles_sections_without_selecting_a_suggestion() {
     let mut app = App::from_remote("/home/example".into());
     app.take_remote_request();
     app.apply_remote_results(0, vec!["/home/example/a".into(), "/home/example/b".into()]);
     app.update(Action::Tab);
-    let old_generation = app.take_remote_request().unwrap().generation();
-    for (action, path) in [
-        (Action::Tab, "/home/example/b"),
-        (Action::BackTab, "/home/example/a"),
-    ] {
-        app.update(action);
-        let Some(RemoteRequest::Validate { generation, raw }) = app.take_remote_request() else {
-            panic!("Tab must replace validation using the existing cycle")
-        };
-        assert_eq!(raw, path);
-        assert!(!app.finish_remote_validation(old_generation, Ok("/home/example/a".into())));
-        assert!(app.finish_remote_validation(generation, Ok(raw)));
-        assert_eq!(app.message, None);
-        assert!(app.take_launch().is_none());
-    }
+    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::Tools);
+    assert!(app.take_remote_request().is_none());
+    app.update(Action::Tab);
+    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::History);
+    app.update(Action::BackTab);
+    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::Tools);
 }
 
 #[test]
@@ -334,7 +322,7 @@ fn old_index_revision_cannot_replace_newer_results() {
     );
 }
 #[test]
-fn reset_close_quit_failure_and_history_copy_invalidate_pending_work() {
+fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
     use zellij_launchpad_core::app::{Focus, Launch, Tool};
     for action in [Action::Reset, Action::Quit, Action::Escape] {
         let mut app = App::from_remote("/home/example".into());
@@ -361,11 +349,11 @@ fn reset_close_quit_failure_and_history_copy_invalidate_pending_work() {
     app.take_remote_request();
     app.update(Action::Focus(Focus::History));
     app.update(Action::Tab);
-    assert!(!app.apply_remote_results(0, vec!["/home/example/late".into()]));
-    assert_eq!(app.editor.text, "~/saved");
+    assert_eq!(app.focus, Focus::Path);
+    assert_eq!(app.editor.text, "~");
+    assert!(app.apply_remote_results(0, vec!["/home/example/late".into()]));
     app.remote_progress(100, "HOME indexed".into());
-    assert!(app.take_remote_request().is_none());
-    app.update(Action::Enter);
+    app.update(Action::AcceptSuggestion(0));
     let generation = app.take_remote_request().unwrap().generation();
     app.update(Action::Escape);
     assert!(!app.finish_remote_validation(generation, Ok("/home/example/saved".into())));

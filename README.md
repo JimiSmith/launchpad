@@ -107,12 +107,13 @@ interpretation. [Configuration details](docs/configured-commands.md).
 ## Controls and directory policy
 
 - Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or history.
-- Type a fuzzy query; arrows select suggestions, Enter accepts, Tab completes.
+- Tab / Shift+Tab cycles forward / backward through path, tools, and history.
+  Type a fuzzy query; arrows select suggestions and Enter accepts.
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
 - F1 opens help. F5 refreshes HOME and shared history and restores the invoking cwd.
-- In history: Tab copies, Enter revalidates/replays, Delete removes, Ctrl+L twice
-  clears; Esc cancels confirmation.
+- In history: Enter revalidates/replays, Delete removes, Ctrl+L twice clears;
+  Esc cancels confirmation.
 - Ctrl+Q / Ctrl+C quits. Esc dismisses transient UI, then quits an untouched dashboard.
 
 Search is HOME-only; relative paths start at HOME. The index uses the `ignore`

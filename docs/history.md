@@ -4,7 +4,7 @@ Launchpad remembers **ten unique tool–directory pairs**, newest first.
 Each pair uses the stable command ID and exact validated absolute path.
 Launching the same pair again refreshes its recency; different tools in the same
 directory remain separate entries. It loads history at startup and F5.
-The initial tool remains Shell; replay or copying a history row explicitly selects its remembered tool.
+The initial tool remains Shell; replay uses the history row's remembered tool.
 Ages are derived from stored UTC Unix seconds on load/refresh, not reset to now.
 The existing keyboard/mouse layout and directory validation are unchanged.
 
@@ -12,7 +12,7 @@ The existing keyboard/mouse layout and directory validation are unchanged.
 `id`, `path`, `tool` (stable configured-command ID, or `shell`), and `opened_at`.
 Replay uses this instance's current configuration, never an executable stored in
 history. Label/executable changes do not change the stable association. Removed
-or invalid IDs stay unavailable; Tab copies the path without substituting Shell.
+or invalid IDs stay unavailable; replay never substitutes Shell.
 `history.d/` is its small **authoritative recovery journal**. Both are
 inside `$XDG_STATE_HOME/zellij-launchpad` (fallback `~/.local/state/zellij-launchpad`).
 The native executable starts fresh and never imports or modifies plugin caches.

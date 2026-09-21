@@ -66,7 +66,7 @@ atomic validation/spawn security boundary.
 
 ## Verification
 
-Core tests exercise ignore rules, limits, completion, input bounds and asynchronous
+Core tests exercise ignore rules, limits, suggestion selection, input bounds and asynchronous
 result fencing. Native tests exercise direct filesystem validation, invoking-cwd
 exceptions and worker epochs. The live suite uses disposable HOME trees and real
 terminal input; it never scans the user's HOME.

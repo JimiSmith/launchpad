@@ -56,7 +56,7 @@ fn click_label(app: &mut App, w: u16, h: u16, label: &str) {
     panic!("missing visible control: {label} at {w}x{h}");
 }
 #[test]
-fn history_click_selects_only_then_copy_or_replay_is_explicit() {
+fn history_click_selects_only_then_replay_is_explicit() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         let mut app = app();
         app.history[9].path = "/home/example/it's literal; $HOME".into();
@@ -67,12 +67,12 @@ fn history_click_selects_only_then_copy_or_replay_is_explicit() {
         assert_eq!(app.recent, 9);
         assert!(app.take_launch().is_none());
         let event = app.history[9].clone();
-        click_label(&mut app, w, h, "Tab copy");
+        app.update(Action::Tab);
         assert_eq!(app.focus, Focus::Path);
-        assert_eq!(app.tool, event.tool);
+        assert_ne!(app.tool, event.tool, "Tab does not copy the history tool");
         assert!(app.take_launch().is_none());
         app.update(Action::Focus(Focus::History));
-        click_label(&mut app, w, h, "Enter replay");
+        app.update(Action::Enter);
         let raw = settle(&mut app, Ok(event.path.clone()));
         assert_eq!(raw, event.path, "replay revalidates the stored path first");
         let launch = app
@@ -252,18 +252,17 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
     let row = app.history[5].clone();
     assert!(!app.available(row.tool));
     app.update(Action::SelectHistory(row.id));
-    click_label(&mut app, 80, 24, "Enter replay");
+    app.update(Action::Enter);
     settle(&mut app, Ok(row.path.clone()));
     assert!(app.take_launch().is_none(), "no silent substitution");
     assert!(app.message.as_ref().unwrap().contains("unavailable"));
-    click_label(&mut app, 80, 24, "Tab copy");
-    click_label(&mut app, 80, 24, "Enter ↵");
-    settle(&mut app, Ok(row.path));
-    assert!(app.take_launch().is_none());
+    app.update(Action::Tab);
+    assert_eq!(app.focus, Focus::Path);
+    assert_ne!(app.tool, row.tool, "Tab does not copy the unavailable tool");
     app.history.clear();
     app.suggestions.clear();
     app.focus = Focus::History;
-    click_label(&mut app, 80, 24, "Enter replay");
+    app.update(Action::Enter);
     wheel(&mut app, 80, 24, 10, 14, true);
     assert_eq!(app.recent, 5); // no empty-list navigation or implicit launch
     app.update(Action::SelectHistory(u64::MAX));

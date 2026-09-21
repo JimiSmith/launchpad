@@ -11,7 +11,7 @@ plus completion immediately. Matching returns at most 100 paths / 64 KiB.
 The UI permits one outstanding request; newer edits replace unsent demand.
 Typing/paste/deletion debounces search by 120 ms, while explicit validation bypasses
 the debounce. Epochs fence refreshes; generations and catalogue revisions reject
-obsolete replies. Reset, help, cancellation and completion preserve the existing
+obsolete replies. Reset, help, cancellation and suggestion selection preserve the existing
 core behavior. Request and response channels are bounded.
 
 The exact invoking cwd can be validated directly even outside HOME or through a

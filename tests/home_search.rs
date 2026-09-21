@@ -209,7 +209,7 @@ fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
 }
 
 #[test]
-fn completed_long_path_is_preserved_and_launches_exact_target() {
+fn selected_long_path_is_preserved_and_launches_exact_target() {
     use zellij_launchpad_core::app::{Action, App};
     let tree = Tree::new();
     let name = format!("{}-needle", "a".repeat(110));
@@ -220,7 +220,8 @@ fn completed_long_path_is_preserved_and_launches_exact_target() {
     }
     app.update(Action::Clear);
     app.update(Action::Text("needle".into()));
-    app.update(Action::Tab);
+    app.update(Action::Down);
+    app.update(Action::Enter);
     assert_eq!(app.editor.text, format!("~/{name}"));
     app.update(Action::Text("ignored".into()));
     assert_eq!(app.editor.text, format!("~/{name}"));
@@ -556,7 +557,8 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     );
     app.launch_rejected();
     query(&mut app, "修理");
-    app.update(Action::Tab);
+    app.update(Action::Down);
+    app.update(Action::Enter);
     assert_eq!(app.editor.text, "~/team notes/修理");
     assert!(app.take_launch().is_none());
     fs::remove_dir(tree.0.join("team notes/修理")).unwrap();
@@ -579,14 +581,14 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
 }
 
 #[test]
-fn background_indexing_respects_dismissal_and_history_copy() {
+fn background_indexing_respects_dismissal_and_section_navigation() {
     use zellij_launchpad_core::app::{Action, App, Focus};
     let tree = Tree::new();
     for i in 0..300 {
         tree.dir(&format!("notes-{i}"));
     }
     let mut app = App::from_home(tree.0.clone(), tree.0.clone());
-    // Recording in memory keeps one recent row to copy back into the form.
+    // Recording in memory keeps one recent row for section-navigation coverage.
     app.simulate_launch = true;
     app.index_tick();
     assert!(app.is_indexing());
@@ -602,10 +604,11 @@ fn background_indexing_respects_dismissal_and_history_copy() {
     assert_eq!(app.history.len(), 1);
     app.update(Action::Focus(Focus::History));
     app.update(Action::Tab);
+    assert_eq!(app.focus, Focus::Path);
     app.index_tick();
     assert!(
-        app.suggestions.is_empty(),
-        "history copy must remain dismissed"
+        !app.suggestions.is_empty(),
+        "section navigation restores the active path suggestions"
     );
 }
 
@@ -682,7 +685,8 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
     app.update(Action::Clear);
     app.update(Action::Text("notes".into()));
     assert_eq!(app.suggestions.len(), 1);
-    app.update(Action::Tab);
+    app.update(Action::Down);
+    app.update(Action::Enter);
     assert_eq!(app.editor.text, "~/notes");
 }
 
