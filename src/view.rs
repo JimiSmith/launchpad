@@ -13,8 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
 
-// Draw directly into a buffer; plugin output does not need a terminal backend
-// or Ratatui's diff against a previous frame.
+// Draw into a buffer shared by the terminal renderer and deterministic tests.
 struct Canvas<'a> {
     buffer: &'a mut Buffer,
     theme: Theme,

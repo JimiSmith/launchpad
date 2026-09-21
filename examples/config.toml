@@ -1,0 +1,26 @@
+[[commands]]
+id = "claude"
+label = "Claude in Worktree"
+executable = "claude"
+arguments = ["-w"]
+
+[[commands]]
+id = "hermes"
+label = "Hermes"
+executable = "hermes"
+
+[[commands]]
+id = "codex"
+label = "Codex"
+executable = "codex"
+
+[theme]
+background = "default"
+surface = "#1e2030"
+raised = "#363a4f"
+border = "#494d64"
+text = "#cad3f5"
+muted = "#a5adcb"
+accent = "#c6a0f6"
+on_accent = "#181926"
+error = "#ed8796"

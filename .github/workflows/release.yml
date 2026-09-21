@@ -1,4 +1,4 @@
-name: Release WASM
+name: Release native
 
 on:
   push:
@@ -26,38 +26,33 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-
-      - name: Install pinned Rust and WASI target
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Check native release
         run: |
-          toolchain=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
-          rustup toolchain install "$toolchain" --profile minimal
-          rustup target add --toolchain "$toolchain" wasm32-wasip1
-
-      - name: Build release plugin
-        run: cargo build --locked --release -p zellij-launchpad --bin zellij-launchpad --target wasm32-wasip1
-
-      - name: Package WASM and checksum
+          cargo fmt --all --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo build --locked --release -p zellij-launchpad
+      - name: Package native binary and checksum
         run: |
-          mkdir -p dist
-          cp target/wasm32-wasip1/release/zellij-launchpad.wasm dist/zellij-launchpad.wasm
+          mkdir -p dist/package
+          cp target/release/zellij-launchpad README.md examples/config.toml dist/package/
+          cp -r docs examples dist/package/
+          tar -czf dist/zellij-launchpad-linux-x86_64.tar.gz -C dist/package zellij-launchpad README.md config.toml docs examples
           cd dist
-          sha256sum zellij-launchpad.wasm > zellij-launchpad.wasm.sha256
-          sha256sum --check zellij-launchpad.wasm.sha256
-
+          sha256sum zellij-launchpad-linux-x86_64.tar.gz > zellij-launchpad-linux-x86_64.tar.gz.sha256
+          sha256sum --check zellij-launchpad-linux-x86_64.tar.gz.sha256
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          # Keep a new release draft until both assets have uploaded. Reruns can
-          # finish a partial draft or replace the same tag's existing assets.
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "$RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --generate-notes
           fi
-          gh release upload "$RELEASE_TAG" \
-            dist/zellij-launchpad.wasm dist/zellij-launchpad.wasm.sha256 --clobber
+          gh release upload "$RELEASE_TAG" dist/zellij-launchpad-linux-x86_64.tar.gz dist/zellij-launchpad-linux-x86_64.tar.gz.sha256 --clobber
           prerelease=false
           if [[ "$RELEASE_TAG" == *-* ]]; then
             prerelease=true

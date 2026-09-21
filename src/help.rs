@@ -1,7 +1,7 @@
 //! Input help shared by navigation and renderer.
 const LINES: &[&str] = &[
     "F1 / Esc  Back to the launcher",
-    "Ctrl+Q / Ctrl+C  Close this plugin pane",
+    "Ctrl+Q / Ctrl+C  Quit Launchpad",
     "Ctrl+P / Ctrl+T / Ctrl+R  Path / tools / recent",
     "",
     "PATH   Type a home directory path or fuzzy query, e.g. notes / nts",
@@ -17,13 +17,13 @@ const LINES: &[&str] = &[
     "Tab copy path + tool · Delete remove · Ctrl+L clear (confirm)",
     "",
     "F5  Refresh HOME / reset form; command and theme settings are preserved",
-    "Esc dismisses transient UI, then closes an untouched pane",
+    "Esc dismisses transient UI, then quits an untouched dashboard",
     "The dashboard closes on launch; it does not return on command exit.",
     "",
     "MOUSE Left click: place path cursor, accept a suggestion,",
     "select a tool or select a recent row. Selection never launches.",
     "Click Enter ↵ to launch; recent Tab copy / Enter replay act",
-    "on the selected row. Launch replaces this plugin pane.",
+    "on the selected row. Launch replaces this pane.",
     "Wheel over suggestions / recent / help scrolls that section.",
     "Click F1 help, F5 reset, Ctrl+Q quit (^Q), or Esc back.",
     "Drag, release, right click ignored; host handles modifiers.",
@@ -33,7 +33,7 @@ const LINES: &[&str] = &[
     "Symlinks, non-UTF-8 and control-character names are skipped.",
     "",
     "Shell uses Zellij's default shell; configured commands use literal argv.",
-    "No command availability checks. Recent validated attempts persist in cache.",
+    "No command availability checks. Recent validated attempts persist in shared history.",
 ];
 
 pub fn lines(app: &crate::app::App) -> Vec<String> {

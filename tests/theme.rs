@@ -65,10 +65,11 @@ fn terminal_background_is_the_default_and_can_be_explicitly_selected() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
         view::render_buffer(&mut buffer, &app);
         assert_eq!(buffer[(0, 0)].bg, Color::Reset);
-        let ansi = zellij_launchpad_core::ansi::serialize(&buffer);
-        assert!(ansi.starts_with("\x1b[0m"));
         assert!(
-            !ansi.contains("48;2;36;39;58m"),
+            buffer
+                .content
+                .iter()
+                .all(|cell| cell.bg != Color::Rgb(36, 39, 58)),
             "must not paint Macchiato Base"
         );
     }

@@ -1,11 +1,6 @@
-// Run from the repository root. For another checkout, update the absolute WASM path.
+// Install zellij-launchpad on the Zellij server's PATH first.
 layout {
     tab name="Launch" focus=true {
-        pane borderless=true {
-            plugin location="file:/home/piclaw/Projects/zellij-launchpad/target/wasm32-wasip1/release/zellij-launchpad.wasm"
-        }
-    }
-    tab name="Shell" {
-        pane name="Shell" command="sh"
+        pane borderless=true command="zellij-launchpad" close_on_exit=true
     }
 }

@@ -1,166 +1,55 @@
-# Home directory search
+# HOME directory search
 
-## Current scope
+The native adapter gives `HomeIndex` the real HOME path as both displayed and
+filesystem root. A background thread owns traversal, fuzzy matching and directory
+validation. Filesystem work does not run on the terminal event loop.
 
-Both adapters use the same HOME-only directory index and embedded Frizbee matcher.
-Zellij reads the session-creation environment
-through `get_session_environment_variables()` and retains only `HOME`. Changing
-HOME in a later shell does not change the session's HOME. Missing/invalid HOME is
-an error, never a fallback to `/host`, process CWD, `/`, or fixture directories.
+## Traversal
 
-`simulate_launch` input starts at `~`. Production starts at the original invoking
-cwd and loads shared history. Normal plugin launches
-[replace the originating pane](real-launch.md); `simulate_launch` runs never
-spawn a process. Only their completed validations add in-memory history. F5 clears
-that history/form and rebuilds the index. Search uses no persistent history, PATH
-probe, subprocess, external search helper, or network request. Indexing reads
-HOME-local `.gitignore` and `.ignore` contents, but not ordinary project files.
+The serial `ignore` walker respects HOME-local `.gitignore` and `.ignore` rules,
+including nested rules and negation. It does not consult global Git excludes.
+Hidden directories, `.git` and `node_modules` are pruned; similarly named paths
+such as `node_modules_backup` remain eligible. Symlinks are not followed.
 
-## Host permissions and mapping
+Traversal cooperatively yields after at most 128 entries or its existing 5 ms
+budget. Limits are 200,000 retained directories, 2,000,000 visited entries,
+depth 64 and 60 MiB of estimated retained path/ignore-rule memory. The UI reports
+limits and errors. There is no persistent index cache or external search process.
 
-Pinned SDK/verified host: Zellij 0.45.1. Request:
+## Matching and input
 
-- `ReadSessionEnvironmentVariables`: obtain the host session's HOME.
-- `FullHdAccess`: required by this host for `ChangeHostFolder`.
-- `ChangeApplicationState`: reload once during boot so workers inherit HOME.
+Frizbee ranks candidates using the existing normalization and matching behavior.
+The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
+Queries over 100 Unicode scalar values return no suggestions, including after
+HOME expansion. This bounds matcher scratch allocation; short queries can still
+match long directory names.
 
-The current website describes `ChangeApplicationState` for `change_host_folder`,
-but the pinned source (`zellij-server/src/plugins/zellij_exports.rs`, permission
-match) and live host reject that combination with `FullHdAccess` denied. The
-filesystem permission is broad; search traverses only HOME. The main instance
-additionally opens the exact invoking cwd for validation, without traversing it.
-Normal launches additionally request `RunActionsAsUser`, `OpenTerminalsOrPlugins`,
-and `ReadApplicationState` for stable-tab naming;
-the explicit `simulate_launch "true"` search harness needs only the three above.
+The editor caps typed/pasted input at 100 Unicode scalars. Completed, history and
+invoking paths retain their full identity. Grapheme-aware cursor/deletion behavior
+and Unicode display widths are preserved. Filesystem paths remain limited to
+4096 UTF-8 bytes and may not contain controls.
 
-After permission grant, remount `/host` to HOME using `change_host_folder`, then
-wait for the matching `HostFolderChanged` acknowledgement. If the initial mount
-was not HOME, reload once before accepting input, then require the worker's
-`initial_cwd` handshake to equal HOME **before** indexing. See [worker details](async-workers.md).
-The default `/host` is an invoking-terminal CWD, not necessarily HOME. Host paths
-are kept separate from WASI paths; `/host` is never presented as a user path.
-Denial, missing HOME, remount failure, and root read failure stay visible without
-retry loops. Reopen after fixing the environment/permissions.
+## Validation
 
-The exact original cwd is preserved in instance-local `/data/original-cwd` before
-HOME remount/reload. For a submission matching that identity (or its HOME-short
-label), remount only the main instance to it and wait for acknowledgement, then
-open `/host` as a directory. Workers remain HOME-mapped. This supports hidden,
-ignored, outside-HOME and symlink invoking directories without adding search
-roots or cwd-relative navigation. Other outside/symlink paths remain rejected.
-The host serializes paths lossily, so an invoking path containing U+FFFD is
-rejected, including a legitimate U+FFFD spelling, rather than launching a UTF-8
-replacement twin. Invalid UTF-8, control characters and paths over 4096 bytes
-also fail visibly. Filesystem mutation between validation and spawn is not atomic.
+Relative paths start at HOME. `~` and `~/…` are supported; other tilde expansion
+is not. Literal hidden/ignored paths may be validated even though not indexed.
+Ordinary validation checks each component before reducing `..`, rejecting files,
+symlinks and attempts to escape HOME. Opening the directory verifies accessibility.
 
-## Policy and bounds
+Only the exact original invoking cwd, or its HOME-short spelling, bypasses the
+ordinary HOME/symlink policy. It is re-opened on every launch attempt, without
+expanding the index. Logical `$PWD` is used only when it resolves to the actual
+process cwd. Missing or deleted cwd fails visibly with no fallback. F5 restores
+that captured identity. Non-UTF-8 names are rejected without lossy conversion;
+legitimate U+FFFD names work.
 
-- The pinned `ignore = 0.4.33` **serial** depth-first walker replaces the custom
-  breadth-first queue. No thread/parallel walker is used. Hidden directories and
-  exact `node_modules` names (including `.git` through the hidden rule) are pruned
-  at every depth, regardless of ignore-file negations. Similar visible names such
-  as `node_modules_backup` remain eligible. Exclusions affect discovery, not
-  explicit-path validation; a dot in a query does not reveal pruned candidates.
-- HOME-local `.gitignore` and `.ignore` rules support nested patterns and negation,
-  including outside Git repositories. `.ignore` outranks `.gitignore`; within a
-  rule type the nearest matching file wins. An excluded parent cannot be reopened
-  by a descendant rule. No excluded paths or skipped counter are retained.
-- One scan slice requests at most 128 iterator results, checking a cooperative 5 ms
-  budget between calls. `next()` may internally consume many ignored entries;
-  these limits are not exact syscall or wall-clock budgets. Stepping is cooperative; the plugin keeps traversal, Frizbee and
-  validation in a persistent WASM worker. Only capped results reach its UI;
-  epochs, query generations and revisions reject stale responses. No filesystem
-  IO or matching runs during rendering. Exact invoking-cwd validation performs
-  one main-instance directory-open check after the host remount acknowledgement.
-  The worker schedules its next slice immediately, keeping at most one queued
-  continuation so queries/validation/refresh can interleave. Progress is emitted
-  at most every 100 ms, with immediate final status. UI timers only check the
-  watchdog; they do not pace indexing. No persistent index cache is used.
-- Stop at 20,000 directory candidates or 200,000 entries, with maximum depth 64.
-  Also stop at a conservative 6 MiB retained-path/rule budget or a path over
-  4096 bytes. Typed/pasted input and fuzzy queries are capped at 100 Unicode
-  scalar values; invoking/completed/history paths are preserved without truncation.
-  Limits are visible; ignored entries are not counted or retained. This is a partial index when capped;
-  an explicit valid path can still be entered without being indexed.
-- Keep at most 100 ranked suggestions, ordered by Frizbee score and path tie-break.
-  HOME's own spelling, including a hidden physical fixture/mount root, does not
-  classify its normal descendants as hidden.
-- Symlinks are neither candidates nor traversed, even when pointing inside HOME.
-  This deliberately narrower policy avoids cycles/escape; internal symlink support
-  in the draft spec is deferred. The walker does not follow directory links;
-  acceptance/submission still check every literal path component. The old repeated
-  ancestor revalidation on each scan descent is removed. Concurrent hostile
-  filesystem replacement is not an atomic-security guarantee; there is no real
-  atomic guarantee from validation through launch.
-- Skip invalid UTF-8 and control-character directory names rather than display
-  ambiguous/unsafe names. Spaces, Unicode, quotes and shell-looking text are literal.
-- `~`, `~/…`, absolute paths under HOME and HOME-relative paths work. `.`/`..`
-  are accepted only within HOME; traversing a symlink or escaping HOME is rejected.
-- Completion acceptance and submission revalidate actual directories, reject files,
-  deleted paths, symlinks and inaccessible paths, and preserve the form on error.
-- Results are a snapshot. F5 discovers newly created directories and removes stale
-  cached entries. Stale candidates also fail validation at acceptance/submission.
+Validation is separate from OS process creation; concurrent filesystem changes
+can still invalidate a checked path. This is not a filesystem sandbox or an
+atomic validation/spawn security boundary.
 
-The cooperative time limit cannot interrupt one slow filesystem syscall (for
-example an unavailable network mount). No hard input-latency SLA is claimed.
-Hidden/ignored subtrees do not consume catalogue, entry or retained-path limits.
-Visible, non-ignored build trees still do.
+## Verification
 
-### Rule loading and filesystem boundaries
-
-`ignore` 0.4.33's automatic Git discovery opens parent ignore files even when
-`parents(false)` disables their *effects*. A host-target regression proves this
-upstream behaviour and the boundary fix. All automatic rule discovery is therefore
-disabled. A small DFS-ancestry rule stack uses the released crate's `GitignoreBuilder`
-and matcher, loading only `.ignore`/`.gitignore` in accepted HOME directories. It
-is not a second directory walker. Parent/global Git configs, `.git/info/exclude`,
-Git worktree pointers and repository metadata are not read. Symlinked rule files
-(internal or external), FIFOs and devices are not opened; ordinary rule files are
-read after a no-follow metadata check. As with path validation, replacement races
-between checking and opening are not atomically prevented.
-
-Rules share the existing byte allowance: cumulatively charge 16 times source
-bytes plus 2 KiB per source line for parser/matcher overhead. Each rule file is
-also bounded to 64 KiB before parsing. Exceeding either allowance stops indexing
-with the usual visible limit state, rather than continuing with incomplete rules.
-This is conservative accounting, not a guarantee on allocator/regex peak memory.
-Malformed patterns and unreadable rule files are ignored like the crate's normal
-best-effort loader. Ancestor matchers are released as the serial walker leaves
-their subtree; no list of excluded paths is stored.
-
-The serial walker's underlying `walkdir` may open a pruned directory handle before
-its filter runs. It then skips the subtree: descendants and their ignore files
-are not visited/read, counted or catalogued. Do not interpret pruning as a promise
-of zero metadata/open syscalls for the excluded directory itself.
-
-## Development verification
-
-```sh
-cargo fmt --all --check
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo clippy -p zellij-launchpad --target wasm32-wasip1 --locked -- -D warnings
-cargo build --locked --release -p zellij-launchpad --target wasm32-wasip1
-# pyte is a development-only dependency in target/verification-venv
-PY=target/verification-venv/bin/python
-$PY tools/verify_search.py
-$PY tools/verify_search.py --deny
-$PY tools/verify_workers.py
-$PY tools/verify_input_limit.py
-$PY tools/verify_index_benchmark.py --wasm target/wasm32-wasip1/release/zellij-launchpad.wasm
-
-$PY tools/verify_zellij.py
-```
-
-`verify_search.py` uses private host state and controlled directories, a CWD outside
-the test HOME, real permission grant/deny, and readback of the closed plugin pane.
-The benchmark accepts an explicit release WASM, constructs the same 18,110-directory
-visible tree for each run, verifies the loaded URL/hash and catalogue count, and
-reports time from first visible indexing to completion separately from edit and
-result latency. These are PTY-observed timings, not cold-disk or pure-walker timings.
-All automated search checks use disposable HOME fixtures beneath `target/`;
-there is no mode that uses the invoking user’s HOME. Unsupported flags are rejected
-before setup. Evidence is ignored under `target/zj-*`.
-The UI/mouse regression harnesses run the real plugin with plugin configuration
-`simulate_launch=true` over a disposable fixture HOME; production startup never
-uses that setting.
+Core tests exercise ignore rules, limits, completion, input bounds and asynchronous
+result fencing. Native tests exercise direct filesystem validation, invoking-cwd
+exceptions and worker epochs. The live suite uses disposable HOME trees and real
+terminal input; it never scans the user's HOME.

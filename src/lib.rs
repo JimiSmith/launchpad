@@ -1,4 +1,3 @@
-pub mod ansi;
 pub mod app;
 pub mod cells;
 pub mod commands;

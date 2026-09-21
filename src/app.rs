@@ -157,10 +157,10 @@ impl App {
     pub fn launch_rejected(&mut self) {
         self.launch_pending = false;
         self.message =
-            Some("Zellij did not accept the launch. Check permissions and try again.".into());
+            Some("Zellij did not accept the launch. Check the command and try again.".into());
     }
     pub fn from_remote(home: std::path::PathBuf) -> Self {
-        let mut app = Self::from_home(home, "/host".into());
+        let mut app = Self::from_home(home.clone(), home);
         app.remote = Some(crate::remote::Remote {
             dirty: true,
             ..Default::default()
@@ -825,7 +825,7 @@ mod tests {
     fn tool(id: &str) -> Tool {
         Tool::new(id).expect("valid command ID")
     }
-    /// A worker-backed App, exactly as the plugin builds one. No fixtures.
+    /// A worker-backed App, as the native adapter builds one. No fixtures.
     fn app() -> App {
         let mut app = App::from_remote(HOME.into());
         app.configure(&std::collections::BTreeMap::from([
