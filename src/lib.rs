@@ -4,6 +4,7 @@ pub mod cells;
 pub mod commands;
 pub mod editor;
 pub mod help;
+pub mod host_path;
 pub mod remote;
 pub mod search;
 pub mod theme;

@@ -40,7 +40,8 @@ impl ZellijPlugin for Probe {
     fn update(&mut self, event: Event) -> bool {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
-                self.home = get_session_environment_variables().remove("HOME").unwrap();
+                self.home =
+                    zellij_launchpad::session_home(&get_session_environment_variables()).unwrap();
                 if self.initial == self.home {
                     post_message_to(PluginMessage::new_to_worker("mapping", "hello", ""));
                 } else if std::path::Path::new("/data/reload-attempted").exists() {

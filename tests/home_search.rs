@@ -8,7 +8,9 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Tree(PathBuf);
 impl Tree {
     fn new() -> Self {
-        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/search-tests");
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("search-tests");
         fs::create_dir_all(&base).unwrap();
         let path = base.join(format!(
             "launchpad-search-{}-{}",
@@ -27,6 +29,47 @@ impl Drop for Tree {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+#[test]
+fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
+    use zellij_launchpad_core::{
+        app::{Action, App},
+        search::matches_in,
+    };
+    let tree = Tree::new();
+    tree.dir("Projects/team notes");
+    fs::write(tree.0.join("Projects/file"), "text").unwrap();
+    for home in [r"C:\Users\Ada", r"\\server\share\Ada"] {
+        let mut index = HomeIndex::new(home.into(), tree.0.clone()).unwrap();
+        while index.is_scanning() {
+            index.step(128);
+        }
+        let expected = format!(r"{home}\Projects\team notes");
+        for raw in [
+            "~/Projects/team notes",
+            r"~\Projects\team notes",
+            expected.as_str(),
+        ] {
+            assert_eq!(index.validate(raw).unwrap(), expected);
+            let results = matches_in(raw, &index.dirs, home);
+            assert_eq!(index.dirs[results[0]].path, expected);
+        }
+        for invalid in [
+            r"..\outside",
+            r"Projects\..\..\outside",
+            r"D:\outside",
+            r"Projects\file",
+            r"Projects\missing",
+        ] {
+            assert!(index.validate(invalid).is_err(), "{invalid}");
+        }
+        let mut app = App::from_home(home.into(), tree.0.clone());
+        app.update(Action::Clear);
+        app.update(Action::Text(r"~\Projects\team notes".into()));
+        app.update(Action::Enter);
+        assert_eq!(app.take_launch().unwrap().path, expected);
+    }
+}
+
 #[test]
 fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
     use zellij_launchpad_core::search::{Directory, matches_in};
@@ -78,6 +121,7 @@ fn ignore_rule_bytes_share_the_index_memory_limit() {
 }
 
 #[test]
+#[cfg(unix)]
 fn symlinked_ignore_files_do_not_read_or_apply_outside_rules() {
     use std::os::unix::fs::symlink;
     let tree = Tree::new();
@@ -231,10 +275,12 @@ fn prunes_git_and_node_modules_subtrees_at_every_depth() {
         "project/src",
         ".github/workflows",
         "node_modules_backup/keep",
-        "Node_modules/keep",
     ] {
         tree.dir(name);
     }
+    // These names are distinct only on a case-sensitive filesystem.
+    #[cfg(not(windows))]
+    tree.dir("Node_modules/keep");
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     // Excluded trees must not consume the entry budget, not merely be hidden.
     index.limits.max_entries = 7; // Six retained entries; ignored names cost nothing.
@@ -266,20 +312,24 @@ fn prunes_git_and_node_modules_subtrees_at_every_depth() {
         "project/src",
         "node_modules_backup",
         "node_modules_backup/keep",
-        "Node_modules",
-        "Node_modules/keep",
     ]
     .into_iter()
     .map(PathBuf::from)
     .collect();
+    #[cfg(not(windows))]
+    expected.extend(["Node_modules", "Node_modules/keep"].map(PathBuf::from));
     expected.sort();
     assert_eq!(paths, expected);
-    assert_eq!(index.status(), "HOME indexed · 6 dirs · F5 refresh");
+    assert_eq!(
+        index.status(),
+        format!("HOME indexed · {} dirs · F5 refresh", expected.len())
+    );
     // Index exclusions are not a restriction on explicitly selected paths.
     assert!(index.validate("~/project/node_modules/ignored-0").is_ok());
 }
 
 #[test]
+#[cfg(unix)]
 fn skips_symlinks_and_unrepresentable_names() {
     use std::os::unix::fs::symlink;
     let tree = Tree::new();
@@ -303,12 +353,15 @@ fn skips_symlinks_and_unrepresentable_names() {
 
 #[test]
 fn validates_literal_home_paths_not_files_or_escapes() {
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
     let tree = Tree::new();
+    #[cfg(unix)]
     let outside = Tree::new();
     tree.dir("team notes/修理");
     tree.dir("it's literal; $HOME");
     fs::write(tree.0.join("file"), "text").unwrap();
+    #[cfg(unix)]
     symlink(&outside.0, tree.0.join("link")).unwrap();
     let index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     for raw in [
@@ -375,7 +428,7 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     assert!(
         app.suggestions
             .iter()
-            .any(|&i| app.dirs[i].path.ends_with("research/notes"))
+            .any(|&i| PathBuf::from(&app.dirs[i].path).ends_with("research/notes"))
     );
     assert!(
         !app.suggestions
@@ -553,8 +606,16 @@ fn indexes_nested_directories_incrementally_not_files() {
     }
     assert!(!index.is_scanning());
     let paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
-    assert!(paths.iter().any(|p| p.ends_with("Projects/research/notes")));
-    assert!(paths.iter().any(|p| p.ends_with("team notes/修理")));
+    assert!(
+        paths
+            .iter()
+            .any(|p| PathBuf::from(p).ends_with("Projects/research/notes"))
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|p| PathBuf::from(p).ends_with("team notes/修理"))
+    );
     assert!(!paths.iter().any(|p| p.ends_with("not-a-directory")));
 }
 #[test]

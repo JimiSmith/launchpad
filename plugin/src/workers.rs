@@ -118,7 +118,7 @@ impl Engine {
             Request::Start { epoch, home } => {
                 self.epoch = epoch;
                 self.index = None;
-                if initial_cwd != home {
+                if !zellij_launchpad_core::host_path::same(initial_cwd, &home) {
                     return Reply::Failed {
                         epoch,
                         error: "Worker HOME mapping disagrees. Reopen the plugin.".into(),

@@ -352,14 +352,7 @@ impl App {
     pub fn path_label(&self, path: &str) -> String {
         self.index
             .as_ref()
-            .and_then(|i| std::path::Path::new(path).strip_prefix(&i.home).ok())
-            .map(|rest| {
-                if rest.as_os_str().is_empty() {
-                    "~".into()
-                } else {
-                    format!("~/{}", rest.display())
-                }
-            })
+            .and_then(|i| crate::host_path::label(path, i.home.to_str()?))
             .unwrap_or_else(|| path.into())
     }
 

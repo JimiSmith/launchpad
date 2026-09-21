@@ -13,32 +13,7 @@ mod ignore_rules;
 /// Lexical only: never consults the host, a shell or the invoking directory.
 /// Relative input resolves against HOME, which is also the only search root.
 pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
-    if raw.is_empty()
-        || raw.chars().any(char::is_control)
-        || (raw.starts_with('~') && raw != "~" && !raw.starts_with("~/"))
-    {
-        return None;
-    }
-    let path = if raw == "~" {
-        home.to_owned()
-    } else if let Some(rest) = raw.strip_prefix("~/") {
-        format!("{home}/{rest}")
-    } else if raw.starts_with('/') {
-        raw.to_owned()
-    } else {
-        format!("{home}/{raw}")
-    };
-    let mut parts = Vec::new();
-    for p in path.split('/') {
-        match p {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(p),
-        }
-    }
-    Some(format!("/{}", parts.join("/")))
+    crate::host_path::normalize(raw, home)
 }
 
 /// Embedded Frizbee ranks basename and full path; path order breaks ties.
@@ -51,7 +26,15 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str) -> Vec<usize> {
         max_typos: Some(0),
         ..Config::default()
     };
-    let explicit = raw.starts_with('/')
+    let windows = crate::host_path::HostPath::parse(home).is_some_and(|p| p.is_windows());
+    let raw = if windows {
+        raw.replace('\\', "/")
+    } else {
+        raw.to_owned()
+    };
+    let raw = raw.as_str();
+    let explicit = crate::host_path::HostPath::parse(raw).is_some()
+        || raw.starts_with('/')
         || raw.starts_with('~')
         || raw.starts_with("./")
         || raw.starts_with("../");
@@ -65,10 +48,24 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str) -> Vec<usize> {
     if query.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
     }
-    let paths: Vec<_> = dirs.iter().map(|d| d.path.as_str()).collect();
-    let names: Vec<_> = dirs
+    let query = if windows {
+        query.replace('\\', "/")
+    } else {
+        query
+    };
+    let paths: Vec<_> = dirs
         .iter()
-        .map(|d| d.path.rsplit('/').next().unwrap_or(&d.path))
+        .map(|d| {
+            if windows {
+                std::borrow::Cow::Owned(d.path.replace('\\', "/"))
+            } else {
+                std::borrow::Cow::Borrowed(d.path.as_str())
+            }
+        })
+        .collect();
+    let names: Vec<_> = paths
+        .iter()
+        .map(|p| p.rsplit('/').next().unwrap_or(p))
         .collect();
     let mut scores = vec![None; dirs.len()];
     let mut matcher = Matcher::new(&query, &config);
@@ -142,15 +139,10 @@ impl std::fmt::Debug for HomeIndex {
 impl HomeIndex {
     /// `home` is the host path; `root` is its filesystem mapping (/host in WASI).
     pub fn new(home: PathBuf, root: PathBuf) -> Result<Self, String> {
-        if !home.is_absolute()
-            || !root.is_absolute()
-            || home.parent().is_none()
-            || home
-                .to_str()
-                .is_none_or(|p| p.chars().any(char::is_control))
-            || home
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
+        if home.to_str().and_then(crate::host_path::HostPath::parse)
+            .is_none_or(|p| !p.is_home())
+            // /host is a WASI mount, including in native adapter tests.
+            || !(root.is_absolute() || root == std::path::Path::new("/host"))
         {
             return Err("HOME must be an absolute directory.".into());
         }
@@ -168,58 +160,47 @@ impl HomeIndex {
             started: false,
         })
     }
-    fn relative(&self, raw: &str) -> Result<PathBuf, String> {
-        if raw.is_empty() || raw.chars().any(char::is_control) {
-            return Err("Enter a directory under HOME.".into());
-        }
-        let path = if raw == "~" {
-            PathBuf::new()
-        } else if let Some(rest) = raw.strip_prefix("~/") {
-            PathBuf::from(rest)
-        } else if raw.starts_with('~') {
-            return Err("Only ~ and ~/ are supported.".into());
-        } else if raw.starts_with('/') {
-            std::path::Path::new(raw)
-                .strip_prefix(&self.home)
-                .map_err(|_| "Only directories under HOME are allowed.".to_string())?
-                .to_owned()
-        } else {
-            PathBuf::from(raw)
-        };
-        Ok(path)
+    fn host_path(&self) -> crate::host_path::HostPath {
+        crate::host_path::HostPath::parse(self.home.to_str().expect("validated HOME")).unwrap()
+    }
+    fn relative(&self, raw: &str) -> Result<Vec<String>, String> {
+        self.host_path()
+            .relative(raw)
+            .ok_or_else(|| "Enter a directory under HOME; only ~ and ~/ are supported.".into())
     }
     /// Check each component before reducing '..': symlinks are never followed.
     pub fn validate(&self, raw: &str) -> Result<String, String> {
         let relative = self.relative(raw)?;
-        let mut checked = PathBuf::new();
-        for component in relative.components() {
-            match component {
-                std::path::Component::Normal(name) => {
-                    checked.push(name);
-                    let metadata = fs::symlink_metadata(self.root.join(&checked))
-                        .map_err(|e| format!("Directory unavailable: {e}"))?;
-                    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                        return Err(
-                            "Choose a directory; symlinks and files are not supported.".into()
-                        );
-                    }
+        let mut checked = Vec::new();
+        let mut sandbox = self.root.clone();
+        for component in relative {
+            if component == ".." {
+                if checked.pop().is_none() {
+                    return Err("Only directories under HOME are allowed.".into());
                 }
-                std::path::Component::CurDir => {}
-                std::path::Component::ParentDir => {
-                    if !checked.pop() {
-                        return Err("Only directories under HOME are allowed.".into());
-                    }
+                sandbox.pop();
+            } else {
+                // Host components must stay single, relative sandbox components.
+                let path = std::path::Path::new(&component);
+                if path.components().count() != 1
+                    || !matches!(
+                        path.components().next(),
+                        Some(std::path::Component::Normal(_))
+                    )
+                {
+                    return Err("Unsupported directory component.".into());
                 }
-                _ => return Err("Only directories under HOME are allowed.".into()),
+                sandbox.push(&component);
+                let metadata = fs::symlink_metadata(&sandbox)
+                    .map_err(|e| format!("Directory unavailable: {e}"))?;
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return Err("Choose a directory; symlinks and files are not supported.".into());
+                }
+                checked.push(component);
             }
         }
-        fs::read_dir(self.root.join(&checked).join("."))
-            .map_err(|e| format!("Directory unavailable: {e}"))?;
-        self.home
-            .join(checked)
-            .to_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "Directory is not valid UTF-8.".into())
+        fs::read_dir(sandbox.join(".")).map_err(|e| format!("Directory unavailable: {e}"))?;
+        Ok(self.host_path().join(&checked))
     }
     pub fn status(&self) -> String {
         if let Some(error) = &self.error {
@@ -330,7 +311,12 @@ impl HomeIndex {
             let Ok(relative) = entry.path().strip_prefix(&self.root) else {
                 continue;
             };
-            if let Some(path) = self.home.join(relative).to_str() {
+            let parts: Option<Vec<_>> = relative
+                .components()
+                .map(|c| c.as_os_str().to_str().map(str::to_owned))
+                .collect();
+            if let Some(parts) = parts {
+                let path = self.host_path().join(&parts);
                 // Keep the conservative path/allocation allowance even though
                 // the serial DFS walker no longer retains a breadth-first queue.
                 let cost = path.len() + relative.as_os_str().len() + 128;
@@ -347,7 +333,7 @@ impl HomeIndex {
                 }
                 self.retained_bytes += cost;
                 self.dirs.push(Directory {
-                    path: path.into(),
+                    path,
                     note: "directory",
                     error: None,
                 });

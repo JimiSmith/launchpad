@@ -14,7 +14,7 @@ pub fn load(data: &Path, initial: &Path) -> Result<String, String> {
     };
     // The host serializes paths lossily. Reject U+FFFD, including a legitimate
     // occurrence, rather than risk opening an existing UTF-8 replacement twin.
-    if !Path::new(&cwd).is_absolute()
+    if zellij_launchpad_core::host_path::HostPath::parse(&cwd).is_none()
         || cwd.len() > 4096
         || cwd.chars().any(char::is_control)
         || cwd.contains('\u{fffd}')
@@ -52,6 +52,13 @@ mod tests {
         let cwd = format!("/outside/{} 修理 e\u{301}; $HOME", "x".repeat(180));
         assert_eq!(load(&f.0, Path::new(&cwd)).unwrap(), cwd);
         assert_eq!(load(&f.0, Path::new("/owned/home")).unwrap(), cwd);
+    }
+    #[test]
+    fn windows_invoking_cwd_survives_the_home_reload_literally() {
+        let f = Fixture::new();
+        let cwd = r"C:\Projects\team notes";
+        assert_eq!(load(&f.0, Path::new(cwd)).unwrap(), cwd);
+        assert_eq!(load(&f.0, Path::new(r"C:\Users\Ada")).unwrap(), cwd);
     }
     #[test]
     fn host_replacement_char_cannot_turn_non_utf8_into_a_different_path() {

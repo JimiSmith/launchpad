@@ -41,6 +41,22 @@ zellij action launch-plugin --skip-plugin-cache -- \
 
 The plugin is a single `.wasm` file with no companion executable. After rebuilding,
 close the old plugin pane and launch it again with the command above.
+
+On native Windows, build with the same Rust commands above, then run this in
+PowerShell inside Zellij:
+
+```powershell
+$wasm = (Resolve-Path .\target\wasm32-wasip1\release\zellij-launchpad.wasm).Path.Replace('\', '/')
+zellij action launch-plugin --skip-plugin-cache -- "file:$wasm"
+```
+
+The same WASM works on Windows and Unix. Launchpad uses the session's `HOME`,
+falling back to `USERPROFILE`, then `HOMEDRIVE` + `HOMEPATH`. Windows paths accept
+drive letters, UNC shares, and either slash style; `~` refers to that session home.
+Drive-relative paths such as `C:notes` are rejected. When using WSL, use Linux
+paths and run Zellij inside WSL. The live Python/Bash verification harness below
+requires Unix; native Windows is covered by the workspace tests in CI.
+
 Zellij 0.45.1 requires session-environment access, **Full disk access**, and
 **Change application state** (one startup reload to map workers to HOME), plus
 **Open terminals or plugins**, **Execute actions as the user**, and

@@ -29,7 +29,9 @@ fn configured_example_forwards_exact_values_from_pinned_kdl_parser() {
 fn documented_argument_examples_parse_and_produce_literal_argv() {
     use zellij_utils::input::layout::{Layout, Run};
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let text = std::fs::read_to_string(root.join("docs/configured-commands.md")).unwrap();
+    let text = std::fs::read_to_string(root.join("docs/configured-commands.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let snippets: Vec<_> = text
         .split("```kdl\n")
         .skip(1)

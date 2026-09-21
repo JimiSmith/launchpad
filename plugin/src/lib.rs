@@ -2,6 +2,19 @@
 pub mod cwd;
 pub mod history;
 pub mod workers;
+
+/// Read the host's session environment, never the WASI process environment.
+pub fn session_home(environment: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    let get = |key: &str| {
+        environment
+            .iter()
+            .find(|(k, v)| k.eq_ignore_ascii_case(key) && !v.is_empty())
+            .map(|(_, v)| v.clone())
+    };
+    get("HOME")
+        .or_else(|| get("USERPROFILE"))
+        .or_else(|| Some(format!("{}{}", get("HOMEDRIVE")?, get("HOMEPATH")?)))
+}
 /// Resolve position-keyed panes and stable-ID tabs from ONE coherent snapshot.
 pub fn launch_tab(
     session: &zellij_tile::prelude::SessionInfo,
@@ -21,10 +34,7 @@ pub fn launch_tab(
 }
 
 pub fn tab_name(path: &str, label: &str) -> String {
-    let basename = std::path::Path::new(path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("/");
+    let basename = zellij_launchpad_core::host_path::basename(path);
     format!("{basename} · {label}")
 }
 use zellij_launchpad_core::app::{Action, Focus};
@@ -90,7 +100,7 @@ impl State {
         self.pending_home = None;
         let Some(home) = home else {
             self.app.search_status =
-                "Session HOME is missing. Reopen from a session with HOME set.".into();
+                "Session HOME is missing. Set HOME or USERPROFILE and reopen.".into();
             return false;
         };
         let path = std::path::PathBuf::from(home);
@@ -126,7 +136,15 @@ impl State {
                 return true;
             }
             Event::HostFolderChanged(home) => {
-                if self.pending_home.as_ref() == Some(&home) {
+                if self
+                    .pending_home
+                    .as_ref()
+                    .and_then(|pending| pending.to_str())
+                    .zip(home.to_str())
+                    .is_some_and(|(pending, home)| {
+                        zellij_launchpad_core::host_path::same(pending, home)
+                    })
+                {
                     self.pending_home = None;
                     self.replace_app(zellij_launchpad_core::app::App::from_remote(home));
                     return true;

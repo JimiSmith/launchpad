@@ -373,10 +373,12 @@ mod wasm {
                 Event::PermissionRequestResult(PermissionStatus::Granted)
                     if self.home.is_none() =>
                 {
-                    let home = get_session_environment_variables().remove("HOME");
+                    let home = zellij_launchpad::session_home(&get_session_environment_variables());
                     if self.state.prepare_home(home.clone()) {
                         self.home = home;
-                        if self.home.as_deref() == Some(&self.initial_cwd) {
+                        if self.home.as_deref().is_some_and(|home| {
+                            zellij_launchpad_core::host_path::same(home, &self.initial_cwd)
+                        }) {
                             self.start();
                         } else if std::path::Path::new("/data/worker-reload-attempted").exists() {
                             self.fail("Worker HOME reload failed. Reopen the plugin.".into());
@@ -390,7 +392,10 @@ mod wasm {
                 Event::PermissionRequestResult(PermissionStatus::Denied) => self
                     .fail("Permission denied. Reopen and allow the requested permissions.".into()),
                 Event::HostFolderChanged(path)
-                    if self.remounting && path.to_str() == self.home.as_deref() =>
+                    if self.remounting
+                        && path.to_str().zip(self.home.as_deref()).is_some_and(
+                            |(path, home)| zellij_launchpad_core::host_path::same(path, home),
+                        ) =>
                 {
                     self.remounting = false;
                     if std::fs::write("/data/worker-reload-attempted", b"1").is_ok() {
@@ -402,7 +407,9 @@ mod wasm {
                 }
                 Event::HostFolderChanged(path)
                     if self.cwd_validation.is_some()
-                        && path.to_str() == self.original_cwd.as_deref() =>
+                        && path.to_str().zip(self.original_cwd.as_deref()).is_some_and(
+                            |(path, cwd)| zellij_launchpad_core::host_path::same(path, cwd),
+                        ) =>
                 {
                     let (epoch, generation) = self.cwd_validation.take().unwrap();
                     // Only this exact host-supplied directory is an exception to
@@ -436,7 +443,10 @@ mod wasm {
                 Event::CustomMessage(name, payload) if name == "index-reply" && !self.failed => {
                     match serde_json::from_str::<Reply>(&payload) {
                         Ok(Reply::Ready { epoch, cwd })
-                            if epoch == self.epoch && Some(&cwd) == self.home.as_ref() =>
+                            if epoch == self.epoch
+                                && self.home.as_deref().is_some_and(|home| {
+                                    zellij_launchpad_core::host_path::same(&cwd, home)
+                                }) =>
                         {
                             self.pending = Some(now);
                             self.ready = true;

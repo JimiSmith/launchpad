@@ -56,19 +56,32 @@ fn valid_token(token: &str) -> bool {
 fn valid_entry(entry: &Entry) -> bool {
     valid_token(&entry.id)
         && entry.path.len() <= 4096
-        && Path::new(&entry.path).is_absolute()
+        && zellij_launchpad_core::host_path::HostPath::parse(&entry.path)
+            .is_some_and(|p| !p.has_parent())
         && !entry.path.chars().any(char::is_control)
-        && !Path::new(&entry.path)
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 fn safe_path(path: &Path, directory: bool) -> Result<(), String> {
-    match fs::symlink_metadata(path) {
+    match concurrent_io(|| fs::symlink_metadata(path)) {
         Ok(m) if (directory && m.is_dir()) || (!directory && m.is_file()) => Ok(()),
         Ok(_) => Err("Unsafe history path (symlink or non-regular file)".into()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(format!("Inspect {}: {e}", path.display())),
     }
+}
+
+/// Windows reports delete-pending files as PermissionDenied while another
+/// instance has a reader open. WASI forwards that error too. Give the reader a
+/// bounded opportunity to close, then propagate genuine permission failures.
+fn concurrent_io<T>(mut operation: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    for delay in [1, 2, 4, 8] {
+        match operation() {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+            }
+            result => return result,
+        }
+    }
+    operation()
 }
 impl Store {
     pub fn new(root: &Path) -> Self {
@@ -142,10 +155,13 @@ impl Store {
         let result = (|| -> std::io::Result<()> {
             file.write_all(bytes)?;
             file.sync_all()?;
-            fs::rename(&temp, target)
+            // Windows cannot reliably replace a destination still held open by
+            // another writer after its rename. Close before publishing.
+            drop(file);
+            concurrent_io(|| fs::rename(&temp, target))
         })();
         let _ = fs::remove_file(&temp);
-        result.map_err(|e| e.to_string())
+        result.map_err(|e| format!("Publish {}: {e}", target.display()))
     }
     fn materialize(&self, token: &str) -> Result<(), String> {
         let events = self.events()?;
@@ -161,14 +177,16 @@ impl Store {
         )?;
         for event in &events {
             if !kept.iter().any(|e| e.id == event.id) {
-                match fs::remove_file(
-                    self.root
-                        .join("history.d")
-                        .join(format!("{}.json", event.id)),
-                ) {
+                match concurrent_io(|| {
+                    fs::remove_file(
+                        self.root
+                            .join("history.d")
+                            .join(format!("{}.json", event.id)),
+                    )
+                }) {
                     Ok(()) => (),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-                    Err(e) => return Err(e.to_string()),
+                    Err(e) => return Err(format!("Collect history event {}: {e}", event.id)),
                 }
             }
         }
@@ -179,7 +197,9 @@ impl Store {
             return Err("Invalid history token".into());
         }
         self.events()?;
-        match fs::remove_file(self.root.join("history.d").join(format!("{token}.json"))) {
+        match concurrent_io(|| {
+            fs::remove_file(self.root.join("history.d").join(format!("{token}.json")))
+        }) {
             Ok(()) => (),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
             Err(e) => return Err(e.to_string()),
@@ -237,10 +257,10 @@ impl Store {
             // Another writer may garbage-collect a redundant immutable record.
             safe_path(&path, false)?;
             use std::io::Read;
-            let file = match fs::File::open(&path) {
+            let file = match concurrent_io(|| fs::File::open(&path)) {
                 Ok(file) => file,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(e.to_string()),
+                Err(e) => return Err(format!("Read {}: {e}", path.display())),
             };
             let mut bytes = Vec::new();
             file.take(32769)
@@ -300,6 +320,18 @@ mod tests {
             tool,
             opened_at: n,
         }
+    }
+    #[test]
+    fn windows_history_roundtrips_and_rejects_parent_traversal() {
+        let store = fixture("windows-paths");
+        for (n, path) in [(1, r"C:\Users\Ada\notes"), (2, r"\\server\share\Ada\notes")] {
+            let row = entry(n, path, Tool::Shell);
+            store.record(row.clone()).unwrap();
+            assert_eq!(store.refresh(&format!("read-{n}")).unwrap()[0], row);
+        }
+        assert!(store
+            .record(entry(3, r"C:\Users\Ada\..\outside", Tool::Shell))
+            .is_err());
     }
     #[test]
     fn arbitrary_stable_command_identity_roundtrips_without_executable_data() {
