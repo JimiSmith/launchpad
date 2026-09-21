@@ -129,97 +129,43 @@ fn completed_long_path_is_preserved_and_launches_exact_target() {
 }
 
 #[test]
-fn ignore_rule_bytes_share_the_index_memory_limit() {
+fn parent_ignore_files_and_git_excludes_apply_to_the_search_root() {
     let tree = Tree::new();
-    tree.dir("visible");
-    fs::write(tree.0.join(".ignore"), "nonmatching-pattern\n".repeat(1000)).unwrap();
-    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
-    index.limits.max_bytes = 1024;
-    while index.is_scanning() {
-        index.step(128);
-    }
-    assert!(index.status().contains("limit"));
-    assert!(index.dirs.is_empty());
-    assert!(index.validate("~/visible").is_ok());
-}
-
-#[test]
-#[cfg(unix)]
-fn symlinked_ignore_files_do_not_read_or_apply_outside_rules() {
-    use std::os::unix::fs::symlink;
-    let tree = Tree::new();
-    tree.dir("home/visible");
-    fs::write(tree.0.join("outside-rules"), "visible/\n").unwrap();
-    symlink(tree.0.join("outside-rules"), tree.0.join("home/.ignore")).unwrap();
-    let mut index = HomeIndex::new("/logical/home".into(), tree.0.join("home")).unwrap();
-    while index.is_scanning() {
-        index.step(128);
-    }
-    assert_eq!(index.dirs.len(), 1, "symlinked rules must not apply");
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn ignore_discovery_does_not_open_parent_configs_or_pruned_descendants() {
-    use std::{ffi::CString, io::Read, os::fd::FromRawFd};
-    unsafe extern "C" {
-        fn inotify_init1(flags: i32) -> i32;
-        fn inotify_add_watch(fd: i32, path: *const std::ffi::c_char, mask: u32) -> i32;
-    }
-    let tree = Tree::new();
-    tree.dir("home/visible");
-    for name in ["blocked", ".secret", ".git", "node_modules"] {
-        tree.dir(&format!("home/{name}/nested"));
-        fs::write(tree.0.join(format!("home/{name}/.ignore")), "*\n").unwrap();
-    }
-    fs::write(
-        tree.0.join("home/.ignore"),
-        "blocked/\n!blocked/nested/\n!.secret/\n!.git/\n!node_modules/\n",
-    )
-    .unwrap();
-    fs::write(tree.0.join(".ignore"), "visible/\n").unwrap();
-    fs::write(tree.0.join(".gitignore"), "visible/\n").unwrap();
-    fs::write(tree.0.join("external-rules"), "visible/\n").unwrap();
-    std::os::unix::fs::symlink(
-        tree.0.join("external-rules"),
-        tree.0.join("home/.gitignore"),
-    )
-    .unwrap();
-    let fd = unsafe { inotify_init1(0x800) }; // IN_NONBLOCK
-    assert!(fd >= 0);
-    let mut watch = unsafe { fs::File::from_raw_fd(fd) };
-    for relative in [
-        ".ignore",
-        ".gitignore",
-        "external-rules",
-        "home/blocked/.ignore",
-        "home/blocked/nested",
-        "home/.secret/.ignore",
-        "home/.secret/nested",
-        "home/.git/.ignore",
-        "home/.git/nested",
-        "home/node_modules/.ignore",
-        "home/node_modules/nested",
+    tree.dir(".git/info");
+    for name in [
+        "git-ignored",
+        "ignore-ignored",
+        "excluded",
+        "visible",
+        "restored",
     ] {
-        let path = CString::new(tree.0.join(relative).as_os_str().as_encoded_bytes()).unwrap();
-        assert!(unsafe { inotify_add_watch(fd, path.as_ptr(), 0x20) } >= 0); // IN_OPEN
+        tree.dir(&format!("home/{name}/nested"));
     }
+    fs::write(tree.0.join(".gitignore"), "git-ignored/\nrestored/\n").unwrap();
+    fs::write(tree.0.join(".ignore"), "ignore-ignored/\n").unwrap();
+    fs::write(tree.0.join(".git/info/exclude"), "excluded/\n").unwrap();
+    fs::write(tree.0.join("home/.gitignore"), "!restored/\n").unwrap();
     let mut index = HomeIndex::new("/logical/home".into(), tree.0.join("home")).unwrap();
     while index.is_scanning() {
         index.step(128);
     }
-    assert_eq!(index.dirs.len(), 1, "parent rules cannot change results");
-    let mut events = [0; 4096];
-    let result = watch.read(&mut events);
-    assert!(
-        matches!(result, Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
-        "outside config or pruned descendant was opened: {result:?}"
+    let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            "/logical/home/restored",
+            "/logical/home/restored/nested",
+            "/logical/home/visible",
+            "/logical/home/visible/nested",
+        ]
     );
 }
 
 #[test]
-fn project_ignore_rules_apply_without_git_metadata_with_nested_negation() {
+fn project_ignore_rules_apply_with_nested_negation() {
     let tree = Tree::new();
+    tree.dir("project/.git");
     for name in [
         "project/build/cache",
         "project/release/keep",
@@ -265,18 +211,12 @@ fn project_ignore_rules_apply_without_git_metadata_with_nested_negation() {
 
 #[test]
 #[cfg(windows)]
-fn windows_hidden_attributes_prune_subtrees_before_rules_and_limits() {
+fn windows_hidden_attributes_prune_subtrees_before_index_limits() {
     let tree = Tree::new();
     for parent in ["AppData", "project/secret"] {
         for i in 0..20 {
             tree.dir(&format!("{parent}/descendant-{i}/nested"));
         }
-        // A pruned directory's rules must not consume the index memory budget.
-        fs::write(
-            tree.0.join(parent).join(".ignore"),
-            "pattern\n".repeat(20_000),
-        )
-        .unwrap();
         tree.hidden(parent, true);
     }
     tree.dir("visible");
@@ -358,70 +298,39 @@ fn hidden_subtrees_are_pruned_before_entry_and_memory_budgets() {
 }
 
 #[test]
-fn prunes_git_and_node_modules_subtrees_at_every_depth() {
+fn node_modules_is_controlled_by_ignore_files() {
     let tree = Tree::new();
-    for prefix in ["", "project/"] {
-        for name in [".git", "node_modules"] {
-            for i in 0..100 {
-                tree.dir(&format!("{prefix}{name}/ignored-{i}/nested"));
-            }
-        }
-    }
-    for name in [
-        "project/src",
-        ".github/workflows",
-        "node_modules_backup/keep",
-    ] {
-        tree.dir(name);
-    }
-    // These names are distinct only on a case-sensitive filesystem.
-    #[cfg(not(windows))]
-    tree.dir("Node_modules/keep");
-    let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
-    // Excluded trees must not consume the entry budget, not merely be hidden.
-    index.limits.max_entries = 7; // Six retained entries; ignored names cost nothing.
-    for _ in 0..1000 {
+    tree.dir(".git");
+    tree.dir("node_modules/package");
+    tree.dir("project/node_modules/package");
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
+    while index.is_scanning() {
         index.step(128);
-        if !index.is_scanning() {
-            break;
-        }
     }
-    assert!(!index.is_scanning());
-    assert!(
-        index.status().starts_with("HOME indexed"),
-        "{}",
-        index.status()
-    );
-    let mut paths: Vec<_> = index
-        .dirs
-        .iter()
-        .map(|d| {
-            PathBuf::from(&d.path)
-                .strip_prefix(&tree.0)
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
+    assert_eq!(index.dirs.len(), 5, "unignored dependencies are indexed");
+    fs::write(tree.0.join(".gitignore"), "node_modules/\n").unwrap();
+    index = index.restart();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(index.dirs.len(), 1);
+    assert_eq!(index.dirs[0].path, "/logical/home/project");
+    fs::write(tree.0.join("project/.gitignore"), "!node_modules/\n").unwrap();
+    index = index.restart();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
     paths.sort();
-    let mut expected: Vec<_> = [
-        "project",
-        "project/src",
-        "node_modules_backup",
-        "node_modules_backup/keep",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .collect();
-    #[cfg(not(windows))]
-    expected.extend(["Node_modules", "Node_modules/keep"].map(PathBuf::from));
-    expected.sort();
-    assert_eq!(paths, expected);
     assert_eq!(
-        index.status(),
-        format!("HOME indexed · {} dirs · F5 refresh", expected.len())
+        paths,
+        [
+            "/logical/home/project",
+            "/logical/home/project/node_modules",
+            "/logical/home/project/node_modules/package",
+        ]
     );
-    // Index exclusions are not a restriction on explicitly selected paths.
-    assert!(index.validate("~/project/node_modules/ignored-0").is_ok());
+    assert!(index.validate("~/node_modules/package").is_ok());
 }
 
 #[test]

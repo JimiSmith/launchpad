@@ -6,22 +6,24 @@ validation. Filesystem work does not run on the terminal event loop.
 
 ## Traversal
 
-The serial `ignore` walker respects HOME-local `.gitignore` and `.ignore` rules,
-including nested rules and negation. It does not consult global Git excludes.
-Hidden directories, `.git` and `node_modules` are pruned; similarly named paths
-such as `node_modules_backup` remain eligible. Symlinks are not followed.
+The serial `ignore` walker uses its standard ignore handling, including parent
+`.gitignore` and `.ignore` files, nested rules and negation, global Git ignores,
+and `.git/info/exclude`. Git-related rules use the crate's default repository
+detection. `node_modules` is indexed unless excluded by ignore rules.
+Hidden directories are pruned. Symlinks are not followed.
 
 Dot-prefixed entries are hidden on every platform. On Windows, the native walker
 also checks `FILE_ATTRIBUTE_HIDDEN`; hidden entries and their descendants are
-pruned before loading their ignore rules or consuming entry/index budgets.
+pruned without consuming the index's entry or retained-path budgets.
 Ignore-file negations cannot reveal them. HOME itself is always scanned even if
 it has the Hidden attribute. F5 rebuilds the index and rechecks attributes;
 explicit hidden paths remain valid launch targets.
 
 Traversal cooperatively yields after at most 128 entries or its existing 5 ms
 budget. Limits are 200,000 retained directories, 2,000,000 visited entries,
-depth 64 and 60 MiB of estimated retained path/ignore-rule memory. The UI reports
-limits and errors. There is no persistent index cache or external search process.
+depth 64 and 60 MiB of estimated retained index memory, excluding the walker's
+internal allocations and ignore matchers. The UI reports limits and errors.
+There is no persistent index cache or external search process.
 
 ## Matching and input
 

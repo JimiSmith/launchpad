@@ -1,19 +1,14 @@
 //! Home-only cached directory index. No shell, subprocess, or render-time IO.
 use crate::editor::MAX_INPUT_CHARS;
-use std::{
-    fs,
-    path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
-mod ignore_rules;
+use std::{fs, path::PathBuf};
 
 #[cfg(windows)]
-fn hidden_attribute(entry: &ignore::DirEntry) -> bool {
+fn is_hidden(entry: &ignore::DirEntry) -> bool {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    if entry.file_name().as_encoded_bytes().starts_with(b".") {
+        return true;
+    }
     // If metadata is unavailable, do not descend into an unclassified entry.
     entry.metadata().map_or(true, |metadata| {
         metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
@@ -21,8 +16,8 @@ fn hidden_attribute(entry: &ignore::DirEntry) -> bool {
 }
 
 #[cfg(not(windows))]
-fn hidden_attribute(_entry: &ignore::DirEntry) -> bool {
-    false
+fn is_hidden(entry: &ignore::DirEntry) -> bool {
+    entry.file_name().as_encoded_bytes().starts_with(b".")
 }
 
 /// Lexical only: never consults the host, a shell or the invoking directory.
@@ -113,7 +108,7 @@ pub struct Directory {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
-    /// Conservative retained path/queue/allocation accounting, not RSS.
+    /// Conservative retained index accounting, excluding walker internals, not RSS.
     pub max_bytes: usize,
     pub max_directories: usize,
     pub max_entries: usize,
@@ -136,7 +131,6 @@ pub struct HomeIndex {
     pub limits: Limits,
     visited: usize,
     retained_bytes: usize,
-    rule_bytes: Arc<AtomicUsize>,
     limited: bool,
     error: Option<String>,
     walker: Option<ignore::Walk>,
@@ -168,7 +162,6 @@ impl HomeIndex {
             limits: Limits::default(),
             visited: 0,
             retained_bytes: 0,
-            rule_bytes: Arc::new(AtomicUsize::new(0)),
             limited: false,
             error: None,
             walker: None,
@@ -250,28 +243,19 @@ impl HomeIndex {
                 self.error = Some(error);
                 return;
             }
-            let rules = Mutex::new(ignore_rules::Rules::new(
-                &self.root,
-                self.limits.max_bytes,
-                self.rule_bytes.clone(),
-            ));
             let mut builder = ignore::WalkBuilder::new(&self.root);
             builder
-                .standard_filters(false)
                 .follow_links(false)
-                .parents(false)
-                .git_ignore(false)
-                .git_global(false)
-                .git_exclude(false)
                 .max_depth(Some(self.limits.max_depth))
                 .filter_entry(move |entry| {
-                    entry.depth() == 0
-                        || entry.file_name().to_str().is_some_and(|name| {
-                            name != "node_modules"
-                                && !name.starts_with('.')
-                                && !name.chars().any(char::is_control)
-                        }) && !hidden_attribute(entry)
-                            && rules.lock().expect("serial rule matcher").allows(entry)
+                    if entry.depth() == 0 {
+                        return true;
+                    }
+                    entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| !name.chars().any(char::is_control))
+                        && !is_hidden(entry)
                 });
             self.walker = Some(builder.build());
         }
@@ -281,10 +265,7 @@ impl HomeIndex {
             }
             if self.dirs.len() >= self.limits.max_directories
                 || self.visited >= self.limits.max_entries
-                || self
-                    .retained_bytes
-                    .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
-                    > self.limits.max_bytes
+                || self.retained_bytes > self.limits.max_bytes
             {
                 self.limited = true;
                 self.walker = None;
@@ -308,15 +289,6 @@ impl HomeIndex {
                     break;
                 }
             };
-            if self
-                .retained_bytes
-                .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
-                > self.limits.max_bytes
-            {
-                self.limited = true;
-                self.walker = None;
-                break;
-            }
             if entry.depth() == 0 {
                 continue;
             }
@@ -337,11 +309,7 @@ impl HomeIndex {
                 // the serial DFS walker no longer retains a breadth-first queue.
                 let cost = path.len() + relative.as_os_str().len() + 128;
                 if path.len() > 4096
-                    || self
-                        .retained_bytes
-                        .saturating_add(cost)
-                        .saturating_add(self.rule_bytes.load(Ordering::Relaxed))
-                        > self.limits.max_bytes
+                    || self.retained_bytes.saturating_add(cost) > self.limits.max_bytes
                 {
                     self.limited = true;
                     self.walker = None;

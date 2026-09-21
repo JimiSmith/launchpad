@@ -109,10 +109,11 @@ interpretation. [Configuration details](docs/configured-commands.md).
   clears; Esc cancels confirmation.
 - Ctrl+Q / Ctrl+C quits. Esc dismisses transient UI, then quits an untouched dashboard.
 
-Search is HOME-only; relative paths start at HOME. The index respects local
-`.gitignore` / `.ignore`, excludes hidden directories, `.git`, and `node_modules`,
-and never follows symlinks. Hidden and ignored directories can be entered
-literally. Hidden means dot-prefixed names on all platforms, plus the Windows
+Search is HOME-only; relative paths start at HOME. The index uses the `ignore`
+crate's standard handling of `.gitignore`, `.ignore`, parent rules, global Git
+ignores, and `.git/info/exclude`. There is no special exclusion for `node_modules`.
+It excludes hidden directories and never follows symlinks. Hidden and ignored
+directories can be entered literally. Hidden means dot-prefixed names on all platforms, plus the Windows
 Hidden attribute (including AppData). Their descendants are pruned too; F5
 rechecks attribute changes. The exact invoking cwd is the sole exception for
 outside-HOME or symlink directories. Deleted/inaccessible directories fail visibly
