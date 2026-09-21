@@ -34,7 +34,9 @@ impl Fixture {
             executable: self.root.join("zellij"),
             session: "test session".into(),
             pane_id: 7,
-            timeout: Duration::from_millis(200),
+            // Allow for process startup and scheduling delays on CI runners.
+            // Tests of deadline behavior opt into a short timeout explicitly.
+            timeout: Duration::from_secs(2),
         }
     }
 }
@@ -108,7 +110,9 @@ fn malformed_or_missing_pane_information_never_targets_neighbor() {
 #[cfg(unix)]
 fn no_response_is_unknown_and_not_safe_to_retry() {
     let f = Fixture::new("timeout", "while :; do :; done");
-    let result = f.host().launch("/tmp", &tool());
+    let mut host = f.host();
+    host.timeout = Duration::from_millis(200);
+    let result = host.launch("/tmp", &tool());
     assert!(matches!(result, Err(Failure::Unknown(_))), "{result:?}");
 }
 #[test]
@@ -140,8 +144,10 @@ fi"#,
 #[cfg(unix)]
 fn persistently_empty_pane_response_obeys_the_deadline() {
     let f = Fixture::new("empty-response", "exit 0");
+    let mut host = f.host();
+    host.timeout = Duration::from_millis(200);
     let started = std::time::Instant::now();
-    let result = f.host().origin();
+    let result = host.origin();
     assert!(matches!(result, Err(Failure::Unknown(_))), "{result:?}");
     assert!(started.elapsed() < Duration::from_millis(800));
 }
@@ -173,8 +179,10 @@ fn supported_versions() {
 #[cfg(unix)]
 fn command_output_deadline_includes_inherited_pipes() {
     let f = Fixture::new("pipe-timeout", "/bin/sleep 1 &\nexit 0");
+    let mut host = f.host();
+    host.timeout = Duration::from_millis(200);
     let started = std::time::Instant::now();
-    let result = f.host().launch("/tmp", &tool());
+    let result = host.launch("/tmp", &tool());
     assert!(matches!(result, Err(Failure::Unknown(_))), "{result:?}");
     assert!(started.elapsed() < Duration::from_millis(800));
 }
