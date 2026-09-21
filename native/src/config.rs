@@ -1,0 +1,151 @@
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
+};
+use zellij_launchpad_core::{
+    app::App,
+    commands::{Command, Commands, Tool},
+    theme::Theme,
+};
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    commands: Vec<toml::Value>,
+    theme: BTreeMap<String, String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Definition {
+    id: String,
+    label: Option<String>,
+    executable: String,
+    #[serde(default)]
+    arguments: Vec<String>,
+}
+impl Config {
+    pub fn load(path: &Path, explicit: bool) -> Result<Self, String> {
+        use std::io::Read;
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(e) if !explicit && e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(e) => return Err(format!("Cannot read config {}: {e}", path.display())),
+        };
+        let mut text = String::new();
+        file.take(1024 * 1024 + 1)
+            .read_to_string(&mut text)
+            .map_err(|e| e.to_string())?;
+        if text.len() > 1024 * 1024 {
+            return Err("Config exceeds 1 MiB".into());
+        }
+        toml::from_str(&text).map_err(|e| format!("Invalid config {}: {e}", path.display()))
+    }
+    pub fn apply(self, app: &mut App) {
+        let mut commands = Commands::default();
+        let mut seen = HashSet::new();
+        for value in self.commands {
+            let definition: Definition = match value.try_into() {
+                Ok(d) => d,
+                Err(e) => {
+                    commands.errors.push(format!("Command: {e}"));
+                    continue;
+                }
+            };
+            if !seen.insert(definition.id.clone()) {
+                continue;
+            }
+            if seen.len() > 64 {
+                commands
+                    .errors
+                    .push("commands exceeds 64 unique IDs; remaining entries skipped".into());
+                break;
+            }
+            match definition.validate() {
+                Ok(command) => commands.entries.push(command),
+                Err(error) => commands.errors.push(error),
+            }
+        }
+        app.commands = commands;
+        let known = [
+            "background",
+            "surface",
+            "raised",
+            "border",
+            "text",
+            "muted",
+            "accent",
+            "on_accent",
+            "error",
+        ];
+        let values = self
+            .theme
+            .iter()
+            .map(|(k, v)| (format!("theme_{k}"), v.clone()))
+            .collect();
+        (app.theme, app.theme_errors) = Theme::parse(&values);
+        for key in self.theme.keys().filter(|k| !known.contains(&k.as_str())) {
+            app.theme_errors
+                .push(format!("Unknown theme colour: {key}"));
+        }
+    }
+}
+impl Definition {
+    fn validate(self) -> Result<Command, String> {
+        let fail = |s| format!("{}: {s}", self.id);
+        let id = Tool::new(&self.id).ok_or_else(|| fail("invalid command ID"))?;
+        if id == Tool::Shell {
+            return Err(fail("shell is reserved for Zellij's default shell"));
+        }
+        if self.executable.trim().is_empty()
+            || self.executable.len() > 4096
+            || self.executable.chars().any(char::is_control)
+        {
+            return Err(fail(
+                "require an executable of at most 4096 bytes without controls",
+            ));
+        }
+        if self.arguments.len() > 256
+            || self.arguments.iter().map(String::len).sum::<usize>() > 16384
+            || self.arguments.iter().any(|a| a.contains('\0'))
+        {
+            return Err(fail(
+                "arguments: maximum 256 arguments / 16384 bytes, no NUL",
+            ));
+        }
+        let label = self.label.as_deref().unwrap_or(&self.id);
+        if label.trim().is_empty() || label.len() > 256 || label.chars().any(char::is_control) {
+            return Err(fail(
+                "label: require nonempty text, at most 256 bytes, no controls",
+            ));
+        }
+        Ok(Command {
+            id,
+            label: label.into(),
+            executable: Some(self.executable),
+            arguments: self.arguments,
+        })
+    }
+}
+pub fn xdg_path(variable: &str, fallback: &str, home: &Path) -> PathBuf {
+    std::env::var_os(variable)
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(fallback))
+        .join("zellij-launchpad")
+}
+
+/// HOME remains an explicit override; Windows normally supplies USERPROFILE.
+pub fn home_from_env(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let get = |key| get(key).filter(|value| !value.is_empty());
+    get("HOME")
+        .or_else(|| get("USERPROFILE"))
+        .or_else(|| {
+            let mut home = get("HOMEDRIVE")?;
+            home.push(get("HOMEPATH")?);
+            Some(home)
+        })
+        .map(PathBuf::from)
+}

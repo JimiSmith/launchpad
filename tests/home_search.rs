@@ -398,7 +398,13 @@ fn bounded_scan_reports_limits_and_read_errors() {
     tree.dir("a/b/c");
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     index.limits.max_directories = 1;
-    index.step(100);
+    // A slice may yield on its time budget before reaching the directory cap.
+    for _ in 0..1000 {
+        if !index.is_scanning() {
+            break;
+        }
+        index.step(100);
+    }
     assert!(!index.is_scanning());
     assert_eq!(index.dirs.len(), 1);
     assert!(index.status().contains("limit"));
@@ -577,11 +583,14 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
 #[test]
 fn search_status_uses_readable_text_color_not_separator_color() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{app::App, theme::MUTED, view};
+    use zellij_launchpad_core::{app::App, theme::Theme, view};
     let app = App::default();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|f| view::render(f, &app)).unwrap();
-    assert_eq!(terminal.backend().buffer()[(2, 10)].fg, MUTED);
+    assert_eq!(
+        terminal.backend().buffer()[(2, 10)].fg,
+        Theme::default().muted
+    );
 }
 
 #[test]

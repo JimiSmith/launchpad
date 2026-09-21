@@ -1,4 +1,4 @@
-//! Shared persistent history for the real Zellij adapter.
+//! Shared persistent history in the native XDG state directory.
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -113,7 +113,10 @@ impl Store {
             .enumerate()
         {
             if n >= 128 {
-                return Err("History cache exceeds 128 files; remove cache to recover".into());
+                return Err(
+                    "History state exceeds 128 files; move the state directory aside to recover"
+                        .into(),
+                );
             }
             let file = file.map_err(|e| e.to_string())?;
             let name = file.file_name();
@@ -251,7 +254,10 @@ impl Store {
 
         for (n, file) in dir.enumerate() {
             if n >= 128 {
-                return Err("History journal exceeds 128 files; remove cache to recover".into());
+                return Err(
+                    "History journal exceeds 128 files; move the state directory aside to recover"
+                        .into(),
+                );
             }
             let path = file.map_err(|e| e.to_string())?.path();
             // Another writer may garbage-collect a redundant immutable record.
@@ -266,20 +272,17 @@ impl Store {
             file.take(32769)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            if bytes.len() <= 32768 {
-                if let Ok(event) = serde_json::from_slice::<Event>(&bytes) {
-                    if event.version == 2
-                        && valid_token(&event.id)
-                        && path.file_name().and_then(|s| s.to_str())
-                            == Some(&format!("{}.json", event.id))
-                        && event
-                            .entry
-                            .as_ref()
-                            .is_none_or(|e| valid_entry(e) && e.id == event.id)
-                    {
-                        entries.push(event);
-                    }
-                }
+            if bytes.len() <= 32768
+                && let Ok(event) = serde_json::from_slice::<Event>(&bytes)
+                && event.version == 2
+                && valid_token(&event.id)
+                && path.file_name().and_then(|s| s.to_str()) == Some(&format!("{}.json", event.id))
+                && event
+                    .entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.id == event.id && valid_entry(entry))
+            {
+                entries.push(event);
             }
         }
         Ok(entries)
@@ -329,9 +332,11 @@ mod tests {
             store.record(row.clone()).unwrap();
             assert_eq!(store.refresh(&format!("read-{n}")).unwrap()[0], row);
         }
-        assert!(store
-            .record(entry(3, r"C:\Users\Ada\..\outside", Tool::Shell))
-            .is_err());
+        assert!(
+            store
+                .record(entry(3, r"C:\Users\Ada\..\outside", Tool::Shell))
+                .is_err()
+        );
     }
     #[test]
     fn arbitrary_stable_command_identity_roundtrips_without_executable_data() {

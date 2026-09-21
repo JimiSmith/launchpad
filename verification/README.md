@@ -1,18 +1,11 @@
 # Verification records
 
-Dated evidence from bounded, isolated verification runs. Each record describes
-the build it was produced from, not necessarily the current one.
+[Native migration results](native/REPORT.md).
 
-- `plugin-only/` — the current record: the plugin-only refactor (2026-09-20),
-  covering build gates and the live-host suites that were re-run.
-- `async/` — the asynchronous worker migration, including the only performance
-  measurements taken on this host. Referenced from
-  [docs/async-workers.md](../docs/async-workers.md).
-- `versions.json` — pinned toolchain and Ratatui provenance.
+Current native checks run through `bash tools/verify_native.sh`. Unit/check logs
+and live PTY evidence are generated under `target/`; sessions use disposable HOME,
+PATH, XDG state/config and sockets, with harmless fixture executables.
 
-`async/` holds verbatim captured logs and JSON from runs that predate the crate
-rename, so they name `zellij-launchpad-prototype` and `launchpad-plugin.wasm`.
-That is the historical record and is left unedited.
-
-Records of the removed native binary and of the fixture-only demo plugin were
-deleted once both were removed from the codebase; `git log` retains them.
+The `plugin-only/` and `async/` directories are historical plugin evidence. Their
+logs and measurements predate the native migration and do not describe the native
+runtime. They are retained unedited for provenance.

@@ -107,9 +107,9 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_bytes: 6 * 1024 * 1024,
-            max_directories: 20_000,
-            max_entries: 200_000,
+            max_bytes: 60 * 1024 * 1024,
+            max_directories: 200_000,
+            max_entries: 2_000_000,
             max_depth: 64,
         }
     }
@@ -137,7 +137,7 @@ impl std::fmt::Debug for HomeIndex {
     }
 }
 impl HomeIndex {
-    /// `home` is the host path; `root` is its filesystem mapping (/host in WASI).
+    /// `home` is the displayed path; `root` is its filesystem root (normally identical).
     pub fn new(home: PathBuf, root: PathBuf) -> Result<Self, String> {
         if home.to_str().and_then(crate::host_path::HostPath::parse)
             .is_none_or(|p| !p.is_home())
@@ -223,7 +223,7 @@ impl HomeIndex {
     }
     /// Bound returned entries and cooperate between iterator calls. One next()
     /// can consume many ignored entries or block in IO; this is not a syscall
-    /// or hard time budget. The plugin calls this only inside its serial worker.
+    /// or hard time budget. The native adapter calls this inside its background worker.
     pub fn step(&mut self, budget: usize) {
         if budget == 0 {
             return;

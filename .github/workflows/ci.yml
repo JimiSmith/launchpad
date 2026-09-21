@@ -27,40 +27,43 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-
-      - name: Install pinned Rust and WASI target
-        run: |
-          # rust-toolchain.toml pins the channel plus rustfmt and clippy, and
-          # rustup installs all of it on first use in this directory.
-          rustup show active-toolchain
-          rustup target add wasm32-wasip1
-          rustup component list --installed
-
-      - name: Cache cargo registry and build output
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Cache Cargo
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-
-      - name: Formatting
-        run: cargo fmt --all --check
-
-      - name: Tests
-        run: cargo test --workspace --locked
-
-      - name: Clippy (host, all targets)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Clippy (wasm32-wasip1)
-        run: cargo clippy -p zellij-launchpad --target wasm32-wasip1 --locked -- -D warnings
-
-      - name: Release WASM builds
-        run: cargo build --locked --release -p zellij-launchpad --target wasm32-wasip1
-
-      - name: Plugin artifact depends on no terminal backend
+          key: ${{ runner.os }}-native-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Install verification dependencies
+        if: runner.os == 'Linux'
         run: |
-          cargo tree -p zellij-launchpad --target wasm32-wasip1 --locked --edges normal > wasm-deps.txt
-          ! grep -q crossterm wasm-deps.txt
+          python3 -m venv target/verification-venv
+          target/verification-venv/bin/pip install pyte==0.8.2
+          mkdir -p target/zellij-bin
+          curl --fail --location --retry 3 https://github.com/zellij-org/zellij/releases/download/v0.45.1/zellij-x86_64-unknown-linux-musl.tar.gz -o target/zellij.tar.gz
+          curl --fail --location --retry 3 https://github.com/zellij-org/zellij/releases/download/v0.45.1/zellij-x86_64-unknown-linux-musl.sha256sum -o target/zellij.sha256sum
+          tar -xzf target/zellij.tar.gz -C target/zellij-bin
+          awk '{print $1 "  target/zellij-bin/zellij"}' target/zellij.sha256sum | sha256sum --check
+          echo "$PWD/target/zellij-bin" >> "$GITHUB_PATH"
+      - name: Native build, tests, lints and isolated live launches
+        if: runner.os == 'Linux'
+        run: bash tools/verify_native.sh
+      - name: Windows build, tests and lints
+        if: runner.os == 'Windows'
+        run: |
+          cargo fmt --all --check
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo build --release --locked -p zellij-launchpad
+      - name: Retain failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-verification-${{ runner.os }}
+          path: |
+            target/native-*/screen.txt
+            target/native-*/session.ansi
+            target/native-*/executions.jsonl

@@ -1,5 +1,5 @@
-//! Host paths are data: WASI's `std::path` always uses Unix rules, even when
-//! Zellij runs on Windows. Only paths inside the sandbox use `std::path`.
+//! Parse host paths consistently across build targets. This keeps Windows and
+//! Unix path labels, history, and search independent of the test host's rules.
 #[derive(Debug, Clone)]
 pub struct HostPath {
     root: String,

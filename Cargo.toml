@@ -1,13 +1,13 @@
 [package]
 name = "zellij-launchpad-core"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.98.1"
 publish = false
 
 [workspace]
-members = ["plugin"]
-default-members = ["."]
+members = ["native"]
+default-members = [".", "native"]
 resolver = "2"
 
 [dependencies]
@@ -20,11 +20,7 @@ unicode-width = "0.2"
 unicode-normalization = "0.1"
 
 [profile.release]
-# Measured on an 18,100-directory HOME: fat LTO with one codegen unit is 12%
-# smaller than thin/16 with no latency cost, and makes the artifact
-# reproducible, which thin LTO across parallel units is not. opt-level "s"
-# would save a further 21% but costs 25% on suggestion latency, because the
-# matcher scores every indexed path on each search.
+# Optimize directory matching for throughput.
 opt-level = 3
 lto = "fat"
 codegen-units = 1
