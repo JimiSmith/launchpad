@@ -448,7 +448,13 @@ fn skips_symlinks_and_unrepresentable_names() {
     symlink(&tree.0, tree.0.join("cycle")).unwrap();
     symlink(tree.0.join("normal"), tree.0.join("internal-link")).unwrap();
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
-    index.step(100);
+    // A slice may yield on its time budget before visiting every entry.
+    for _ in 0..1000 {
+        if !index.is_scanning() {
+            break;
+        }
+        index.step(100);
+    }
     assert!(!index.is_scanning());
     assert_eq!(
         index.dirs.len(),
@@ -590,7 +596,14 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
     let mut app = App::from_home(tree.0.clone(), tree.0.clone());
     // Recording in memory keeps one recent row for section-navigation coverage.
     app.simulate_launch = true;
-    app.index_tick();
+    // Initialization may use a whole time slice before producing suggestions.
+    for _ in 0..1000 {
+        app.index_tick();
+        if !app.suggestions.is_empty() {
+            break;
+        }
+    }
+    assert!(!app.suggestions.is_empty());
     assert!(app.is_indexing());
     app.update(Action::Escape);
     app.index_tick();

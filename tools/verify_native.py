@@ -112,15 +112,24 @@ for line in sys.stdin:
 ''')
         path.chmod(0o700)
 
-    def cli(self, *args, check=True):
+    def cli(self, *args, check=True, timeout=8):
         result = subprocess.run([ZELLIJ, '--session', self.name, *args], env=self.env,
-                                cwd=self.home, capture_output=True, text=True, timeout=8)
+                                cwd=self.home, capture_output=True, text=True, timeout=timeout)
         if check:
             assert result.returncode == 0, (args, result.stdout, result.stderr)
         return result
 
     def panes(self):
-        return json.loads(self.cli('action', 'list-panes', '--all', '--json').stdout)
+        deadline = time.monotonic() + 8
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, 'Zellij list-panes returned only empty responses'
+            output = self.cli('action', 'list-panes', '--all', '--json', timeout=remaining).stdout
+            if output.strip():
+                return json.loads(output)
+            # Zellij can return an empty successful response during startup.
+            # Retry only this read, within the original command timeout.
+            self.pump(min(.02, max(0, deadline - time.monotonic())))
 
     def pump(self, seconds=.1):
         end = time.monotonic() + seconds
@@ -344,15 +353,43 @@ def history_and_layout_cases():
         # Exercise the shipped native layout and the same shared state directory.
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
         s.expect('HOME indexed')
-        s.send('\x12\t')  # copy the remembered path + command from history
-        s.expect('~/space')
-        s.expect('[ Fixture ]')
-        s.send('\x12\x1b[3~')
-        s.pump(.2)
-        assert not json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())['entries']
+        s.expect('Recent launches · 1 events')
+        assert any('Fixture' in line and '~/space 修理 literal' in line
+                   for line in s.screen.display), s.display()
+        s.expect('[ Shell ]')
+        input_before = next(line for line in s.screen.display if '│ › ' in line)
+        tools_before = next(line for line in s.screen.display if '[ Shell ]' in line)
+        records_before = s.records()
+        s.send('\x12')
+        s.expect('RECENT Tab next')
+        s.send('\t')  # Tab changes sections without copying or replaying history.
+        s.expect('PATH Tab next')
+        assert next(line for line in s.screen.display if '│ › ' in line) == input_before, s.display()
+        assert next(line for line in s.screen.display if '[ Shell ]' in line) == tools_before, s.display()
+        assert s.records() == records_before, s.records()
+
+        # Replay must use the remembered directory and command, not the current form.
+        s.send('\x12\r')
+        s.expect('FIXTURE_READY')
+        records = s.records()
+        assert len(records) == len(records_before) + 1, records
+        assert records[-1]['exe'] == 'fixture', records
+        assert records[-1]['cwd'] == str(s.cwd), records
+        assert records[-1]['argv'] == ['a b', '', '$HOME', ';', '$(touch NO_EXPANSION)'], records
+        launched = next(p for p in s.panes() if not p['is_plugin'] and p['title'] != 'neighbor')
+        s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
+        s.pump(.3)
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/configured.kdl'))
         s.expect('HOME indexed')
-        print('PASS shipped layouts, history reopen/copy/delete', flush=True)
+        s.expect('Recent launches · 1 events')
+        s.send('\x12\x1b[3~')
+        s.expect('No recent launches. Choose a directory.')
+        assert not json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())['entries']
+        s.screen.reset()  # Reopen assertions must observe the new launcher's render.
+        s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
+        s.expect('HOME indexed')
+        s.expect('No recent launches. Choose a directory.')
+        print('PASS shipped layouts, history reopen/section switch/replay/delete', flush=True)
     finally:
         s.close()
     s = Session(only=True, outside=True)
