@@ -65,6 +65,9 @@ impl Zellij {
         Ok(host)
     }
     fn call(&self, args: &[String]) -> Result<String, Failure> {
+        self.call_until(args, Instant::now() + self.timeout)
+    }
+    fn call_until(&self, args: &[String], deadline: Instant) -> Result<String, Failure> {
         let mut child = Command::new(&self.executable)
             .args(["--session", &self.session])
             .args(args)
@@ -84,7 +87,6 @@ impl Zellij {
         thread::spawn(move || {
             let _ = error_tx.send((true, read_output(stderr)));
         });
-        let deadline = Instant::now() + self.timeout;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
@@ -120,7 +122,22 @@ impl Zellij {
         Ok(stdout)
     }
     pub fn origin(&self) -> Result<Pane, Failure> {
-        let output = self.call(&["action".into(), "list-panes".into(), "--json".into()])?;
+        let deadline = Instant::now() + self.timeout;
+        let args = ["action".into(), "list-panes".into(), "--json".into()];
+        let output = loop {
+            let output = self.call_until(&args, deadline)?;
+            if !output.trim().is_empty() || Instant::now() >= deadline {
+                break output;
+            }
+            // Zellij can return an empty response while its session starts.
+            // Retry only this read, sharing the original command deadline.
+            thread::sleep(
+                Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+            );
+            if Instant::now() >= deadline {
+                break output;
+            }
+        };
         let panes: Vec<Pane> = serde_json::from_str(&output)
             .map_err(|e| Failure::Unknown(format!("Invalid Zellij pane response: {e}")))?;
         panes
