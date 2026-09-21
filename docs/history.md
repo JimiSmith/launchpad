@@ -1,7 +1,9 @@
-# Shared recent directories (native)
+# Shared recent launches (native)
 
-Launchpad remembers **ten unique absolute directories**, newest first,
-and the last selected tool for each. It loads history at startup and F5.
+Launchpad remembers **ten unique tool–directory pairs**, newest first.
+Each pair uses the stable command ID and exact validated absolute path.
+Launching the same pair again refreshes its recency; different tools in the same
+directory remain separate entries. It loads history at startup and F5.
 The initial tool remains Shell; replay or copying a history row explicitly selects its remembered tool.
 Ages are derived from stored UTC Unix seconds on load/refresh, not reset to now.
 The existing keyboard/mouse layout and directory validation are unchanged.
@@ -37,7 +39,7 @@ the CLI reply, so this is not a claim that the command started, authenticated,
 or completed successfully. Pre-validation failures create no record. A known
 Shell rejection or correlated agent rejection removes only that attempt ID; it
 never restores an old entire snapshot over concurrent updates. Removal does not
-restore entries already evicted by deduplication/the ten-directory cap. Unknown
+restore entries already evicted by deduplication/the ten-pair cap. Unknown
 outcomes can remain. Nonzero command exits do not erase history.
 
 History failures never prevent the host launch call. A save failure is logged
@@ -59,9 +61,9 @@ Instead:
    flush with `sync_all`, then publish with a same-filesystem rename. Clear is
    a record with no entry. There is no shared lock, lease, sleep, or owner cleanup.
 3. Read valid immutable records, sort newest first, stop at the latest clear,
-   deduplicate by exact validated path, and retain at most ten directory rows.
+   deduplicate by command ID plus exact validated path, and retain at most ten pairs.
 4. Atomically replace `history.json` with this projection. Prune only observed
-   records superseded by a newer same-path record, ten newer distinct paths, or
+   records superseded by a newer record for the same pair, ten newer distinct pairs, or
    a newer clear. Never delete files absent from the collected snapshot.
 5. Delete/rejection unlinks only the selected operation ID, then rematerializes.
    Refresh/reopen merges the journal and repairs a stale/missing/corrupt projection.
@@ -77,7 +79,7 @@ is not a transaction and is not a backup/restore mechanism.
 
 ## Bounds, faults, and filesystem policy
 
-- After quiescent compaction: at most ten directory records plus one clear marker.
+- After quiescent compaction: at most ten tool–directory records plus one clear marker.
   Concurrent in-flight operations temporarily add records.
 - Each journal scan and temporary-file scan stops at 128 directory entries; each
   journal file is read with a 32 KiB cap before parsing. Generated projection size

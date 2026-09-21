@@ -294,7 +294,7 @@ impl Store {
         let mut seen = std::collections::HashSet::new();
         for event in events {
             if let Some(entry) = &event.entry {
-                if seen.len() < 10 && seen.insert(entry.path.clone()) {
+                if seen.len() < 10 && seen.insert((entry.tool, entry.path.clone())) {
                     kept.push(event);
                 }
             } else {
@@ -492,7 +492,7 @@ mod tests {
         store.record(other.clone()).unwrap();
         store.record(newest.clone()).unwrap();
         let journal = store.root.join("history.d");
-        let old = entry(1, "/fixture/a", Tool::Shell);
+        let old = entry(1, "/fixture/a", newest.tool);
         let obsolete = journal.join(format!("{}.json", old.id));
         // A published record left behind before another writer's compaction.
         fs::write(
@@ -690,7 +690,7 @@ mod tests {
         }
     }
     #[test]
-    fn ten_unique_directories_keep_the_latest_tool_and_order() {
+    fn ten_unique_tool_directory_pairs_keep_the_latest_attempt_and_order() {
         let store = fixture("bounded");
         for n in 1..=12 {
             store
@@ -714,13 +714,37 @@ mod tests {
                 "/fixture/11",
                 "/fixture/10",
                 "/fixture/9",
+                "/fixture/8",
                 "/fixture/7",
                 "/fixture/6",
                 "/fixture/5",
-                "/fixture/4",
-                "/fixture/3"
+                "/fixture/4"
             ]
         );
+    }
+    #[test]
+    fn tools_share_a_directory_and_repeated_pairs_refresh_independently() {
+        let store = fixture("tool-directory-pairs");
+        let shell = entry(1, "/fixture/shared", Tool::Shell);
+        let codex = entry(2, "/fixture/shared", Tool::new("codex").unwrap());
+        let other = entry(3, "/fixture/other", codex.tool);
+        for row in [&shell, &codex, &other] {
+            store.record(row.clone()).unwrap();
+        }
+        let latest_shell = entry(4, &shell.path, shell.tool);
+        store.record(latest_shell.clone()).unwrap();
+        let expected = vec![latest_shell.clone(), other.clone(), codex.clone()];
+        let reopened = Store::new(&store.root);
+        assert_eq!(reopened.refresh("refresh-pairs").unwrap(), expected);
+        let snapshot: Snapshot =
+            serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap()).unwrap();
+        assert_eq!(snapshot.entries, expected);
+        assert_eq!(
+            fs::read_dir(store.root.join("history.d")).unwrap().count(),
+            3
+        );
+        reopened.remove(&latest_shell.id, "remove-pair").unwrap();
+        assert_eq!(reopened.read().unwrap(), vec![other, codex]);
     }
     #[test]
     fn real_store_survives_a_new_reader_with_timestamp_and_tool() {

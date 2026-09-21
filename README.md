@@ -138,7 +138,7 @@ history paths are never truncated. Index limits are 200,000 directories,
 traversal, and validation run on a bounded background worker so input remains
 responsive. [Search policy](docs/home-search.md).
 
-Recent history remembers ten unique directories and their last command IDs under
+Recent history remembers ten unique command ID–directory pairs under
 `$XDG_STATE_HOME/zellij-launchpad` (fallback `~/.local/state/zellij-launchpad`).
 It is shared across panes and sessions. F5 reloads other instances' changes.
 Replay uses the current configuration; removed IDs remain unavailable.

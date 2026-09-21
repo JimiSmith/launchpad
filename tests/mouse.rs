@@ -59,6 +59,7 @@ fn click_label(app: &mut App, w: u16, h: u16, label: &str) {
 fn history_click_selects_only_then_copy_or_replay_is_explicit() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         let mut app = app();
+        app.history[9].path = "/home/example/it's literal; $HOME".into();
         app.recent = 9;
         app.update(Action::Escape); // dismiss completions before choosing a history path
         click_label(&mut app, w, h, "it's");

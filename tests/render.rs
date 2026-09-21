@@ -159,8 +159,31 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
 }
 
 #[test]
+fn recent_tool_column_fits_twenty_characters_before_the_directory() {
+    let mut a = app();
+    a.history.truncate(1);
+    a.history[0].path = "/home/example/recent".into();
+    let tool = a.history[0].tool;
+    a.commands
+        .entries
+        .iter_mut()
+        .find(|c| c.id == tool)
+        .unwrap()
+        .label = "12345678901234567890".into();
+    for (w, h) in [(40, 10), (40, 12), (80, 24), (120, 36)] {
+        let b = draw(&a, w, h);
+        let rendered = text(&b);
+        assert!(
+            rendered.contains("12345678901234567890 ~/recent"),
+            "{w}x{h}: {rendered}"
+        );
+    }
+}
+
+#[test]
 fn minimum_usable_view_keeps_selected_history_visible() {
     let mut a = app();
+    a.history.last_mut().unwrap().path = "/home/example/literal".into();
     a.update(Action::Focus(Focus::History));
     a.update(Action::End);
     let s = text(&draw(&a, 40, 10));
@@ -201,6 +224,7 @@ fn dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes() {
 #[test]
 fn narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls() {
     let mut a = app();
+    a.history.last_mut().unwrap().path = "/home/example/literal".into();
     a.update(Action::Focus(Focus::History));
     a.update(Action::End);
     let s = text(&draw(&a, 40, 12));

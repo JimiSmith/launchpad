@@ -808,6 +808,8 @@ impl App {
                 self.tool_label(tool),
                 self.path_label(&event.path)
             ));
+            self.history
+                .retain(|row| row.tool != event.tool || row.path != event.path);
             self.history.insert(0, event);
             self.history.truncate(10);
             self.recent = 0;
@@ -988,6 +990,20 @@ mod tests {
         }
         assert_eq!(a.history.len(), 10, "in-memory history keeps the same cap");
         assert!(a.history.windows(2).all(|w| w[0].id > w[1].id));
+    }
+
+    #[test]
+    fn simulated_history_deduplicates_tool_directory_pairs() {
+        let mut a = app();
+        a.simulate_launch = true;
+        for id in ["shell", "codex", "shell"] {
+            a.finish_launch("/home/example/notes".into(), tool(id));
+        }
+        assert_eq!(a.history.len(), 2);
+        assert_eq!(a.history[0].tool, Tool::Shell);
+        assert_eq!(a.history[0].id, 3);
+        assert_eq!(a.history[1].tool, tool("codex"));
+        assert_eq!(a.history[1].id, 2);
     }
 
     #[test]

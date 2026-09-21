@@ -334,7 +334,7 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
             "unavailable marker must survive tool clipping at {w}x{h}"
         );
         assert_eq!(
-            frame.buffer[(x + 12, y)].symbol(),
+            frame.buffer[(x + 24, y)].symbol(),
             "~",
             "status must not shift directory cells"
         );

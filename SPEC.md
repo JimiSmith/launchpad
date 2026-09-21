@@ -14,7 +14,7 @@ Implementation contracts:
 - [Native build and release packaging](docs/releases.md)
 
 Preserve the existing centered dashboard, keyboard/mouse controls, Unicode input,
-HOME-only search policy, exact invoking-cwd exception, ten-directory history,
+HOME-only search policy, exact invoking-cwd exception, ten-pair tool–directory history,
 stable command IDs and close-on-exit tool lifecycle. Configuration lives outside
 Zellij in XDG TOML; history lives in XDG state. Existing plugin caches are untouched.
 

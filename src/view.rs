@@ -628,11 +628,18 @@ fn history_row(
 ) {
     let theme = f.theme;
     row(f, Rect::new(a.x, a.y, 3, 1), marker, style.fg(theme.muted));
-    row(f, Rect::new(a.x + 3, a.y, 9, 1), tool, style);
+    let tool_width = 20;
+    let path_offset = 3 + tool_width + 1;
+    row(f, Rect::new(a.x + 3, a.y, tool_width, 1), tool, style);
     let age_width = if show_age { 12 } else { 0 };
     row(
         f,
-        Rect::new(a.x + 12, a.y, a.width.saturating_sub(12 + age_width), 1),
+        Rect::new(
+            a.x + path_offset,
+            a.y,
+            a.width.saturating_sub(path_offset + age_width),
+            1,
+        ),
         path,
         style,
     );
