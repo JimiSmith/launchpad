@@ -11,6 +11,13 @@ including nested rules and negation. It does not consult global Git excludes.
 Hidden directories, `.git` and `node_modules` are pruned; similarly named paths
 such as `node_modules_backup` remain eligible. Symlinks are not followed.
 
+Dot-prefixed entries are hidden on every platform. On Windows, the native walker
+also checks `FILE_ATTRIBUTE_HIDDEN`; hidden entries and their descendants are
+pruned before loading their ignore rules or consuming entry/index budgets.
+Ignore-file negations cannot reveal them. HOME itself is always scanned even if
+it has the Hidden attribute. F5 rebuilds the index and rechecks attributes;
+explicit hidden paths remain valid launch targets.
+
 Traversal cooperatively yields after at most 128 entries or its existing 5 ms
 budget. Limits are 200,000 retained directories, 2,000,000 visited entries,
 depth 64 and 60 MiB of estimated retained path/ignore-rule memory. The UI reports

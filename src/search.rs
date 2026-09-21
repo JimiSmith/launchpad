@@ -10,6 +10,21 @@ use std::{
 };
 mod ignore_rules;
 
+#[cfg(windows)]
+fn hidden_attribute(entry: &ignore::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    // If metadata is unavailable, do not descend into an unclassified entry.
+    entry.metadata().map_or(true, |metadata| {
+        metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+    })
+}
+
+#[cfg(not(windows))]
+fn hidden_attribute(_entry: &ignore::DirEntry) -> bool {
+    false
+}
+
 /// Lexical only: never consults the host, a shell or the invoking directory.
 /// Relative input resolves against HOME, which is also the only search root.
 pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
@@ -255,7 +270,8 @@ impl HomeIndex {
                             name != "node_modules"
                                 && !name.starts_with('.')
                                 && !name.chars().any(char::is_control)
-                        }) && rules.lock().expect("serial rule matcher").allows(entry)
+                        }) && !hidden_attribute(entry)
+                            && rules.lock().expect("serial rule matcher").allows(entry)
                 });
             self.walker = Some(builder.build());
         }

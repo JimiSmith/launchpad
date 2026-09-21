@@ -23,6 +23,29 @@ impl Tree {
     fn dir(&self, path: &str) {
         fs::create_dir_all(self.0.join(path)).unwrap();
     }
+    #[cfg(windows)]
+    fn hidden(&self, path: &str, hidden: bool) {
+        use std::os::windows::fs::MetadataExt;
+        let path = if path.is_empty() {
+            self.0.clone()
+        } else {
+            self.0.join(path)
+        };
+        let result = std::process::Command::new("attrib.exe")
+            .arg(if hidden { "+H" } else { "-H" })
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::metadata(path).unwrap().file_attributes() & 0x2 != 0,
+            hidden
+        );
+    }
 }
 impl Drop for Tree {
     fn drop(&mut self) {
@@ -238,6 +261,79 @@ fn project_ignore_rules_apply_without_git_metadata_with_nested_negation() {
     );
     assert_eq!(index.status(), "HOME indexed · 6 dirs · F5 refresh");
     assert!(index.validate("~/project/build/cache").is_ok());
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_hidden_attributes_prune_subtrees_before_rules_and_limits() {
+    let tree = Tree::new();
+    for parent in ["AppData", "project/secret"] {
+        for i in 0..20 {
+            tree.dir(&format!("{parent}/descendant-{i}/nested"));
+        }
+        // A pruned directory's rules must not consume the index memory budget.
+        fs::write(
+            tree.0.join(parent).join(".ignore"),
+            "pattern\n".repeat(20_000),
+        )
+        .unwrap();
+        tree.hidden(parent, true);
+    }
+    tree.dir("visible");
+    tree.dir("project/visible");
+    fs::write(tree.0.join(".ignore"), "!AppData/\n!project/secret/\n").unwrap();
+    let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
+    index.limits.max_entries = 4;
+    index.limits.max_bytes = 16 * 1024;
+    while index.is_scanning() {
+        index.step(128);
+    }
+    let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            "/logical/home/project",
+            "/logical/home/project/visible",
+            "/logical/home/visible"
+        ]
+    );
+    assert_eq!(index.status(), "HOME indexed · 3 dirs · F5 refresh");
+    assert_eq!(
+        index.validate("~/AppData/descendant-0").unwrap(),
+        "/logical/home/AppData/descendant-0"
+    );
+    assert!(index.validate("~/project/secret/descendant-0").is_ok());
+}
+
+#[test]
+#[cfg(windows)]
+fn hidden_windows_home_is_scanned_and_refresh_rechecks_attributes() {
+    let tree = Tree::new();
+    tree.dir("ordinary/nested");
+    tree.hidden("", true);
+    let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(index.dirs.len(), 2, "HOME itself must remain traversable");
+    tree.hidden("ordinary", true);
+    index = index.restart();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert!(index.dirs.is_empty());
+    assert!(index.validate("~/ordinary/nested").is_ok());
+    tree.hidden("ordinary", false);
+    index = index.restart();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    assert_eq!(
+        index.dirs.len(),
+        2,
+        "unhidden directories return after refresh"
+    );
 }
 
 #[test]
