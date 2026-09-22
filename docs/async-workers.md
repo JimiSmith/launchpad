@@ -9,8 +9,12 @@ and checks demand between slices. It publishes progress at most every 100 ms,
 plus completion immediately. Matching returns at most 100 paths / 64 KiB.
 
 The UI permits one outstanding request; newer edits replace unsent demand.
-Typing/paste/deletion debounces search by 120 ms, while explicit validation bypasses
-the debounce. Epochs fence refreshes; generations and catalogue revisions reject
+The search scheduler observes the actual input text each UI iteration, including
+while a request is outstanding. Any text change restarts the 120 ms quiet period;
+there is no key/action list to maintain when adding editing commands. Cursor
+movement and unchanged input do not restart it. Explicit validation bypasses the
+delay, and F5's new refresh epoch permits immediate search of the restored form.
+Epochs fence refreshes; generations and catalogue revisions reject
 obsolete replies. Reset, help, cancellation and suggestion selection preserve the existing
 core behavior. Request and response channels are bounded.
 

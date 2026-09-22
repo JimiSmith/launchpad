@@ -107,6 +107,16 @@ interpretation. [Configuration details](docs/configured-commands.md).
 ## Controls and directory policy
 
 - Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or history.
+- In the path box: Left/Right moves one Unicode grapheme; Home/End moves to
+  the beginning/end. Ctrl+Left/Right moves by path segment; Ctrl+Backspace/Delete
+  deletes the same range to the left/right. Ctrl+H is an alias for Ctrl+Backspace
+  for terminals using the legacy encoding. Ordinary Backspace/Delete removes
+  one grapheme. Ctrl+A/E and Ctrl+U still move to the ends and clear the input.
+  Segment operations skip adjacent separators, then traverse the next segment
+  in that direction; inside a segment they traverse only its remaining text.
+  Separators are `/` on Unix and both `/` and `\` for Windows home paths.
+  Spaces and punctuation within a segment stay together; edits do not normalize
+  paths. No text selection is performed.
 - Tab / Shift+Tab cycles forward / backward through path, tools, and history.
   Type a fuzzy query; arrows select suggestions and Enter accepts.
   Enter without a highlighted suggestion launches the selected tool.

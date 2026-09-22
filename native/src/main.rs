@@ -13,6 +13,7 @@ use zellij_launchpad::{
     config::{Config, xdg_path},
     history::{self, Entry, Store},
     input,
+    search::SearchScheduler,
     terminal::Screen,
     worker::{self, Reply, Request, Worker},
     zellij::{Failure, Zellij, tab_name},
@@ -135,7 +136,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut area = ratatui::layout::Rect::default();
     let mut dirty = true;
     let mut busy: Option<(u64, Instant)> = None;
-    let mut search_due = Instant::now();
+    let mut search = SearchScheduler::new(&app, Instant::now());
     let mut mouse_after = Instant::now();
     let mut launch_unknown = matches!(shell_failure, Some(Failure::Unknown(_)));
     loop {
@@ -265,9 +266,8 @@ fn run(args: Args) -> Result<(), String> {
                 }
             }
         }
-        if busy.is_none()
-            && !launch_unknown
-            && let Some(request) = app.take_remote_request_with_search(Instant::now() >= search_due)
+        if let Some(request) =
+            search.poll(&mut app, Instant::now(), busy.is_none() && !launch_unknown)
         {
             let generation = request.generation();
             worker
@@ -323,17 +323,10 @@ fn run(args: Args) -> Result<(), String> {
                 if launch_unknown {
                     continue;
                 }
-                if matches!(
-                    action,
-                    Action::Text(_) | Action::Backspace | Action::Delete | Action::Clear
-                ) {
-                    search_due = Instant::now() + Duration::from_millis(120);
-                }
                 let reset = action == Action::Reset;
                 app.update(action);
                 if reset {
                     history.load(&mut app);
-                    search_due = Instant::now();
                 }
                 dirty = true;
             }

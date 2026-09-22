@@ -408,6 +408,65 @@ def history_and_layout_cases():
         s.close()
 
 
+def path_editing_case(s, explicit_backspace=False):
+    def expect_input(text, cursor):
+        deadline = time.monotonic() + 12
+        while True:
+            for y, line in enumerate(s.screen.display):
+                if '› ' not in line:
+                    continue
+                x = line.index('› ') + 2
+                if (line[x:].rstrip(' │') == text
+                        and (s.screen.cursor.x, s.screen.cursor.y) == (x + cursor, y)):
+                    return
+            assert time.monotonic() < deadline, f'input {text!r}, cursor {cursor}\n{s.display()}'
+            s.pump()
+
+    s.send('\x10\x15\x1b[200~foo/bar/baz\x1b[201~')
+    expect_input('foo/bar/baz', 11)
+    for keys, text, cursor in [
+        ('\x1b[1;5D', 'foo/bar/baz', 8),  # Ctrl+Left
+        ('\x1b[D', 'foo/bar/baz', 7),
+        ('\x1b[1;5D', 'foo/bar/baz', 4),
+        ('\x1b[C', 'foo/bar/baz', 5),
+        ('\x1b[1;5C', 'foo/bar/baz', 7),  # Ctrl+Right
+        ('\x1b[3;5~', 'foo/bar', 7),      # Ctrl+Delete
+        ('\x08', 'foo/', 4),             # Legacy Ctrl+Backspace / Ctrl+H
+        ('\x08', '', 0),
+    ]:
+        s.send(keys)
+        expect_input(text, cursor)
+    s.send('\x1b[200~foo/bar/baz\x1b[201~')
+    for keys, text, cursor in [
+        ('\x1b[H', 'foo/bar/baz', 0),
+        ('\x1b[1;5C', 'foo/bar/baz', 3),
+        ('\x1b[1;5C', 'foo/bar/baz', 7),
+        ('\x1b[1;5D', 'foo/bar/baz', 4),
+        ('\x1b[3;5~', 'foo//baz', 4),
+        ('\x1b[3~', 'foo/baz', 4),
+        ('\x1b[F', 'foo/baz', 7),
+        ('\x7f', 'foo/ba', 6),
+    ]:
+        s.send(keys)
+        expect_input(text, cursor)
+    if explicit_backspace:
+        s.send('\x1b[127;5u')  # Explicit Ctrl+Backspace (CSI-u).
+        expect_input('foo/', 4)
+    s.send('\x1b[15~')  # Restore initial form for subsequent checks.
+
+
+def live_path_editing_case():
+    s = Session()
+    try:
+        s.expect('HOME indexed')
+        records = s.records()
+        path_editing_case(s)
+        assert s.records() == records, 'editing must never launch a command'
+        print('PASS path editing through live Zellij', flush=True)
+    finally:
+        s.close()
+
+
 def terminal_cases():
     # Run the real native terminal adapter on a PTY with a read-only fake CLI.
     # No live server or real tool command is reachable in these checks.
@@ -445,6 +504,7 @@ esac
                                  env=env, cwd=out / 'home', preexec_fn=setup)
         try:
             s.expect('HOME indexed')
+            path_editing_case(s, explicit_backspace=True)
             s.send('\x15\x1b[200~notes\x1b[201~')
             s.expect('~/notes/')
             s.send('\x1bOP')  # F1
@@ -492,6 +552,7 @@ if __name__ == '__main__':
         probe()
     else:
         terminal_cases()
+        live_path_editing_case()
         native()
         interactive_shell_history_cases()
         recovery_cases()

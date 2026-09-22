@@ -1,5 +1,89 @@
 use zellij_launchpad_core::app::{Action, App};
 use zellij_launchpad_core::remote::RemoteRequest;
+
+#[test]
+fn segment_edits_refresh_search_but_motion_does_not() {
+    for action in [Action::DeleteSegmentLeft, Action::DeleteSegmentRight] {
+        let mut app = App::from_remote("/home/example".into());
+        app.update(Action::Clear);
+        app.update(Action::Text("foo/bar/baz".into()));
+        let old = app.take_remote_request().unwrap().generation();
+        app.update(Action::Home);
+        app.update(Action::SegmentRight);
+        app.update(Action::SegmentRight);
+        assert_eq!(app.editor.cursor, 7);
+        assert!(app.take_remote_request().is_none());
+        app.update(action.clone());
+        let expected = if action == Action::DeleteSegmentLeft {
+            "foo//baz"
+        } else {
+            "foo/bar"
+        };
+        assert_eq!(app.editor.text, expected);
+        assert!(app.touched);
+        assert!(!app.apply_remote_results(old, vec!["/home/example/stale".into()]));
+        let Some(RemoteRequest::Query { text, generation }) = app.take_remote_request() else {
+            panic!()
+        };
+        assert_eq!(text, expected);
+        assert!(generation > old);
+    }
+}
+
+#[test]
+fn segment_actions_are_ignored_outside_active_path_editor() {
+    use zellij_launchpad_core::app::Focus;
+    for (focus, help, compact) in [
+        (Focus::Tools, false, false),
+        (Focus::History, false, false),
+        (Focus::Path, true, false),
+        (Focus::Path, false, true),
+    ] {
+        let mut app = App::from_remote("/home/example".into());
+        app.editor.set("foo/bar");
+        app.focus = focus;
+        app.take_remote_request();
+        app.update(Action::LaunchForm);
+        let Some(RemoteRequest::Validate { generation, .. }) = app.take_remote_request() else {
+            panic!()
+        };
+        app.help = help;
+        app.compact = compact;
+        for action in [
+            Action::SegmentLeft,
+            Action::SegmentRight,
+            Action::DeleteSegmentLeft,
+            Action::DeleteSegmentRight,
+        ] {
+            app.update(action);
+            assert_eq!(app.editor.text, "foo/bar");
+            assert_eq!(app.editor.cursor, 7);
+            assert_eq!(app.focus, focus);
+            assert!(app.take_remote_request().is_none());
+        }
+        assert!(app.finish_remote_validation(generation, Ok("/home/example/foo/bar".into())));
+    }
+}
+
+#[test]
+fn editor_path_style_follows_home_and_survives_reset() {
+    for (home, expected) in [
+        ("/home/example", 0),
+        (r"C:\Users\example", 4),
+        (r"\\server\share\example", 4),
+    ] {
+        let mut app = App::from_remote(home.into());
+        for reset in [false, true] {
+            if reset {
+                app.update(Action::Reset);
+            }
+            app.editor.set(r"foo\bar");
+            app.update(Action::SegmentLeft);
+            assert_eq!(app.editor.cursor, expected, "{home}, reset={reset}");
+        }
+    }
+}
+
 #[test]
 fn async_search_coalesces_edits_and_rejects_dismissed_or_stale_results() {
     let mut app = App::from_remote("/home/example".into());
@@ -106,6 +190,8 @@ fn delayed_selection_survives_path_cursor_navigation() {
     for action in [
         Action::Left,
         Action::Right,
+        Action::SegmentLeft,
+        Action::SegmentRight,
         Action::Home,
         Action::End,
         Action::PathCursor(0),
@@ -143,6 +229,8 @@ fn cancelling_delayed_validation_clears_status_and_restores_search() {
             Action::Text("x".into()),
             Action::Backspace,
             Action::Delete,
+            Action::DeleteSegmentLeft,
+            Action::DeleteSegmentRight,
             Action::Clear,
             Action::ClearHistory,
         ] {
@@ -211,6 +299,8 @@ fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
         app.apply_remote_results(0, vec!["/home/example/notes".into()]);
         app.update(start.clone());
         app.update(Action::Left);
+        app.update(Action::SegmentLeft);
+        app.update(Action::SegmentRight);
         let Some(RemoteRequest::Validate { generation, .. }) = app.take_remote_request() else {
             panic!("cursor motion must preserve even an unsent validation")
         };

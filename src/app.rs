@@ -25,6 +25,10 @@ pub enum Action {
     Text(String),
     Left,
     Right,
+    SegmentLeft,
+    SegmentRight,
+    DeleteSegmentLeft,
+    DeleteSegmentRight,
     Up,
     Down,
     Home,
@@ -306,6 +310,9 @@ impl App {
     }
     pub fn from_home(home: std::path::PathBuf, root: std::path::PathBuf) -> Self {
         let mut app = Self::default();
+        if let Some(path) = home.to_str().and_then(crate::host_path::HostPath::parse) {
+            app.editor.windows_paths = path.is_windows();
+        }
         match crate::search::HomeIndex::new(home, root) {
             Ok(index) => {
                 app.search_status = index.status();
@@ -365,6 +372,16 @@ impl App {
         if self.launch_pending {
             return;
         }
+        if matches!(
+            action,
+            Action::SegmentLeft
+                | Action::SegmentRight
+                | Action::DeleteSegmentLeft
+                | Action::DeleteSegmentRight
+        ) && (self.focus != Focus::Path || self.help || self.compact)
+        {
+            return;
+        }
         // Never turn a pending completion into a launch of the old editor.
         // Likewise, repeated submit must not replace an in-flight launch request.
         if matches!(action, Action::Enter | Action::LaunchForm)
@@ -397,6 +414,8 @@ impl App {
                         | Action::Clear
                         | Action::Backspace
                         | Action::Delete
+                        | Action::DeleteSegmentLeft
+                        | Action::DeleteSegmentRight
                         | Action::Enter
                         | Action::AcceptSuggestion(_)
                         | Action::LaunchForm
@@ -430,7 +449,9 @@ impl App {
             let remote = self.remote.take();
             let index = self.index.as_ref().map(|i| i.restart());
             let status = self.search_status.clone();
+            let windows_paths = self.editor.windows_paths;
             *self = Self::default();
+            self.editor.windows_paths = windows_paths;
             if let Some(index) = index {
                 self.search_status = index.status();
                 self.index = Some(index);
@@ -606,6 +627,16 @@ impl App {
                     self.editor.delete();
                     self.edited();
                 }
+                Action::DeleteSegmentLeft => {
+                    self.editor.delete_segment_left();
+                    self.edited();
+                }
+                Action::DeleteSegmentRight => {
+                    self.editor.delete_segment_right();
+                    self.edited();
+                }
+                Action::SegmentLeft => self.editor.segment_left(),
+                Action::SegmentRight => self.editor.segment_right(),
                 Action::Left => self.editor.left(),
                 Action::Right => self.editor.right(),
                 Action::Home => self.editor.home(),
