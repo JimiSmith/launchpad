@@ -267,13 +267,15 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                     s.fixture('missing')
                     s.send('\r')
                     s.pump(.6)
+                executable = 'default-shell' if selected == 'Shell' else selected.lower()
+                s.wait_record(executable, str(target))
                 after = s.panes()
                 assert not any(p['id'] == origin['id'] for p in after), s.display()
                 assert any(p['id'] == neighbor['id'] for p in after)
                 launched = next(p for p in after if p['id'] != neighbor['id'] and not p['is_plugin'])
                 assert launched['is_floating'] == floating
                 assert launched['tab_name'] == target.name + ' · ' + selected, launched
-                record = next(r for r in s.records() if r['exe'] == ('default-shell' if selected == 'Shell' else selected.lower()))
+                record = next(r for r in s.records() if r['exe'] == executable)
                 assert record['cwd'] == str(target), record
                 if selected == 'Fixture':
                     assert record['argv'] == ['a b', '', '$HOME', ';', '$(touch NO_EXPANSION)'], record
