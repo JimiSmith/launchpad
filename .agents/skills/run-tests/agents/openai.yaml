@@ -1,0 +1,3 @@
+interface:
+  display_name: "Running Tests"
+  short_description: "Run Rust checks and isolated live Zellij tests"
