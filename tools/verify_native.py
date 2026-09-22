@@ -485,6 +485,7 @@ esac
         env = dict(os.environ, HOME=str(out / 'home'), PATH=str(out / 'bin'),
                    ZELLIJ_SESSION_NAME='fake-native-terminal', ZELLIJ_PANE_ID='7',
                    XDG_CONFIG_HOME=str(out / 'config'), XDG_STATE_HOME=str(out / 'state'),
+                   XDG_CACHE_HOME=str(out / 'cache'),
                    TERM='xterm-256color')
         s = Session.__new__(Session)
         s.out = out

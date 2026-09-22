@@ -137,6 +137,13 @@ pub struct HomeIndex {
     walker: Option<ignore::Walk>,
     started: bool,
 }
+/// Only completed scans are eligible to replace a persistent snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanState {
+    Scanning,
+    Complete { limited: bool },
+    Failed(String),
+}
 impl std::fmt::Debug for HomeIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HomeIndex")
@@ -243,7 +250,19 @@ impl HomeIndex {
     pub fn restart(&self) -> Self {
         let mut index = Self::new(self.home.clone(), self.root.clone()).expect("validated HOME");
         index.ignore = self.ignore.clone();
+        index.limits = self.limits;
         index
+    }
+    pub fn scan_state(&self) -> ScanState {
+        if self.is_scanning() {
+            ScanState::Scanning
+        } else if let Some(error) = &self.error {
+            ScanState::Failed(error.clone())
+        } else {
+            ScanState::Complete {
+                limited: self.limited,
+            }
+        }
     }
     pub fn is_scanning(&self) -> bool {
         !self.started || self.walker.is_some()

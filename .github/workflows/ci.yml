@@ -16,7 +16,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os: [ubuntu-24.04, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     defaults:
@@ -51,8 +51,8 @@ jobs:
       - name: Native build, tests, lints and isolated live launches
         if: runner.os == 'Linux'
         run: bash tools/verify_native.sh
-      - name: Windows build, tests and lints
-        if: runner.os == 'Windows'
+      - name: macOS and Windows build, tests and lints
+        if: runner.os != 'Linux'
         run: |
           cargo fmt --all --check
           cargo test --workspace --locked

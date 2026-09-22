@@ -149,6 +149,16 @@ history paths are never truncated. Index limits are 200,000 directories,
 traversal, and validation run on a bounded background worker so input remains
 responsive. [Search policy](docs/home-search.md).
 
+The directory index is saved as `zellij-launchpad/index.json` under the OS cache
+location: `$XDG_CACHE_HOME` (fallback `~/.cache`) on Linux, `~/Library/Caches` on
+macOS, and `%LOCALAPPDATA%` (fallback `~/AppData/Local`) on Windows. Launchpad
+loads it before starting a background rebuild. Cached results stay searchable
+until the completed replacement is published atomically. F5 also rebuilds while
+keeping the current index available. Without a usable cache, results appear
+progressively during the first scan. You can safely delete `index.json` to force
+a cold start; a changed HOME, ignore configuration, or index format also causes
+a fresh scan. Cache failures are nonfatal and appear in the search status.
+
 Recent history remembers ten unique command ID–directory pairs under
 `$XDG_STATE_HOME/zellij-launchpad` (fallback `~/.local/state/zellij-launchpad`).
 It is shared across panes and sessions. F5 reloads other instances' changes.

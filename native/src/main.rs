@@ -121,7 +121,9 @@ fn run(args: Args) -> Result<(), String> {
         }
         app.message = Some(message);
     }
-    let worker = Worker::start_with_ignore(home, cwd, ignore).map_err(|e| e.to_string())?;
+    let cache_root = zellij_launchpad::index_store::cache_root(&home);
+    let worker =
+        Worker::start_with_cache(home, cwd, ignore, Some(cache_root)).map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for signal in [

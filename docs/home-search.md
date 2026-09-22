@@ -31,7 +31,43 @@ Traversal cooperatively yields after at most 128 entries or its existing 5 ms
 budget. Limits are 200,000 retained directories, 2,000,000 visited entries,
 depth 64 and 60 MiB of estimated retained index memory, excluding the walker's
 internal allocations and ignore matchers. The UI reports limits and errors.
-There is no persistent index cache or external search process.
+There is no external search process. While rebuilding, the previous snapshot
+and the new index each have their own retained-data budget.
+
+## Persistent index
+
+The worker loads a versioned `index.json` before it begins traversal. Linux uses
+`$XDG_CACHE_HOME/zellij-launchpad` (fallback `~/.cache/zellij-launchpad`), macOS
+uses `~/Library/Caches/zellij-launchpad`, and Windows uses
+`%LOCALAPPDATA%/zellij-launchpad` (fallback `~/AppData/Local/zellij-launchpad`).
+Environment overrides must be absolute. Configuration and history locations are
+unchanged.
+
+A loaded index remains searchable during startup rebuilding and F5 refreshes.
+The worker builds its replacement separately, and switches the searchable
+snapshot when scanning finishes. Repeated F5 restarts only the pending scan.
+Search revisions advance on content publication independently of directory count,
+so replacements with fewer directories or the same count refresh the UI too.
+Without a usable saved index, the first scan exposes results progressively.
+
+The cache records HOME, normalized configuration exclusions, indexing limits,
+and whether the scan reached a limit. Incompatible, malformed, or oversized
+snapshots are ignored. Paths are checked lexically without accessing each saved
+directory; selected directories still undergo live validation. Ignore-file and
+filesystem changes are picked up by the background scan.
+
+Completed scans, including scans ending at configured limits, are serialized to
+a unique temporary file beside the destination, synced, closed, and renamed over
+it. The previous file is never deleted before replacement. Concurrent instances
+publish independently; the last successful publication wins. A crash before
+publication leaves the previous index usable; abandoned temporary files are
+ignored and can safely be removed when no instances are running.
+
+Fatal scan errors retain the old index. Inaccessible subdirectories retain the
+walker's existing skip behavior. Cache IO errors appear in search status without
+disabling search or launch: a successful rebuild remains usable in memory even
+if saving fails. Deleting `index.json` safely forces the next launch to scan from
+scratch. There is no expiry timer or filesystem watcher.
 
 ## Matching and input
 
