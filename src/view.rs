@@ -398,7 +398,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         y += h;
     }
     let history_y = y;
-    let free_rows = footer_y.saturating_sub(y + 1 + u16::from(!short)) as usize;
+    let free_rows = footer_y.saturating_sub(y + 1) as usize;
     let row_step = if roomy { 2 } else { 1 };
     let available_rows = free_rows.div_ceil(row_step);
     let count = app.history.len();

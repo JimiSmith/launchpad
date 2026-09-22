@@ -462,3 +462,22 @@ fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
     assert!(!app.finish_remote_validation(generation, Ok("/home/example/saved".into())));
     assert!(app.history.len() == 1);
 }
+
+#[test]
+fn launch_from_empty_history_launches_the_form() {
+    use zellij_launchpad_core::app::Focus;
+    for action in [Action::LaunchForm, Action::Enter] {
+        let mut app = App::from_remote("/home/example".into());
+        app.editor.set("foo/bar");
+        app.focus = Focus::History;
+        app.take_remote_request();
+        app.update(action.clone());
+        assert!(
+            matches!(
+                app.take_remote_request(),
+                Some(RemoteRequest::Validate { .. })
+            ),
+            "{action:?}"
+        );
+    }
+}

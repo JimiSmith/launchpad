@@ -559,10 +559,10 @@ impl App {
             return;
         }
         if action == Action::LaunchForm {
-            if self.focus == Focus::History {
-                if let Some(event) = self.history.get(self.recent).cloned() {
-                    self.launch(event.path, event.tool);
-                }
+            if self.focus == Focus::History
+                && let Some(event) = self.history.get(self.recent).cloned()
+            {
+                self.launch(event.path, event.tool);
                 return;
             }
             self.launch(self.editor.text.clone(), self.tool);
@@ -715,11 +715,7 @@ impl App {
                     self.recent = self.history.len().saturating_sub(1);
                     self.sync_recent();
                 }
-                Action::Enter => {
-                    if let Some(e) = self.history.get(self.recent).cloned() {
-                        self.launch(e.path, e.tool);
-                    }
-                }
+                Action::Enter => self.update(Action::LaunchForm),
                 Action::Delete => {
                     if let Some(row) = self.history.get(self.recent) {
                         if self.simulate_launch {

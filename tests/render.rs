@@ -354,3 +354,13 @@ fn resized_layout_keeps_launch_history_and_errors_reachable() {
         }
     }
 }
+
+#[test]
+fn medium_height_with_suggestions_and_message_still_shows_a_recent_row() {
+    let mut a = app();
+    a.suggestions.truncate(3);
+    a.history[0].path = "/home/example/only-in-recent".into();
+    a.message = Some("Worker timed out".into());
+    let s = text(&draw(&a, 80, 18));
+    assert!(s.contains("only-in-recent") && s.contains("1–"), "{s}");
+}
