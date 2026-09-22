@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Launchpad — minimal design draft</title>
+  <style>
+    :root {
+      /* Current src/theme.rs palette; black represents the shell's default background. */
+      --background: #000000;
+      --surface: #1e2030;
+      --raised: #363a4f;
+      --border: #494d64;
+      --text: #cad3f5;
+      --muted: #a5adcb;
+      --accent: #c6a0f6;
+      --on-accent: #181926;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      color: var(--text);
+      background: var(--background);
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-size: 14px; line-height: 1.6; }
+    button, input { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; }
+    button:focus-visible { outline: 1px solid var(--accent); outline-offset: 5px; }
+    ::selection { background: var(--accent); color: var(--on-accent); }
+    [hidden] { display: none !important; }
+    .page { width: min(100%, 1000px); margin: auto; padding: 48px 48px 24px; }
+    .draft { display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font-size: 11px; opacity: .65; }
+    main { max-width: 720px; margin: 74px auto 0; }
+    h1 { font-size: 17px; font-weight: 400; margin: 0 0 64px; letter-spacing: -.5px; }
+    .brand-mark { color: var(--accent); margin-right: 12px; }
+    .sections { display: grid; gap: 58px; }
+    .section { opacity: .65; transition: opacity 160ms ease; min-width: 0; }
+    .section[data-active="true"] { opacity: 1; }
+    h2 { font-size: 12px; font-weight: 400; color: var(--muted); margin: 0 0 16px; }
+    .section[data-active="true"] h2 { color: var(--accent); }
+    .path-line { display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border); padding: 0 0 13px; }
+    .section[data-active="true"] .path-line { border-color: var(--accent); }
+    .prompt { color: var(--accent); font-size: 22px; line-height: 1; }
+    input { flex: 1; width: 100%; min-width: 0; border: 0; outline: none; background: none; font-size: 18px; caret-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+    .suggestions { margin-top: 12px; }
+    .suggestion { display: block; width: 100%; padding: 7px 12px; text-align: left; font-size: 13px; overflow-wrap: anywhere; }
+    .suggestion:hover, .suggestion[aria-selected="true"] { color: var(--accent); background: var(--raised); }
+    .empty { color: var(--muted); margin: 12px 0 0; font-size: 12px; }
+    .tool-line { display: flex; align-items: center; gap: 40px; }
+    .tools { display: flex; gap: 28px; flex-wrap: wrap; }
+    .tool { padding: 3px 0 7px; color: var(--muted); border-bottom: 1px solid transparent; }
+    .tool[aria-checked="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+    .launch { padding: 7px 13px; color: var(--accent); white-space: nowrap; }
+    .launch:hover { background: var(--raised); }
+    .launch span { margin-left: 15px; }
+    .history { display: grid; gap: 3px; }
+    .recent { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; width: 100%; padding: 9px 10px 9px 0; text-align: left; }
+    .recent-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .recent-tool { font-size: 12px; color: var(--muted); }
+    .marker { color: var(--accent); visibility: hidden; }
+    .section[data-active="true"] .recent[aria-selected="true"] { color: var(--accent); }
+    .section[data-active="true"] .recent[aria-selected="true"] .marker { visibility: visible; }
+    .recent:hover { background: var(--raised); }
+    footer { margin: 66px 0 0; min-height: 46px; color: var(--muted); font-size: 11px; }
+    .hints { display: flex; gap: 25px; flex-wrap: wrap; opacity: .65; }
+    kbd { font: inherit; color: var(--text); margin-right: 6px; }
+    .status { margin: 0 0 16px; color: var(--accent); font-size: 12px; overflow-wrap: anywhere; }
+    @media (max-width: 640px) {
+      .page { padding: 26px 24px; }
+      main { margin-top: 56px; }
+      h1 { margin-bottom: 46px; }
+      .sections { gap: 44px; }
+      .tools { gap: 20px; }
+      .tool-line { flex-wrap: wrap; gap: 18px; }
+      .launch { padding-left: 0; }
+      input { font-size: 15px; }
+      footer { margin-top: 48px; }
+      .hints { gap: 12px 20px; }
+    }
+    @media (max-height: 740px) {
+      .page { padding-top: 24px; padding-bottom: 20px; }
+      main { margin-top: 32px; }
+      h1 { margin-bottom: 32px; }
+      .sections { gap: 32px; }
+      footer { margin-top: 32px; min-height: 0; }
+    }
+    @media (max-height: 560px) {
+      .page { padding-top: 12px; padding-bottom: 12px; }
+      .draft { display: none; }
+      main { margin-top: 0; }
+      h1 { margin-bottom: 12px; }
+      h2 { margin-bottom: 8px; }
+      .sections { gap: 16px; }
+      .path-line { padding-bottom: 8px; }
+      input { font-size: 16px; }
+      .launch { padding-top: 3px; padding-bottom: 3px; }
+      .recent { padding-top: 3px; padding-bottom: 3px; }
+      .suggestions { max-height: 88px; overflow-y: auto; }
+      footer { margin-top: 12px; }
+      .status { margin-bottom: 8px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .section { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="draft"><span>Design draft / 01</span><span>Interactive mockup</span></div>
+    <main aria-label="Launchpad mockup">
+      <h1><span class="brand-mark" aria-hidden="true">›_</span>Launchpad</h1>
+      <div class="sections">
+        <section class="section" id="directory-section" data-active="true" aria-labelledby="directory-heading">
+          <h2 id="directory-heading"><label for="directory">Directory</label></h2>
+          <div class="path-line">
+            <span class="prompt" aria-hidden="true">›</span>
+            <input id="directory" value="~/Projects/zellij-launchpad" placeholder="Find a directory…" autocomplete="off" spellcheck="false" autocapitalize="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
+          </div>
+          <div class="suggestions" id="suggestions" role="listbox" aria-label="Directory suggestions" hidden></div>
+          <p class="empty" id="empty" hidden>No matching directories in this mockup.</p>
+        </section>
+
+        <section class="section" id="tool-section" data-active="false" aria-labelledby="tool-heading">
+          <h2 id="tool-heading">Tool</h2>
+          <div class="tool-line">
+            <div class="tools" role="radiogroup" aria-label="Tool">
+              <button class="tool" role="radio" aria-checked="true" tabindex="0">Shell</button>
+              <button class="tool" role="radio" aria-checked="false" tabindex="-1">Claude</button>
+              <button class="tool" role="radio" aria-checked="false" tabindex="-1">Codex</button>
+              <button class="tool" role="radio" aria-checked="false" tabindex="-1">Hermes</button>
+            </div>
+            <button class="launch" id="launch">Launch<span aria-hidden="true">↵</span></button>
+          </div>
+        </section>
+
+        <section class="section" id="recent-section" data-active="false" aria-labelledby="recent-heading">
+          <h2 id="recent-heading">Recent</h2>
+          <div class="history" role="listbox" aria-label="Recent launches">
+            <button class="recent" role="option" aria-selected="true" tabindex="0" data-tool="Claude" data-path="~/Projects/zellij-launchpad">
+              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/Projects/zellij-launchpad</span><span class="recent-tool">Claude</span>
+            </button>
+            <button class="recent" role="option" aria-selected="false" tabindex="-1" data-tool="Codex" data-path="~/Projects/website">
+              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/Projects/website</span><span class="recent-tool">Codex</span>
+            </button>
+            <button class="recent" role="option" aria-selected="false" tabindex="-1" data-tool="Shell" data-path="~/notes">
+              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/notes</span><span class="recent-tool">Shell</span>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <footer>
+        <p class="status" id="status" role="status" hidden></p>
+        <div class="hints"><span><kbd>Tab</kbd>next section</span><span id="context-hint"><kbd>↵</kbd>launch</span></div>
+      </footer>
+    </main>
+  </div>
+  <script>
+    // Local sample data only. This file never launches a process or reads files.
+    const sections = [...document.querySelectorAll('.section')];
+    const directory = document.querySelector('#directory');
+    const toolButtons = [...document.querySelectorAll('.tool')];
+    const recentButtons = [...document.querySelectorAll('.recent')];
+    const suggestions = document.querySelector('#suggestions');
+    const empty = document.querySelector('#empty');
+    const status = document.querySelector('#status');
+    const paths = ['~/Projects/zellij-launchpad', '~/Projects/website', '~/Projects/dotfiles', '~/notes'];
+    let active = 0, toolIndex = 0, recentIndex = 0, matches = [], suggestionIndex = -1;
+
+    function setActive(index) {
+      active = index;
+      sections.forEach((section, i) => section.dataset.active = String(i === index));
+      document.querySelector('#context-hint').innerHTML = index === 0
+        ? '<kbd>↵</kbd>' + (suggestionIndex >= 0 ? 'choose directory' : 'launch')
+        : index === 1 ? '<kbd>← →</kbd>choose tool <span style="margin-left:19px"><kbd>↵</kbd>launch</span>'
+        : '<kbd>↑ ↓</kbd>choose recent <span style="margin-left:19px"><kbd>↵</kbd>launch again</span>';
+    }
+    function focusSection(index) {
+      [directory, toolButtons[toolIndex], recentButtons[recentIndex]][index].focus();
+    }
+    sections.forEach((section, i) => {
+      section.addEventListener('focusin', event => {
+        if (i === 2 && recentButtons.includes(event.target)) {
+          selectRecent(recentButtons.indexOf(event.target), false);
+        }
+        setActive(i);
+      });
+      section.addEventListener('click', event => {
+        if (!event.target.closest('button, input')) focusSection(i);
+      });
+    });
+    function selectTool(index, focus = true) {
+      toolIndex = index;
+      toolButtons.forEach((button, i) => {
+        button.setAttribute('aria-checked', String(i === index));
+        button.tabIndex = i === index ? 0 : -1;
+      });
+      if (focus) toolButtons[index].focus();
+    }
+    toolButtons.forEach((button, i) => button.addEventListener('click', () => selectTool(i)));
+    function selectRecent(index, focus = true) {
+      recentIndex = index;
+      recentButtons.forEach((button, i) => {
+        button.setAttribute('aria-selected', String(i === index));
+        button.tabIndex = i === index ? 0 : -1;
+      });
+      // Keep the visible Directory/Tool pair in sync so Launch and Enter agree,
+      // including when clicking Launch moves focus away from Recent.
+      directory.value = recentButtons[index].dataset.path;
+      selectTool(toolButtons.findIndex(button => button.textContent === recentButtons[index].dataset.tool), false);
+      closeSuggestions();
+      if (focus) recentButtons[index].focus();
+    }
+    recentButtons.forEach((button, i) => button.addEventListener('click', () => selectRecent(i)));
+    function closeSuggestions() {
+      suggestions.hidden = true;
+      empty.hidden = true;
+      matches = [];
+      suggestionIndex = -1;
+      directory.setAttribute('aria-expanded', 'false');
+      directory.removeAttribute('aria-activedescendant');
+      setActive(active);
+    }
+    function acceptSuggestion(index) {
+      directory.value = matches[index];
+      closeSuggestions();
+      directory.focus();
+    }
+    function renderSuggestions() {
+      suggestions.replaceChildren();
+      matches.forEach((path, i) => {
+        const button = document.createElement('button');
+        button.className = 'suggestion';
+        button.id = 'suggestion-' + i;
+        button.tabIndex = -1;
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', String(i === suggestionIndex));
+        button.textContent = path;
+        button.addEventListener('mousedown', event => event.preventDefault());
+        button.addEventListener('click', () => acceptSuggestion(i));
+        suggestions.append(button);
+      });
+      suggestions.hidden = matches.length === 0;
+      directory.setAttribute('aria-expanded', String(matches.length > 0));
+      if (suggestionIndex >= 0) directory.setAttribute('aria-activedescendant', 'suggestion-' + suggestionIndex);
+      else directory.removeAttribute('aria-activedescendant');
+      setActive(active);
+    }
+    directory.addEventListener('input', () => {
+      status.hidden = true;
+      const query = directory.value.toLowerCase().trim();
+      matches = paths.filter(path => path.toLowerCase().includes(query));
+      suggestionIndex = -1;
+      empty.hidden = matches.length > 0;
+      renderSuggestions();
+    });
+    function previewLaunch() {
+      const path = directory.value.trim();
+      const tool = toolButtons[toolIndex].textContent;
+      status.textContent = path ? `Preview: ${tool} would open in ${path}.` : 'Choose a directory first.';
+      status.hidden = false;
+    }
+    document.querySelector('#launch').addEventListener('click', () => previewLaunch());
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        focusSection((active + (event.shiftKey ? 2 : 1)) % 3);
+      } else if (event.ctrlKey && ['p', 't', 'r'].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        focusSection(['p', 't', 'r'].indexOf(event.key.toLowerCase()));
+      } else if (event.key === 'Escape') {
+        closeSuggestions();
+        status.hidden = true;
+      } else if (active === 1 && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        selectTool((toolIndex + (event.key === 'ArrowRight' ? 1 : toolButtons.length - 1)) % toolButtons.length);
+      } else if (active === 2 && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault();
+        selectRecent((recentIndex + (event.key === 'ArrowDown' ? 1 : recentButtons.length - 1)) % recentButtons.length);
+      } else if (active === 0 && matches.length && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault();
+        suggestionIndex = (suggestionIndex + (event.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length;
+        renderSuggestions();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (active === 0 && suggestionIndex >= 0) acceptSuggestion(suggestionIndex);
+        else previewLaunch();
+      }
+    });
+    directory.focus({ preventScroll: true });
+  </script>
+</body>
+</html>
