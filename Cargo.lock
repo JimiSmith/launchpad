@@ -1165,7 +1165,7 @@ dependencies = [
 
 [[package]]
 name = "zellij-launchpad"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "zellij-launchpad-core"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "ignore",
  "neo_frizbee",
