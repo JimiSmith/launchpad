@@ -310,10 +310,8 @@ def interactive_shell_history_cases():
                 if selected == 'Fixture':
                     s.send('\x14\x1b[C')
                 s.send('\r')
-                s.pump(1)
                 launched = 'default-shell' if selected == 'Shell' else 'fixture'
-                assert any(r['exe'] == launched and r['cwd'] == str(s.cwd)
-                           for r in s.records()), (s.records(), log.read_text(), s.display())
+                s.wait_record(launched, str(s.cwd))
                 state = json.loads((state_root / 'history.json').read_text())
                 assert len(state['entries']) == 2, (state, log.read_text())
                 assert state['entries'][0]['path'] == str(s.cwd), (state, log.read_text())
