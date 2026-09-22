@@ -185,10 +185,10 @@ for line in sys.stdin:
     def records(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
-    def wait_record(self, executable, cwd):
+    def wait_record(self, executable, cwd, count=1):
         deadline = time.monotonic() + 12
         while True:
-            if any(r['exe'] == executable and r['cwd'] == cwd for r in self.records()):
+            if sum(r['exe'] == executable and r['cwd'] == cwd for r in self.records()) >= count:
                 return
             assert time.monotonic() < deadline, f'No {executable} launch in {cwd}\n{self.display()}'
             self.pump(.05)
@@ -226,7 +226,7 @@ def probe():
             print('missing-command result:', result.returncode, repr(result.stdout), repr(result.stderr))
             result = s.cli('action', 'new-pane', '--in-place', '--close-replaced-pane',
                           '--pane-id', pane_id, '--cwd', str(s.cwd))
-            s.pump(.4)
+            s.wait_record('default-shell', str(s.cwd))
             after = s.panes()
             assert not any(p['id'] == origin['id'] for p in after)
             assert any(p['id'] == neighbor['id'] for p in after)
@@ -337,9 +337,8 @@ def recovery_cases():
         assert len(panes) == 2 and all(p['tab_name'] == 'Tab #1' for p in panes)
         s.fixture('default-shell')
         s.send('\r')
+        s.wait_record('default-shell', str(s.cwd))
         s.expect('FIXTURE_READY')
-        s.pump(.5)
-        assert any(r['exe'] == 'default-shell' for r in s.records())
         print('PASS default-shell rejection rollback and explicit retry', flush=True)
     finally:
         s.close()
@@ -365,7 +364,7 @@ def history_and_layout_cases():
     try:
         s.wait_indexed()
         s.send('\x14\x1b[C\r')
-        s.pump(.5)
+        s.wait_record('fixture', str(s.cwd))
         launched = next(p for p in s.panes() if not p['is_plugin'] and p['title'] != 'neighbor')
         s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
         s.pump(.3)
@@ -389,6 +388,7 @@ def history_and_layout_cases():
 
         # Replay must use the remembered directory and command shown in the form.
         s.send('\x12\r')
+        s.wait_record('fixture', str(s.cwd), count=2)
         s.expect('FIXTURE_READY')
         records = s.records()
         assert len(records) == len(records_before) + 1, records
