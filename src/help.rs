@@ -26,10 +26,9 @@ const LINES: &[&str] = &[
     "",
     "MOUSE Left click: place path cursor, accept a suggestion,",
     "select a tool or select a recent row. Selection never launches.",
-    "Click Enter ↵ to launch; Enter replays the selected recent entry.",
-    "on the selected row. Launch replaces this pane.",
+    "Selecting a recent row fills Directory and Tool; Enter or Launch opens it.",
     "Wheel over suggestions / recent / help scrolls that section.",
-    "Click F1 help, F5 reset, Ctrl+Q quit (^Q), or Esc back.",
+    "Click F1 help or Esc back. F5 resets; Ctrl+Q quits.",
     "Drag, release, right click ignored; host handles modifiers.",
     "",
     "Search: HOME only; relative paths start at HOME, not CWD.",
@@ -47,6 +46,8 @@ pub fn lines(app: &crate::app::App) -> Vec<String> {
         lines.push("simulate_launch: directories are validated but no process".into());
         lines.push("is started, and recent launches stay in memory only.".into());
     }
+    lines.push(String::new());
+    lines.push(format!("Search: {}", app.search_status));
     lines.push(String::new());
     lines.push("Configured commands (Shell first):".into());
     for c in &app.commands.entries {

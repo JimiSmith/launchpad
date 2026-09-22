@@ -46,6 +46,8 @@ class Session:
         self.log = self.out / 'executions.jsonl'
         self.socket_dir = tempfile.TemporaryDirectory(prefix='launchpad-')
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('ZELLIJ') and k != 'TMUX'}
+        # Rendering checks must exercise colour even when the runner disables it.
+        self.env.pop('NO_COLOR', None)
         self.env.update(HOME=str(self.home), PATH=str(self.out / 'bin'), SHELL='/bin/false',
                         TERM='xterm-256color', COLORTERM='truecolor',
                         ZELLIJ_SOCKET_DIR=self.socket_dir.name,
@@ -157,6 +159,16 @@ for line in sys.stdin:
                     self.filter_state = 'normal' if char == '\\' else 'string'
             self.stream.feed(''.join(output))
 
+    def wait_indexed(self):
+        self.expect('Launchpad')
+        self.send('\x1bOP')  # Search diagnostics now live in help.
+        self.expect('Quit Launchpad')
+        self.send('\x1b[F')
+        self.expect('HOME indexed')
+        self.send('\x1b[H')
+        self.send('\x1b')
+        self.expect('F1 help')
+
     def expect(self, text):
         end = time.monotonic() + 12
         while text not in self.display() and time.monotonic() < end:
@@ -172,6 +184,14 @@ for line in sys.stdin:
 
     def records(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def wait_record(self, executable, cwd):
+        deadline = time.monotonic() + 12
+        while True:
+            if any(r['exe'] == executable and r['cwd'] == cwd for r in self.records()):
+                return
+            assert time.monotonic() < deadline, f'No {executable} launch in {cwd}\n{self.display()}'
+            self.pump(.05)
 
     def close(self):
         (self.out / 'screen.txt').write_text(self.display())
@@ -221,12 +241,12 @@ def probe():
             s.close()
 
 
-def native():
-    for floating in [False, True]:
-        for selected, changed in [('Shell', False), ('Shell', True), ('Fixture', True), ('missing', False)]:
+def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True), ('Fixture', True), ('missing', False))):
+    for floating in floating_modes:
+        for selected, changed in cases:
             s = Session(floating=floating)
             try:
-                s.expect('HOME indexed')
+                s.wait_indexed()
                 origin = next(p for p in s.panes() if p['title'] == 'launchpad')
                 neighbor = next(p for p in s.panes() if p['title'] == 'neighbor')
                 target = s.cwd
@@ -286,7 +306,7 @@ def interactive_shell_history_cases():
                 log = s.out / 'launcher.stderr'
                 s.send(shlex.quote(str(BINARY)) +
                        ' 2>' + shlex.quote(str(log)) + '\n')
-                s.expect('HOME indexed')
+                s.wait_indexed()
                 if selected == 'Fixture':
                     s.send('\x14\x1b[C')
                 s.send('\r')
@@ -308,7 +328,7 @@ def interactive_shell_history_cases():
 def recovery_cases():
     s = Session()
     try:
-        s.expect('HOME indexed')
+        s.wait_indexed()
         (s.out / 'bin/default-shell').unlink()
         s.send('\r')
         s.expect('Default shell failed')
@@ -325,7 +345,7 @@ def recovery_cases():
         s.close()
     s = Session()
     try:
-        s.expect('HOME indexed')
+        s.wait_indexed()
         origin = next(p for p in s.panes() if p['title'] == 'launchpad')
         s.cwd.rmdir()
         s.send('\r')
@@ -334,8 +354,7 @@ def recovery_cases():
         assert all(r['exe'] == 'neighbor' for r in s.records())
         s.cwd.mkdir()
         s.send('\x1b[15~\r')
-        s.pump(.6)
-        assert any(r['exe'] == 'default-shell' and r['cwd'] == str(s.cwd) for r in s.records())
+        s.wait_record('default-shell', str(s.cwd))
         print('PASS deleted invoking cwd and F5 retry', flush=True)
     finally:
         s.close()
@@ -344,7 +363,7 @@ def recovery_cases():
 def history_and_layout_cases():
     s = Session()
     try:
-        s.expect('HOME indexed')
+        s.wait_indexed()
         s.send('\x14\x1b[C\r')
         s.pump(.5)
         launched = next(p for p in s.panes() if not p['is_plugin'] and p['title'] != 'neighbor')
@@ -352,23 +371,23 @@ def history_and_layout_cases():
         s.pump(.3)
         # Exercise the shipped native layout and the same shared state directory.
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
-        s.expect('HOME indexed')
-        s.expect('Recent launches · 1 events')
+        s.wait_indexed()
+        s.expect('Recent')
         assert any('Fixture' in line and '~/space 修理 literal' in line
                    for line in s.screen.display), s.display()
-        s.expect('[ Shell ]')
-        input_before = next(line for line in s.screen.display if '│ › ' in line)
-        tools_before = next(line for line in s.screen.display if '[ Shell ]' in line)
+        s.expect('Shell')
         records_before = s.records()
         s.send('\x12')
-        s.expect('RECENT Tab next')
-        s.send('\t')  # Tab changes sections without copying or replaying history.
-        s.expect('PATH Tab next')
-        assert next(line for line in s.screen.display if '│ › ' in line) == input_before, s.display()
-        assert next(line for line in s.screen.display if '[ Shell ]' in line) == tools_before, s.display()
+        s.expect('↑↓ recent')
+        # Recent selection fills the form but never launches on selection or Tab.
+        selected_path = next(line for line in s.screen.display if '› ~/space 修理 literal' in line)
+        s.send('\t')
+        s.expect('Tab next · ↵ launch')
+        assert selected_path in s.screen.display, s.display()
+        assert any('Fixture' in line and 'Launch' in line for line in s.screen.display), s.display()
         assert s.records() == records_before, s.records()
 
-        # Replay must use the remembered directory and command, not the current form.
+        # Replay must use the remembered directory and command shown in the form.
         s.send('\x12\r')
         s.expect('FIXTURE_READY')
         records = s.records()
@@ -380,24 +399,23 @@ def history_and_layout_cases():
         s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
         s.pump(.3)
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/configured.kdl'))
-        s.expect('HOME indexed')
-        s.expect('Recent launches · 1 events')
+        s.wait_indexed()
+        s.expect('Recent')
         s.send('\x12\x1b[3~')
-        s.expect('No recent launches. Choose a directory.')
+        s.expect('No recent launches')
         assert not json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())['entries']
         s.screen.reset()  # Reopen assertions must observe the new launcher's render.
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
-        s.expect('HOME indexed')
-        s.expect('No recent launches. Choose a directory.')
+        s.wait_indexed()
+        s.expect('No recent launches')
         print('PASS shipped layouts, history reopen/section switch/replay/delete', flush=True)
     finally:
         s.close()
     s = Session(only=True, outside=True)
     try:
-        s.expect('HOME indexed')
+        s.wait_indexed()
         s.send('\r')
-        s.pump(.5)
-        assert any(r['exe'] == 'default-shell' and r['cwd'] == str(s.cwd) for r in s.records())
+        s.wait_record('default-shell', str(s.cwd))
         s.send('exit 17\n')
         deadline = time.monotonic() + 5
         while s.child.poll() is None and time.monotonic() < deadline:
@@ -455,10 +473,36 @@ def path_editing_case(s, explicit_backspace=False):
     s.send('\x1b[15~')  # Restore initial form for subsequent checks.
 
 
+def focus_colours_case():
+    # Inspect the colours delivered through Zellij, not only Ratatui's DIM flag.
+    s = Session(only=True)
+    try:
+        s.wait_indexed()
+        def colour(label, offset=0):
+            for y, line in enumerate(s.screen.display):
+                x = line.find(label)
+                if x >= 0:
+                    return s.screen.buffer[y][x + offset].fg
+            raise AssertionError(f'Missing {label!r}\n{s.display()}')
+        assert colour('› ~', 2) == 'cad3f5'
+        assert colour('Shell') == '80689f'
+        assert colour('Launch ↵') == '80689f'
+        s.send('\x14')
+        assert colour('› ~', 2) == '83899f'
+        assert colour('Shell') == 'c6a0f6'
+        assert colour('Launch ↵') == 'c6a0f6'
+        s.send('\x10')
+        assert colour('› ~', 2) == 'cad3f5'
+        assert colour('Shell') == '80689f'
+        print('PASS inactive foreground colours through live Zellij', flush=True)
+    finally:
+        s.close()
+
+
 def live_path_editing_case():
     s = Session()
     try:
-        s.expect('HOME indexed')
+        s.wait_indexed()
         records = s.records()
         path_editing_case(s)
         assert s.records() == records, 'editing must never launch a command'
@@ -487,6 +531,7 @@ esac
                    XDG_CONFIG_HOME=str(out / 'config'), XDG_STATE_HOME=str(out / 'state'),
                    XDG_CACHE_HOME=str(out / 'cache'),
                    TERM='xterm-256color')
+        env.pop('NO_COLOR', None)
         s = Session.__new__(Session)
         s.out = out
         s.master, s.slave = pty.openpty()
@@ -504,7 +549,7 @@ esac
         child = subprocess.Popen([str(BINARY)], stdin=s.slave, stdout=s.slave, stderr=s.slave,
                                  env=env, cwd=out / 'home', preexec_fn=setup)
         try:
-            s.expect('HOME indexed')
+            s.wait_indexed()
             path_editing_case(s, explicit_backspace=True)
             s.send('\x15\x1b[200~notes\x1b[201~')
             s.expect('~/notes/')
@@ -512,7 +557,7 @@ esac
             s.expect('Quit Launchpad')
             s.send('\x1b')
             s.send('\x1b[15~')  # F5
-            s.expect('HOME indexed')
+            s.wait_indexed()
             # Exercise the native backend at compact dimensions and restore it.
             for width, height in [(30, 8), (100, 30)]:
                 fcntl.ioctl(s.slave, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
@@ -553,6 +598,7 @@ if __name__ == '__main__':
         probe()
     else:
         terminal_cases()
+        focus_colours_case()
         live_path_editing_case()
         native()
         interactive_shell_history_cases()

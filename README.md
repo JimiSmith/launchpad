@@ -97,6 +97,8 @@ error = "#ed8796"
 Shell stays first. Commands follow file order; the first duplicate ID wins.
 Labels default to IDs. Invalid individual definitions are skipped with a visible
 error, while valid commands stay usable. F1 lists all configuration errors.
+The interface uses open sections with dimmed inactive content and a compact
+contextual footer. F1 contains the full controls and search status.
 Colours default to Catppuccin Macchiato over the terminal background; invalid
 colour values keep their defaults.
 
@@ -107,7 +109,7 @@ interpretation. [Configuration details](docs/configured-commands.md).
 ## Controls and directory policy
 
 - Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or history.
-- In the path box: Left/Right moves one Unicode grapheme; Home/End moves to
+- In the directory input: Left/Right moves one Unicode grapheme; Home/End moves to
   the beginning/end. Ctrl+Left/Right moves by path segment; Ctrl+Backspace/Delete
   deletes the same range to the left/right. Ctrl+H is an alias for Ctrl+Backspace
   for terminals using the legacy encoding. Ordinary Backspace/Delete removes
@@ -122,7 +124,8 @@ interpretation. [Configuration details](docs/configured-commands.md).
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
 - F1 opens help. F5 refreshes HOME and shared history and restores the invoking cwd.
-- In history: Enter revalidates/replays, Delete removes, Ctrl+L twice clears;
+- Selecting a recent row fills Directory and Tool. Enter or Launch revalidates
+  and opens that selection. Delete removes, Ctrl+L twice clears;
   Esc cancels confirmation.
 - Ctrl+Q / Ctrl+C quits. Esc dismisses transient UI, then quits an untouched dashboard.
 

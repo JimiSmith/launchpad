@@ -136,6 +136,8 @@ impl App {
     pub fn set_initial_cwd(&mut self, cwd: String) {
         self.editor.set(&self.path_label(&cwd));
         self.initial_cwd = Some(cwd);
+        self.show_suggestions = false;
+        self.suggestions.clear();
         self.highlighted = None;
         self.tool = Tool::Shell;
     }
@@ -242,8 +244,8 @@ impl App {
             remote.validation = None;
             remote.outbound = None;
         }
-        self.search_status = error;
-        self.message = None;
+        self.search_status = error.clone();
+        self.message = Some(error);
         self.suggestions.clear();
         self.highlighted = None;
     }
@@ -472,6 +474,14 @@ impl App {
                 remote.revision = 0;
                 remote.failed = false;
                 remote.refresh += 1;
+                // The worker learns about refresh epochs through requests. A
+                // quiet initial directory still needs to trigger the rebuild.
+                if !self.show_suggestions {
+                    remote.outbound = Some(crate::remote::RemoteRequest::Query {
+                        generation: remote.generation,
+                        text: self.editor.text.clone(),
+                    });
+                }
             }
             return;
         }
@@ -532,6 +542,7 @@ impl App {
         }
         if let Action::Focus(focus) = action {
             self.focus = focus;
+            self.sync_recent();
             return;
         }
         if matches!(action, Action::Tab | Action::BackTab) {
@@ -544,9 +555,16 @@ impl App {
                 (Focus::History, Action::BackTab) => Focus::Tools,
                 _ => unreachable!("only Tab actions reach this branch"),
             };
+            self.sync_recent();
             return;
         }
         if action == Action::LaunchForm {
+            if self.focus == Focus::History {
+                if let Some(event) = self.history.get(self.recent).cloned() {
+                    self.launch(event.path, event.tool);
+                }
+                return;
+            }
             self.launch(self.editor.text.clone(), self.tool);
             return;
         }
@@ -576,6 +594,7 @@ impl App {
             if let Some(index) = self.history.iter().position(|e| e.id == id) {
                 self.recent = index;
                 self.focus = Focus::History;
+                self.sync_recent();
             }
             return;
         }
@@ -672,17 +691,30 @@ impl App {
                     self.message = None;
                 }
                 Action::Up => self.focus = Focus::Path,
-                Action::Down => self.focus = Focus::History,
+                Action::Down => {
+                    self.focus = Focus::History;
+                    self.sync_recent();
+                }
                 Action::Enter => self.launch(self.editor.text.clone(), self.tool),
                 _ => {}
             },
             Focus::History => match action {
-                Action::Up => self.recent = self.recent.saturating_sub(1),
-                Action::Down => {
-                    self.recent = (self.recent + 1).min(self.history.len().saturating_sub(1))
+                Action::Up => {
+                    self.recent = self.recent.saturating_sub(1);
+                    self.sync_recent();
                 }
-                Action::Home => self.recent = 0,
-                Action::End => self.recent = self.history.len().saturating_sub(1),
+                Action::Down => {
+                    self.recent = (self.recent + 1).min(self.history.len().saturating_sub(1));
+                    self.sync_recent();
+                }
+                Action::Home => {
+                    self.recent = 0;
+                    self.sync_recent();
+                }
+                Action::End => {
+                    self.recent = self.history.len().saturating_sub(1);
+                    self.sync_recent();
+                }
                 Action::Enter => {
                     if let Some(e) = self.history.get(self.recent).cloned() {
                         self.launch(e.path, e.tool);
@@ -697,6 +729,7 @@ impl App {
                         }
                     }
                     self.recent = self.recent.min(self.history.len().saturating_sub(1));
+                    self.sync_recent();
                 }
                 Action::ClearHistory => {
                     if self.confirm_clear {
@@ -718,6 +751,40 @@ impl App {
             },
         }
     }
+    // A recent selection fills the form, so mouse Launch and Enter agree.
+    // Keep removed command IDs intact: validation must never substitute Shell.
+    fn sync_recent(&mut self) {
+        if self.focus != Focus::History {
+            return;
+        }
+        if let Some(event) = self.history.get(self.recent) {
+            self.editor.set(&self.path_label(&event.path));
+            self.tool = event.tool;
+            self.show_suggestions = false;
+            self.suggestions.clear();
+            self.highlighted = None;
+            self.touched = true;
+            self.message = None;
+        }
+    }
+
+    pub(crate) fn empty_search(&self) -> bool {
+        self.focus == Focus::Path
+            && self.touched
+            && self.show_suggestions
+            && self.suggestions.is_empty()
+            && self.message.is_none()
+    }
+
+    /// Replace host history and keep the selected row consistent with the form.
+    pub fn replace_history(&mut self, history: Vec<Launch>) {
+        let message = self.message.take();
+        self.history = history;
+        self.recent = self.recent.min(self.history.len().saturating_sub(1));
+        self.sync_recent();
+        self.message = message;
+    }
+
     pub fn visible_tools(&self) -> Vec<Tool> {
         self.commands.entries.iter().map(|c| c.id).collect()
     }
@@ -1046,8 +1113,12 @@ mod tests {
         );
         a.update(Action::Tab);
         assert_eq!(a.focus, Focus::Path);
-        assert_eq!(a.editor.text, "~", "Tab only changes sections");
-        assert_eq!(a.tool, Tool::Shell, "replay keeps the current form tool");
+        assert_eq!(a.editor.text, "~/Projects/notes");
+        assert_eq!(
+            a.tool, removed,
+            "recent selection keeps an unavailable tool explicit"
+        );
+        a.update(Action::SelectTool(Tool::Shell));
         a.update(Action::Enter);
         validate(&mut a, Ok("/home/example/Projects/notes".into()));
         assert_eq!(a.take_launch().map(|l| l.tool), Some(Tool::Shell));

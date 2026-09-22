@@ -71,6 +71,25 @@ impl Theme {
     pub fn accent(self) -> Style {
         self.base().fg(self.accent)
     }
+
+    /// Match the mockup's 65% opacity without relying on terminal SGR dim support.
+    /// An unknown shell background uses black for this calculation only; the
+    /// actual background remains the terminal default.
+    pub fn inactive(self, foreground: Color) -> Color {
+        let (r, g, b) = match foreground {
+            Color::Rgb(r, g, b) => (r, g, b),
+            _ => match self.text {
+                Color::Rgb(r, g, b) => (r, g, b),
+                _ => (0xca, 0xd3, 0xf5),
+            },
+        };
+        let (br, bg, bb) = match self.background {
+            Color::Rgb(r, g, b) => (r, g, b),
+            _ => (0, 0, 0),
+        };
+        let blend = |fg: u8, bg: u8| ((u16::from(fg) * 65 + u16::from(bg) * 35) / 100) as u8;
+        Color::Rgb(blend(r, br), blend(g, bg), blend(b, bb))
+    }
 }
 
 fn parse_colour(value: &str) -> Option<Color> {

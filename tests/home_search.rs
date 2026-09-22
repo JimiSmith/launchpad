@@ -620,8 +620,8 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
     assert_eq!(app.focus, Focus::Path);
     app.index_tick();
     assert!(
-        !app.suggestions.is_empty(),
-        "section navigation restores the active path suggestions"
+        app.suggestions.is_empty(),
+        "a recent selection keeps suggestions closed until the path is edited"
     );
 }
 
@@ -630,7 +630,7 @@ fn restricted_state_is_visible_at_minimum_size() {
     use ratatui::{Terminal, backend::TestBackend};
     use zellij_launchpad_core::{app::App, view};
     let mut app = App::default();
-    app.search_status = "HOME access denied. Reopen plugin.".into();
+    app.remote_failed("HOME access denied. Reopen Launchpad.".into());
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
     terminal.draw(|f| view::render(f, &app)).unwrap();
     let text: String = terminal
@@ -704,16 +704,29 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
 }
 
 #[test]
-fn search_status_uses_readable_text_color_not_separator_color() {
+fn search_diagnostics_are_readable_in_help() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{app::App, theme::Theme, view};
-    let app = App::default();
+    use zellij_launchpad_core::{
+        app::{Action, App},
+        theme::Theme,
+        view,
+    };
+    let mut app = App::default();
+    app.search_status = "HOME indexed".into();
+    app.update(Action::Help);
+    app.update(Action::End);
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|f| view::render(f, &app)).unwrap();
-    assert_eq!(
-        terminal.backend().buffer()[(2, 10)].fg,
-        Theme::default().muted
-    );
+    let b = terminal.backend().buffer();
+    let y = (0..24)
+        .find(|&y| {
+            (0..80)
+                .map(|x| b[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Search: HOME indexed")
+        })
+        .unwrap();
+    assert_eq!(b[(2, y)].fg, Theme::default().text);
 }
 
 #[test]

@@ -78,12 +78,12 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     a.update(Action::Clear);
     a.update(Action::Text("~/Projects/修理".into()));
     let b = draw(&a, 80, 24);
-    // Path begins at x=6, y=3; ASCII prefix takes eleven cells.
-    assert_eq!(b[(17, 3)].symbol(), "修");
-    assert_eq!(b[(18, 3)].symbol(), " ");
-    assert_eq!(b[(19, 3)].symbol(), "理");
-    assert_eq!(b[(77, 3)].symbol(), "│");
-    assert_eq!(b[(77, 3)].fg, theme::Theme::default().accent);
+    // Path begins at x=4, y=4; ASCII prefix takes eleven cells.
+    assert_eq!(b[(15, 4)].symbol(), "修");
+    assert_eq!(b[(16, 4)].symbol(), " ");
+    assert_eq!(b[(17, 4)].symbol(), "理");
+    assert_eq!(b[(77, 5)].symbol(), "─");
+    assert_eq!(b[(77, 5)].fg, theme::Theme::default().accent);
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         a.update(Action::Clear);
         a.update(Action::Text("👩🏽‍💻e\u{301}修理/".repeat(50)));
@@ -92,7 +92,7 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     }
 }
 #[test]
-fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
+fn wide_terminals_center_a_maximum_96_column_ui_and_mouse_targets() {
     use ratatui::layout::Rect;
     use view::Pointer;
 
@@ -111,20 +111,20 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
 
     for app in states {
         for height in [24, 36] {
-            let mut baseline = Terminal::new(TestBackend::new(160, height)).unwrap();
+            let mut baseline = Terminal::new(TestBackend::new(96, height)).unwrap();
             let mut base_hits = view::HitMap::default();
             baseline
                 .draw(|f| base_hits = view::render_with_hits(f, &app))
                 .unwrap();
-            for width in [161, 200, 241] {
-                let offset = (width - 160) / 2;
+            for width in [97, 160, 241] {
+                let offset = (width - 96) / 2;
                 let mut wide = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut hits = view::HitMap::default();
                 wide.draw(|f| hits = view::render_with_hits(f, &app))
                     .unwrap();
                 for y in 0..height {
                     for x in 0..width {
-                        if x >= offset && x < offset + 160 {
+                        if x >= offset && x < offset + 96 {
                             assert_eq!(
                                 wide.backend().buffer()[(x, y)],
                                 baseline.backend().buffer()[(x - offset, y)],
@@ -135,12 +135,12 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
                         }
                         for pointer in [Pointer::Click, Pointer::ScrollUp, Pointer::ScrollDown] {
                             let actual = hits.action(pointer, x, y, Rect::new(0, 0, width, height));
-                            let expected = if x >= offset && x < offset + 160 {
+                            let expected = if x >= offset && x < offset + 96 {
                                 base_hits.action(
                                     pointer,
                                     x - offset,
                                     y,
-                                    Rect::new(0, 0, 160, height),
+                                    Rect::new(0, 0, 96, height),
                                 )
                             } else {
                                 None
@@ -159,7 +159,7 @@ fn wide_terminals_center_a_maximum_160_column_ui_and_mouse_targets() {
 }
 
 #[test]
-fn recent_tool_column_fits_twenty_characters_before_the_directory() {
+fn recent_rows_show_directory_first_and_clip_long_tool_labels() {
     let mut a = app();
     a.history.truncate(1);
     a.history[0].path = "/home/example/recent".into();
@@ -174,7 +174,7 @@ fn recent_tool_column_fits_twenty_characters_before_the_directory() {
         let b = draw(&a, w, h);
         let rendered = text(&b);
         assert!(
-            rendered.contains("12345678901234567890 ~/recent"),
+            rendered.contains("~/recent") && rendered.contains("123456789012345678"),
             "{w}x{h}: {rendered}"
         );
     }
@@ -190,35 +190,113 @@ fn minimum_usable_view_keeps_selected_history_visible() {
     assert!(s.contains("literal"), "{s}");
 }
 #[test]
-fn roomy_layout_uses_spare_rows_for_history_rhythm() {
-    let b = draw(&app(), 120, 36);
-    assert_eq!(b[(2, 34)].symbol(), "1");
-    assert_eq!(b[(3, 34)].symbol(), "0");
-}
-#[test]
-fn dashboard_fits_ten_events_and_fixed_tool_order_at_real_terminal_sizes() {
-    for (w, h) in [(80, 24), (120, 36)] {
-        let b = draw(&app(), w, h);
-        let s = text(&b);
-        for label in [
-            "Launchpad",
-            "Directory",
-            "Launch with",
-            "Recent launches",
-            "10 events",
-            "Ctrl+Q",
-            "2d ago",
-        ] {
-            assert!(s.contains(label), "{w}x{h}: {label}");
-        }
-        let tools = ["Shell", "Claude", "Codex", "Copilot", "Hermes"].map(|s1| s.find(s1).unwrap());
-        assert!(tools.windows(2).all(|p| p[0] < p[1]));
-        assert!(
-            b.content
+fn minimal_dashboard_separates_sections_and_dims_inactive_content() {
+    use ratatui::style::Modifier;
+    for focus in [Focus::Path, Focus::Tools, Focus::History] {
+        let mut a = app();
+        a.focus = focus;
+        for (w, h) in [(80, 24), (120, 36)] {
+            let b = draw(&a, w, h);
+            let rendered = text(&b);
+            for label in [
+                "Launchpad",
+                "Directory",
+                "Tool",
+                "Recent",
+                "Launch ↵",
+                "F1 help",
+            ] {
+                assert!(rendered.contains(label), "{w}x{h}: {label}");
+            }
+            for removed in [
+                "01 Directory",
+                "Launch with",
+                " events",
+                "2d ago",
+                "WHEN",
+                "HOME /",
+            ] {
+                assert!(!rendered.contains(removed), "{removed}");
+            }
+            let heading = |label: &str| {
+                (0..h)
+                    .find_map(|y| {
+                        (0..w)
+                            .find(|&x| {
+                                (x..w)
+                                    .map(|c| b[(c, y)].symbol())
+                                    .collect::<String>()
+                                    .starts_with(label)
+                            })
+                            .map(|x| (x, y))
+                    })
+                    .unwrap()
+            };
+            for (label, active) in [
+                ("Directory", Focus::Path),
+                ("Tool", Focus::Tools),
+                ("Recent", Focus::History),
+            ] {
+                let (x, y) = heading(label);
+                let theme = theme::Theme::default();
+                assert_eq!(
+                    b[(x, y)].fg,
+                    if focus == active {
+                        theme.accent
+                    } else {
+                        theme.inactive(theme.muted)
+                    }
+                );
+                assert!(!b[(x, y + 1)].modifier.contains(Modifier::DIM));
+                assert!(
+                    (0..w).all(|x| b[(x, y - 1)].symbol() == " "),
+                    "blank row above {label}"
+                );
+            }
+            let selected = b
+                .content
                 .iter()
-                .any(|c| c.fg == theme::Theme::default().accent)
-        );
-        assert!(!s.contains("one directory"));
+                .find(|c| c.symbol() == "S" && c.modifier.contains(Modifier::UNDERLINED))
+                .unwrap();
+            let theme = theme::Theme::default();
+            assert_eq!(
+                selected.fg,
+                if focus == Focus::Tools {
+                    theme.accent
+                } else {
+                    theme.inactive(theme.accent)
+                }
+            );
+            // Check actual text colours, not just the section labels or SGR flags.
+            let (x, y) = heading("Directory");
+            assert_eq!(
+                b[(x + 2, y + 1)].fg,
+                if focus == Focus::Path {
+                    theme.text
+                } else {
+                    ratatui::style::Color::Rgb(131, 137, 159)
+                }
+            );
+            let (x, y) = heading("Recent");
+            assert_eq!(b[(x, y + 1)].symbol(), "~");
+            assert_eq!(
+                b[(x, y + 1)].modifier.contains(Modifier::UNDERLINED),
+                focus == Focus::History
+            );
+            assert_eq!(
+                b[(x, y + 1)].fg,
+                if focus == Focus::History {
+                    theme.accent
+                } else {
+                    ratatui::style::Color::Rgb(131, 137, 159)
+                }
+            );
+            assert!(
+                b.content
+                    .iter()
+                    .all(|c| c.bg == ratatui::style::Color::Reset)
+            );
+        }
     }
 }
 #[test]
@@ -229,13 +307,50 @@ fn narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls() {
     a.update(Action::End);
     let s = text(&draw(&a, 40, 12));
     assert!(s.contains("Directory"));
-    assert!(s.contains("Hermes"));
     assert!(s.contains("literal"));
     for (w, h) in [(39, 12), (40, 9), (10, 4), (1, 1), (0, 0)] {
         let s = text(&draw(&a, w, h));
         assert!(!s.contains("Launch with"));
         if w >= 10 && h >= 4 {
             assert!(s.contains("Resize"));
+        }
+    }
+}
+
+#[test]
+fn resized_layout_keeps_launch_history_and_errors_reachable() {
+    use ratatui::layout::Rect;
+    use view::Pointer;
+    for w in [40, 48, 60, 80, 96, 160] {
+        for h in 10..=36 {
+            let mut a = app();
+            a.commands.entries[1].label = "A long custom tool label with 修理".into();
+            a.update(Action::Focus(Focus::History));
+            a.update(Action::End);
+            for message in [
+                None,
+                Some("Directory unavailable. Choose another directory and retry.".into()),
+            ] {
+                a.message = message;
+                let area = Rect::new(0, 0, w, h);
+                let mut buffer = Buffer::empty(area);
+                let (hits, _) = view::render_buffer(&mut buffer, &a);
+                for action in [
+                    Action::LaunchForm,
+                    Action::SelectHistory(a.history[a.recent].id),
+                    Action::Help,
+                ] {
+                    assert!(
+                        (0..h).any(|y| (0..w).any(
+                            |x| hits.action(Pointer::Click, x, y, area) == Some(action.clone())
+                        )),
+                        "{w}x{h}: {action:?}"
+                    );
+                }
+                if a.message.is_some() {
+                    assert!(text(&buffer).contains("Directory unavailable"), "{w}x{h}");
+                }
+            }
         }
     }
 }

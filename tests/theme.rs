@@ -122,7 +122,7 @@ fn all_rendered_colours_follow_each_instances_configuration() {
                 let (_, cursor) = view::render_buffer(&mut actual, &app);
                 let mut baseline_app = common::app();
                 baseline_app.configure(&BTreeMap::new());
-                baseline_app.focus = app.focus;
+                baseline_app.update(Action::Focus(app.focus));
                 baseline_app.highlighted = app.highlighted;
                 baseline_app.help = help;
                 baseline_app.message = app.message.clone();
@@ -133,14 +133,28 @@ fn all_rendered_colours_follow_each_instances_configuration() {
                     assert_eq!(actual.symbol(), expected.symbol());
                     assert_eq!(actual.modifier, expected.modifier);
                     for (colour, default) in [(actual.fg, expected.fg), (actual.bg, expected.bg)] {
-                        let index = default_colours
+                        let (index, inactive) = default_colours
                             .iter()
                             .position(|&c| c == default)
-                            .expect("every cell uses a theme role");
+                            .map(|i| (i, false))
+                            .or_else(|| {
+                                default_colours
+                                    .iter()
+                                    .enumerate()
+                                    .skip(1)
+                                    .find(|(_, c)| defaults.inactive(**c) == default)
+                                    .map(|(i, _)| (i, true))
+                            })
+                            .expect("every cell uses a theme role or its inactive colour");
                         seen[index] = true;
+                        let configured = Color::Rgb(index as u8 + 1, 2, 3);
                         assert_eq!(
                             colour,
-                            Color::Rgb(index as u8 + 1, 2, 3),
+                            if inactive {
+                                app.theme.inactive(configured)
+                            } else {
+                                configured
+                            },
                             "role {}",
                             keys[index]
                         );
@@ -150,8 +164,8 @@ fn all_rendered_colours_follow_each_instances_configuration() {
         }
     }
     assert!(
-        seen.into_iter().all(|used| used),
-        "all roles must be exercised"
+        [0, 2, 3, 4, 5, 6, 8].into_iter().all(|role| seen[role]),
+        "all roles used by the minimal design must be exercised"
     );
 }
 
@@ -174,4 +188,18 @@ fn theme_errors_join_command_errors_and_reconfiguration_clears_them() {
     app.configure(&BTreeMap::new());
     assert_eq!(app.config_errors().count(), 0);
     assert_eq!(app.theme, Theme::default());
+}
+
+#[test]
+fn inactive_colours_preserve_hues_and_respect_explicit_backgrounds() {
+    let theme = Theme::default();
+    assert_eq!(theme.inactive(theme.text), Color::Rgb(131, 137, 159));
+    assert_eq!(theme.inactive(theme.accent), Color::Rgb(128, 104, 159));
+    assert_eq!(theme.inactive(Color::Reset), Color::Rgb(131, 137, 159));
+    let theme = Theme {
+        background: Color::Rgb(255, 255, 255),
+        text: Color::Rgb(0, 0, 0),
+        ..theme
+    };
+    assert_eq!(theme.inactive(theme.text), Color::Rgb(89, 89, 89));
 }

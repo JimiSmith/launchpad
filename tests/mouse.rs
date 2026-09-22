@@ -69,7 +69,8 @@ fn history_click_selects_only_then_replay_is_explicit() {
         let event = app.history[9].clone();
         app.update(Action::Tab);
         assert_eq!(app.focus, Focus::Path);
-        assert_ne!(app.tool, event.tool, "Tab does not copy the history tool");
+        assert_eq!(app.tool, event.tool, "recent selection fills the form");
+        assert_eq!(app.editor.text, app.path_label(&event.path));
         assert!(app.take_launch().is_none());
         app.update(Action::Focus(Focus::History));
         app.update(Action::Enter);
@@ -94,17 +95,17 @@ fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
 #[test]
 fn wheel_is_section_local_and_clamped() {
     let mut app = app();
-    wheel(&mut app, 80, 24, 10, 5, true);
+    wheel(&mut app, 80, 24, 10, 6, true);
     assert_eq!(app.highlighted, Some(0));
     for _ in 0..30 {
-        wheel(&mut app, 80, 24, 10, 5, true);
+        wheel(&mut app, 80, 24, 10, 6, true);
     }
     assert_eq!(app.highlighted, Some(app.suggestions.len() - 1));
     for _ in 0..30 {
-        wheel(&mut app, 80, 24, 10, 5, false);
+        wheel(&mut app, 80, 24, 10, 6, false);
     }
     assert_eq!(app.highlighted, Some(0));
-    wheel(&mut app, 80, 24, 10, 14, true);
+    wheel(&mut app, 80, 24, 10, 16, true);
     assert_eq!(app.focus, Focus::History);
     assert_eq!(app.recent, 1);
     for _ in 0..20 {
@@ -139,7 +140,7 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         let mut app = app();
         app.update(Action::Down); // highlighted completion must not hijack explicit launch
-        click_label(&mut app, w, h, "Enter ↵");
+        click_label(&mut app, w, h, "Launch ↵");
         assert_eq!(
             pending(&mut app).1,
             "notes",
@@ -151,34 +152,27 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
         assert!(app.help);
         click_label(&mut app, w, h, "Esc back");
         assert!(!app.help);
-        click_label(&mut app, w, h, "F5");
+        app.update(Action::Reset);
         assert!(!app.touched);
-        click_label(&mut app, w, h, if w == 40 { "^Q" } else { "Ctrl+Q" });
+        app.update(Action::Quit);
         assert!(app.quit);
     }
 }
 #[test]
 fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
     use zellij_launchpad_core::app::Tool;
-    for (w, h, x, y) in [(80, 24, 26, 9), (120, 36, 26, 12), (40, 12, 4, 6)] {
+    for (w, h) in [(80, 24), (120, 36), (40, 12)] {
         let mut app = app();
-        click(&mut app, w, h, x, y);
+        click_label(&mut app, w, h, "Codex");
         assert_eq!(app.focus, Focus::Tools, "{w}x{h}");
-        assert_eq!(
-            app.tool,
-            if w == 40 {
-                Tool::new("copilot").unwrap()
-            } else {
-                Tool::new("codex").unwrap()
-            }
-        );
+        assert_eq!(app.tool, Tool::new("codex").unwrap());
         assert!(app.take_launch().is_none());
     }
 }
 #[test]
 fn suggestion_click_accepts_without_launching() {
     let mut app = app();
-    click(&mut app, 80, 24, 12, 6);
+    click(&mut app, 80, 24, 12, 7);
     assert_eq!(app.focus, Focus::Path);
     let raw = settle(&mut app, Ok(common::DIRECTORIES[1].into()));
     assert_eq!(raw, common::DIRECTORIES[1], "the second visible row");
@@ -192,7 +186,7 @@ fn scrolled_input_maps_visible_origin_and_clipped_tail() {
     use zellij_launchpad_core::cells::{input_cursor, input_window};
     // Still wider than both viewports, with room under the input cap to edit.
     let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(80));
-    for (w, h, x, y, budget) in [(80, 24, 6, 3, 70), (40, 10, 4, 2, 34)] {
+    for (w, h, x, y, budget) in [(80, 24, 4, 4, 74), (40, 10, 3, 2, 36)] {
         let mut app = app();
         app.editor.set(&text);
         let (visible, _) = input_window(&text, text.len(), budget);
@@ -225,7 +219,7 @@ fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
         }
     }
     assert_eq!(
-        map.action(Pointer::Click, 20, 10, Rect::new(0, 0, 80, 24)),
+        map.action(Pointer::Click, 20, 12, Rect::new(0, 0, 80, 24)),
         None
     ); // separator
 }
@@ -258,12 +252,15 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
     assert!(app.message.as_ref().unwrap().contains("unavailable"));
     app.update(Action::Tab);
     assert_eq!(app.focus, Focus::Path);
-    assert_ne!(app.tool, row.tool, "Tab does not copy the unavailable tool");
+    assert_eq!(
+        app.tool, row.tool,
+        "removed tools must not silently become Shell"
+    );
     app.history.clear();
     app.suggestions.clear();
     app.focus = Focus::History;
     app.update(Action::Enter);
-    wheel(&mut app, 80, 24, 10, 14, true);
+    wheel(&mut app, 80, 24, 10, 16, true);
     assert_eq!(app.recent, 5); // no empty-list navigation or implicit launch
     app.update(Action::SelectHistory(u64::MAX));
     app.update(Action::AcceptSuggestion(usize::MAX));
@@ -275,16 +272,47 @@ fn path_click_uses_cells_graphemes_padding_and_focus() {
     let mut app = app();
     app.editor.set("修理/e\u{301}👩🏽‍💻");
     app.focus = Focus::Tools;
-    click(&mut app, 80, 24, 9, 3); // second cell of 理: before the whole grapheme
+    click(&mut app, 80, 24, 7, 4); // second cell of 理: before the whole grapheme
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(app.editor.cursor, "修".len());
-    click(&mut app, 80, 24, 11, 3);
+    click(&mut app, 80, 24, 9, 4);
     assert_eq!(app.editor.cursor, "修理/".len());
-    click(&mut app, 80, 24, 12, 3);
+    click(&mut app, 80, 24, 10, 4);
     assert_eq!(app.editor.cursor, "修理/e\u{301}".len());
-    click(&mut app, 80, 24, 3, 3); // input left padding
+    click(&mut app, 80, 24, 2, 4); // input left padding
     assert_eq!(app.editor.cursor, 0);
-    click(&mut app, 80, 24, 74, 3);
+    click(&mut app, 80, 24, 74, 4);
     assert_eq!(app.editor.cursor, app.editor.text.len());
     assert!(app.take_launch().is_none());
+}
+
+#[test]
+fn recent_selection_keeps_launch_button_and_keyboard_in_agreement() {
+    for selection in [
+        Action::Focus(Focus::History),
+        Action::BackTab,
+        Action::SelectHistory(2),
+    ] {
+        for submit in [Action::Enter, Action::LaunchForm] {
+            let mut a = app();
+            a.update(selection.clone());
+            a.update(Action::Down);
+            let expected = a.history[a.recent].clone();
+            assert_eq!(a.editor.text, a.path_label(&expected.path));
+            assert_eq!(a.tool, expected.tool);
+            assert!(a.suggestions.is_empty());
+            assert!(a.take_launch().is_none());
+            a.update(submit);
+            assert_eq!(settle(&mut a, Ok(expected.path.clone())), expected.path);
+            let launch = a.take_launch().unwrap();
+            assert_eq!((launch.path, launch.tool), (expected.path, expected.tool));
+        }
+    }
+    let mut a = app();
+    a.update(Action::Focus(Focus::History));
+    let mut history = a.history.clone();
+    history.remove(0);
+    a.replace_history(history);
+    assert_eq!(a.editor.text, a.path_label(&a.history[0].path));
+    assert_eq!(a.tool, a.history[0].tool);
 }

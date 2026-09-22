@@ -34,7 +34,8 @@ impl Canvas<'_> {
 fn row(f: &mut Canvas, area: Rect, text: &str, style: Style) {
     if area.width > 0 && area.height > 0 {
         f.render_widget(
-            Paragraph::new(clip(text, area.width as usize)).style(style),
+            Paragraph::new(Line::styled(clip(text, area.width as usize), style))
+                .style(style.remove_modifier(Modifier::UNDERLINED)),
             area,
         );
     }
@@ -82,7 +83,7 @@ fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Actio
                 f,
                 Rect::new(x, area.y, 3, 1).intersection(area),
                 " · ",
-                theme.muted().bg(theme.surface),
+                theme.muted(),
             );
             x += 3;
         }
@@ -91,7 +92,7 @@ fn controls(f: &mut Canvas, hits: &mut HitMap, area: Rect, items: &[(&str, Actio
             break;
         }
         let rect = Rect::new(x, area.y, w, 1);
-        row(f, rect, label, theme.accent().bg(theme.surface));
+        row(f, rect, label, theme.muted());
         hits.add(rect, action.clone());
         x += w;
     }
@@ -165,7 +166,7 @@ fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
     let theme = f.theme;
     let viewport = f.area();
     f.render_widget(Block::default().style(theme.base()), viewport);
-    let width = viewport.width.min(160);
+    let width = viewport.width.min(96);
     let full = Rect::new(
         viewport.x + (viewport.width - width) / 2,
         viewport.y,
@@ -195,60 +196,59 @@ fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
     dashboard(f, app, area, hits);
 }
 
+// Use explicit foreground colours: SGR DIM is not reliably preserved by hosts.
+fn dim_section(f: &mut Canvas, area: Rect, active: bool) {
+    if !active {
+        let area = area.intersection(f.area());
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                let cell = &mut f.buffer[(x, y)];
+                cell.set_fg(f.theme.inactive(cell.fg));
+            }
+        }
+    }
+}
+
 fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let theme = f.theme;
     let short = area.height < 18;
     let roomy = area.height >= 30;
-    let narrow = area.width < 60;
+    let footer_y = area.bottom() - 1 - u16::from(roomy);
+    let mut y = area.y + if roomy { 2 } else { u16::from(!short) };
     pair(
         f,
-        at(area, area.y, 1),
-        "›_ Launchpad",
-        match (app.simulate_launch, narrow) {
-            (false, false) => "HOME / replace this pane",
-            (false, true) => "REPLACE PANE",
-            (true, false) => "HOME / launch suppressed",
-            (true, true) => "SUPPRESSED",
-        },
-        theme.accent().add_modifier(Modifier::BOLD),
-    );
-    let mut y = area.y + if roomy { 2 } else { 1 };
-    section(
-        f,
         at(area, y, 1),
-        "01 Directory",
-        "Ctrl+P",
-        app.focus == Focus::Path,
+        "›_ Launchpad",
+        if app.simulate_launch { "Preview" } else { "" },
+        theme.muted(),
     );
-    y += 1;
-    let path_height = if short { 1 } else { 3 };
-    let input = at(area, y, path_height);
-    let inner = if short {
-        f.render_widget(
-            Block::default().style(theme.base().bg(theme.surface)),
-            input,
-        );
-        input
+    y += if roomy {
+        3
+    } else if short {
+        1
     } else {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(if app.focus == Focus::Path {
-                theme.accent()
-            } else {
-                theme.base().fg(theme.border)
-            })
-            .style(theme.base().bg(theme.surface));
-        let inner = block.inner(input);
-        f.render_widget(block, input);
-        inner
+        2
     };
-    row(
-        f,
-        Rect::new(inner.x + 1, inner.y, 2, 1),
-        "›",
-        theme.accent().bg(theme.surface),
-    );
-    let text_area = Rect::new(inner.x + 3, inner.y, inner.width.saturating_sub(4), 1);
+
+    let directory_y = y;
+    section(f, at(area, y, 1), "Directory", "", app.focus == Focus::Path);
+    y += 1;
+    let input = at(area, y, if short { 1 } else { 2 });
+    let block = Block::default()
+        .borders(if short {
+            Borders::NONE
+        } else {
+            Borders::BOTTOM
+        })
+        .border_style(if app.focus == Focus::Path {
+            theme.accent()
+        } else {
+            theme.base().fg(theme.border)
+        })
+        .style(theme.base());
+    f.render_widget(block, input);
+    row(f, Rect::new(input.x, input.y, 2, 1), "›", theme.accent());
+    let text_area = Rect::new(input.x + 2, input.y, input.width.saturating_sub(2), 1);
     for x in input.x..input.right() {
         let cursor = input_cursor(
             &app.editor.text,
@@ -266,217 +266,174 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         app.editor.cursor,
         text_area.width as usize,
     );
-    row(
-        f,
-        text_area,
-        &visible,
-        theme.base().bg(theme.surface).add_modifier(Modifier::BOLD),
-    );
+    row(f, text_area, &visible, theme.base());
     if app.focus == Focus::Path && text_area.width > 0 {
         f.set_cursor_position((text_area.x + caret as u16, text_area.y));
     }
-    y += path_height;
-    let suggestion_rows: u16 = if short && app.focus == Focus::History && app.message.is_some() {
-        0
-    } else if short {
-        1
-    } else if roomy {
-        4
+    y += input.height;
+    let suggestion_rows = if app.suggestions.is_empty() {
+        u16::from(app.empty_search())
     } else {
-        3
+        app.suggestions.len().min(if short {
+            1
+        } else if roomy {
+            4
+        } else {
+            3
+        }) as u16
     };
-    suggestions(
+    suggestions(f, app, at(area, y, suggestion_rows), hits);
+    y += suggestion_rows;
+    dim_section(
         f,
-        app,
-        Rect::new(area.x, y, area.width, suggestion_rows),
-        hits,
+        Rect::new(area.x, directory_y, area.width, y - directory_y),
+        app.focus == Focus::Path,
     );
-    y += suggestion_rows + u16::from(roomy);
-    let tools_heading = y;
-    section(
-        f,
-        at(area, y, 1),
-        "02 Launch with",
-        "Ctrl+T",
-        app.focus == Focus::Tools,
-    );
+    y += if short {
+        0
+    } else if roomy {
+        2
+    } else {
+        1
+    };
+
+    let tools_y = y;
+    section(f, at(area, y, 1), "Tool", "", app.focus == Focus::Tools);
     y += 1;
-    let tools = app.visible_tools();
+    // Reserve space beside the tools for Launch, even when labels wrap.
+    let tool_width = area.width.saturating_sub(12);
+    let mut tools = app.visible_tools();
+    if !app.available(app.tool) {
+        tools.push(app.tool);
+    }
     let selected = tools.iter().position(|&t| t == app.tool).unwrap_or(0);
     let mut positions = Vec::new();
     let (mut column, mut tool_row) = (0u16, 0u16);
     for &tool in &tools {
-        let label = clip(&app.tool_label(tool), area.width.saturating_sub(4) as usize);
-        let label = if app.tool == tool {
-            format!("[ {label} ]")
+        let label = if app.available(tool) {
+            app.tool_label(tool)
         } else {
-            format!("  {label}  ")
+            format!("! {}", app.tool_label(tool))
         };
+        let label = clip(&label, tool_width as usize);
         let w = width(&label) as u16;
-        if column > 0 && column + w > area.width {
+        if column > 0 && column + w > tool_width {
             column = 0;
             tool_row += 1;
         }
         positions.push((tool_row, column, w, label));
-        column += w + 1;
+        column += w + 3;
     }
-    let max_rows = if short
-        && (app.focus == Focus::History
-            || app.message.is_some()
-            || app.config_errors().next().is_some())
-    {
+    let max_rows = if area.height < 12 || (!short && area.height < 24) {
         1
     } else {
         2
     };
     let start = positions[selected].0.saturating_sub(max_rows - 1);
     let visible_rows = (tool_row + 1).min(max_rows);
-    let mut x = area.x;
+    let mut end_x = area.x;
     for (&tool, (r, col, w, label)) in tools.iter().zip(&positions) {
         if *r < start || *r >= start + visible_rows {
             continue;
         }
-        let row_y = y + r - start;
-        x = area.x + col;
         let style = if app.tool == tool {
-            if app.focus == Focus::Tools {
-                theme
-                    .base()
-                    .fg(theme.on_accent)
-                    .bg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                theme.accent()
-            }
+            theme.accent().add_modifier(Modifier::UNDERLINED)
         } else {
             theme.muted()
         };
-        row(f, Rect::new(x, row_y, *w, 1), label, style);
-        hits.add(Rect::new(x, row_y, *w, 1), Action::SelectTool(tool));
-        x += w + 1;
+        let rect = Rect::new(area.x + col, y + r - start, *w, 1);
+        row(f, rect, label, style);
+        hits.add(rect, Action::SelectTool(tool));
+        end_x = end_x.max(rect.right());
     }
-    y += visible_rows - 1;
     if tool_row + 1 > visible_rows {
-        let heading = Rect::new(area.right() - 22, tools_heading, 14, 1);
-        row(
-            f,
-            heading,
-            &format!("‹ {:02}/{:02} ›", selected + 1, tools.len()),
-            theme.accent(),
-        );
+        let hint = format!("‹ {}/{} ›", selected + 1, tools.len());
+        let w = width(&hint) as u16;
+        let heading = Rect::new(area.right() - w, tools_y, w, 1);
+        row(f, heading, &hint, theme.muted());
         hits.add(
-            Rect::new(heading.x, heading.y, 2, 1),
+            Rect::new(heading.x, heading.y, 1, 1),
             Action::SelectTool(tools[(selected + tools.len() - 1) % tools.len()]),
         );
         hits.add(
-            Rect::new(heading.x + 8, heading.y, 2, 1),
+            Rect::new(heading.right() - 1, heading.y, 1, 1),
             Action::SelectTool(tools[(selected + 1) % tools.len()]),
         );
     }
-    if !narrow && x + 12 <= area.right() {
-        row(
-            f,
-            Rect::new(area.right() - 12, y, 12, 1),
-            " Enter ↵ ",
-            theme.base().fg(theme.on_accent).bg(theme.accent),
-        );
-        hits.add(Rect::new(area.right() - 12, y, 12, 1), Action::LaunchForm);
+    let launch = Rect::new(end_x + 4, y, 8, 1);
+    row(f, launch, "Launch ↵", theme.accent());
+    hits.add(launch, Action::LaunchForm);
+    y += visible_rows;
+    dim_section(
+        f,
+        Rect::new(area.x, tools_y, area.width, y - tools_y),
+        app.focus == Focus::Tools,
+    );
+    y += if short {
+        1
+    } else if roomy {
+        3
     } else {
-        controls(
-            f,
-            hits,
-            Rect::new(area.right() - 7, tools_heading, 7, 1),
-            &[("Enter ↵", Action::LaunchForm)],
-        );
-    }
-    y += 1;
+        2
+    };
+
+    // Keep errors visible, with room for a recent row and the footer at small sizes.
     let config_error = app.config_errors().next().map(|e| {
         format!(
             "Config error: {e} (F1: all {} errors)",
             app.config_errors().count()
         )
     });
-    let status_height = if let Some(message) = app.message.as_ref().or(config_error.as_ref()) {
-        let max_height = if short && app.focus == Focus::History {
-            area.bottom().saturating_sub(y + 3).clamp(1, 3)
-        } else {
-            3
-        };
-        let h = (width(message).div_ceil(area.width as usize) as u16).clamp(1, max_height);
-        f.render_widget(
-            Paragraph::new(message.as_str())
-                .style(theme.base().fg(theme.error))
-                .wrap(Wrap { trim: false }),
-            at(area, y, h),
-        );
-        h
-    } else if short {
-        0
-    } else {
-        row(f, at(area, y, 1), &app.search_status, theme.muted());
-        1
-    };
-    y += status_height;
-    let footer_y = area.bottom() - 1;
-    hits.wheels.push((
-        Rect::new(area.x, y, area.width, footer_y.saturating_sub(y)),
-        ScrollTarget::History,
-    ));
-    let columns = u16::from(!short);
-    let free_rows = footer_y.saturating_sub(y + 1 + columns) as usize;
-    let count = app.history.len();
-    let row_step = if roomy && count > 0 && free_rows >= count * 2 - 1 {
-        2
-    } else {
-        1
-    };
+    if let Some(message) = app.message.as_ref().or(config_error.as_ref()) {
+        let max_height = footer_y.saturating_sub(y + 2).clamp(1, 3);
+        let paragraph = Paragraph::new(message.as_str())
+            .style(theme.base().fg(theme.error))
+            .wrap(Wrap { trim: false });
+        let h = (paragraph.line_count(area.width) as u16).clamp(1, max_height);
+        // On the smallest screen use the section gap for the status.
+        if short {
+            y = y.saturating_sub(1);
+        }
+        f.render_widget(paragraph, at(area, y, h));
+        y += h;
+    }
+    let history_y = y;
+    let free_rows = footer_y.saturating_sub(y + 1 + u16::from(!short)) as usize;
+    let row_step = if roomy { 2 } else { 1 };
     let available_rows = free_rows.div_ceil(row_step);
+    let count = app.history.len();
     let start = app.recent.saturating_sub(available_rows.saturating_sub(1));
-    let count_label = if available_rows > 0 && available_rows < count {
+    let range = if available_rows > 0 && available_rows < count {
         format!(
-            "{}–{}/{}",
+            "{}–{} / {}",
             (start + 1).min(count),
             (start + available_rows).min(count),
             count
         )
     } else {
-        format!("{count} events")
-    };
-    let label = if narrow {
-        format!("03 Recent · {count_label}")
-    } else {
-        format!("03 Recent launches · {count_label}")
+        String::new()
     };
     if y < footer_y {
         section(
             f,
             at(area, y, 1),
-            &label,
-            "Ctrl+R",
+            "Recent",
+            &range,
             app.focus == Focus::History,
         );
     }
     y += 1;
-    if !short && y < footer_y {
-        history_row(
-            f,
-            at(area, y, 1),
-            "",
-            "TOOL",
-            "DIRECTORY",
-            "WHEN",
-            theme.muted(),
-            !narrow,
-        );
-        y += 1;
-    }
+    hits.wheels.push((
+        Rect::new(
+            area.x,
+            history_y,
+            area.width,
+            footer_y.saturating_sub(history_y),
+        ),
+        ScrollTarget::History,
+    ));
     if app.history.is_empty() && y < footer_y {
-        row(
-            f,
-            at(area, y, 1),
-            "No recent launches. Choose a directory.",
-            theme.muted(),
-        );
+        row(f, at(area, y, 1), "No recent launches", theme.muted());
     }
     for (i, event) in app
         .history
@@ -487,89 +444,63 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     {
         let active = i == app.recent && app.focus == Focus::History;
         let style = if active {
-            theme.accent().bg(theme.raised)
+            theme.accent().add_modifier(Modifier::UNDERLINED)
         } else {
             theme.base()
         };
         let a = at(area, y, 1);
         hits.add(a, Action::SelectHistory(event.id));
-        f.render_widget(Block::default().style(style), a);
-        let marker = if active {
-            "›".into()
-        } else {
-            format!("{:02}", i + 1)
-        };
-        let available = app.available(event.tool);
-        let tool = format!(
-            "{}{}",
-            if available { "" } else { "!" },
+        let tool = if app.available(event.tool) {
             app.tool_label(event.tool)
-        );
-        history_row(
-            f,
-            a,
-            &marker,
-            &tool,
-            &app.path_label(&event.path),
-            if available { &event.age } else { "unavailable" },
-            style,
-            !narrow,
-        );
+        } else {
+            format!("! {}", app.tool_label(event.tool))
+        };
+        let tool = clip(&tool, (a.width / 2) as usize);
+        pair(f, a, &app.path_label(&event.path), &tool, style);
         y += row_step as u16;
     }
+    dim_section(
+        f,
+        Rect::new(
+            area.x,
+            history_y,
+            area.width,
+            footer_y.saturating_sub(history_y),
+        ),
+        app.focus == Focus::History,
+    );
+
     let foot = at(area, footer_y, 1);
-    let global = if narrow {
-        [
-            ("F1", Action::Help),
-            ("F5", Action::Reset),
-            ("^Q", Action::Quit),
-        ]
-    } else {
-        [
-            ("F1 help", Action::Help),
-            ("F5 reset", Action::Reset),
-            ("Ctrl+Q quit", Action::Quit),
-        ]
+    let hints = match app.focus {
+        Focus::Path if area.width < 60 && app.highlighted.is_some() => "Tab next · ↵ choose",
+        Focus::Tools if area.width < 60 => "Tab next · ←→ · ↵ launch",
+        Focus::History if area.width < 60 => "Tab next · ↑↓ · ↵ launch",
+        Focus::Path if app.highlighted.is_some() => "Tab next · ↵ choose directory",
+        Focus::Path => "Tab next · ↵ launch",
+        Focus::Tools => "Tab next · ←→ tool · ↵ launch",
+        Focus::History => "Tab next · ↑↓ recent · ↵ launch",
     };
-    let global_width = global.iter().map(|(s, _)| width(s) as u16).sum::<u16>() + 6;
-    let left = Rect::new(
-        foot.x,
-        foot.y,
-        foot.width.saturating_sub(global_width + 1),
-        1,
+    row(
+        f,
+        Rect::new(foot.x, foot.y, foot.width - 9, 1),
+        hints,
+        theme.muted(),
     );
     controls(
         f,
         hits,
-        Rect::new(foot.right() - global_width, foot.y, global_width, 1),
-        &global,
+        Rect::new(foot.right() - 7, foot.y, 7, 1),
+        &[("F1 help", Action::Help)],
     );
-    let hints = match (app.focus, narrow) {
-        (Focus::Path, true) => "PATH Tab next · ↑↓",
-        (Focus::Path, false) => "PATH Tab next section · ↑↓ select",
-        (Focus::Tools, true) => "TOOLS Tab next · ←→",
-        (Focus::Tools, false) => "TOOLS Tab next · ←→ choose · Enter",
-        (Focus::History, true) => "RECENT Tab next · ↑↓",
-        (Focus::History, false) => "RECENT Tab next · ↑↓ select · Enter replay",
-    };
-    row(f, left, hints, theme.accent().bg(theme.surface));
 }
 
 fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let theme = f.theme;
-    if app.suggestions.is_empty() {
-        row(
-            f,
-            at(area, area.y, 1),
-            if area.width < 60 {
-                &app.search_status
-            } else if app.message.is_some() {
-                "Edit the path or choose another directory."
-            } else {
-                "Enter launches · edit to search · ↓ tools"
-            },
-            theme.muted(),
-        );
+    if area.is_empty() {
+        return;
+    }
+    if app.empty_search() {
+        row(f, at(area, area.y, 1), "No suggestions", theme.muted());
         return;
     }
     hits.wheels.push((area, ScrollTarget::Suggestions));
@@ -588,62 +519,21 @@ fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         let d = &app.dirs[index];
         let a = at(area, area.y + r as u16, 1);
         hits.add(a, Action::AcceptSuggestion(index));
-        let active = app.highlighted == Some(i);
+        let active = app.highlighted == Some(i) && app.focus == Focus::Path;
         let style = if active {
-            theme.accent().bg(theme.raised)
+            theme
+                .accent()
+                .bg(theme.raised)
+                .add_modifier(Modifier::UNDERLINED)
         } else {
             theme.base()
         };
-        f.render_widget(Block::default().style(style), a);
-        let label = format!(
-            " {} {}/",
-            if active { "›" } else { "·" },
-            app.path_label(&d.path)
+        f.render_widget(
+            Block::default().style(style.remove_modifier(Modifier::UNDERLINED)),
+            a,
         );
-        if area.width >= 70 {
-            pair(f, a, &label, d.note, style);
-        } else {
-            row(f, a, &label, style);
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn history_row(
-    f: &mut Canvas,
-    a: Rect,
-    marker: &str,
-    tool: &str,
-    path: &str,
-    age: &str,
-    style: Style,
-    show_age: bool,
-) {
-    let theme = f.theme;
-    row(f, Rect::new(a.x, a.y, 3, 1), marker, style.fg(theme.muted));
-    let tool_width = 20;
-    let path_offset = 3 + tool_width + 1;
-    row(f, Rect::new(a.x + 3, a.y, tool_width, 1), tool, style);
-    let age_width = if show_age { 12 } else { 0 };
-    row(
-        f,
-        Rect::new(
-            a.x + path_offset,
-            a.y,
-            a.width.saturating_sub(path_offset + age_width),
-            1,
-        ),
-        path,
-        style,
-    );
-    if show_age {
-        let w = width(age) as u16;
-        row(
-            f,
-            Rect::new(a.right() - w, a.y, w, 1),
-            age,
-            style.fg(theme.muted),
-        );
+        let label = format!("{}/", app.path_label(&d.path));
+        row(f, a, &label, style);
     }
 }
 

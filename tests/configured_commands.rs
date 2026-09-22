@@ -201,7 +201,7 @@ fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
             );
             for y in 0..h {
                 for x in 0..w {
-                    if w > 160 && !(20..180).contains(&x) {
+                    if w > 96 && !((w - 96) / 2..(w - 96) / 2 + 96).contains(&x) {
                         assert!(hits.action(Pointer::Click, x, y, area).is_none());
                         assert_eq!(terminal.backend().buffer()[(x, y)].symbol(), " ");
                     }
@@ -330,11 +330,11 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
             })
             .unwrap();
         assert!(
-            (x..x + 12).any(|col| frame.buffer[(col, y)].symbol() == "!"),
+            (x..w).any(|col| frame.buffer[(col, y)].symbol() == "!"),
             "unavailable marker must survive tool clipping at {w}x{h}"
         );
         assert_eq!(
-            frame.buffer[(x + 24, y)].symbol(),
+            frame.buffer[(x, y)].symbol(),
             "~",
             "status must not shift directory cells"
         );
@@ -352,7 +352,11 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
         assert!(app.take_launch().is_none());
         app.update(Action::Tab);
         assert_eq!(app.focus, Focus::Path);
-        assert_eq!(app.tool, Tool::Shell, "Tab does not copy the history tool");
+        assert_eq!(
+            app.tool,
+            Tool::new("removed-long-id").unwrap(),
+            "keep the removed tool explicit"
+        );
     }
 }
 

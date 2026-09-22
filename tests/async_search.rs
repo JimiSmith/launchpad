@@ -41,6 +41,12 @@ fn segment_actions_are_ignored_outside_active_path_editor() {
     ] {
         let mut app = App::from_remote("/home/example".into());
         app.editor.set("foo/bar");
+        app.history.push(zellij_launchpad_core::app::Launch {
+            id: 1,
+            path: "/home/example/foo/bar".into(),
+            tool: zellij_launchpad_core::app::Tool::Shell,
+            age: "now".into(),
+        });
         app.focus = focus;
         app.take_remote_request();
         app.update(Action::LaunchForm);
@@ -284,7 +290,11 @@ fn timeout_during_selection_discards_delayed_reply() {
     app.remote_failed("Worker timed out".into());
     assert!(!app.finish_remote_validation(generation, Ok("/home/example/notes".into())));
     app.update(Action::Tab);
-    assert_eq!(app.message, None, "Tab must not retry a failed selection");
+    assert_eq!(
+        app.message.as_deref(),
+        Some("Worker timed out"),
+        "Tab keeps the failure visible without retrying"
+    );
     assert_eq!(app.editor.text, "~");
     assert!(app.take_remote_request().is_none());
     assert!(app.take_launch().is_none());
@@ -440,8 +450,11 @@ fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
     app.update(Action::Focus(Focus::History));
     app.update(Action::Tab);
     assert_eq!(app.focus, Focus::Path);
-    assert_eq!(app.editor.text, "~");
-    assert!(app.apply_remote_results(0, vec!["/home/example/late".into()]));
+    assert_eq!(app.editor.text, "~/saved");
+    assert!(!app.apply_remote_results(0, vec!["/home/example/late".into()]));
+    app.update(Action::Text("a".into()));
+    let query = app.take_remote_request().unwrap().generation();
+    assert!(app.apply_remote_results(query, vec!["/home/example/late".into()]));
     app.remote_progress(100, "HOME indexed".into());
     app.update(Action::AcceptSuggestion(0));
     let generation = app.take_remote_request().unwrap().generation();

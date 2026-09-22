@@ -363,7 +363,7 @@ impl History {
             Ok(rows) => self.rows = rows,
             Err(error) => app.message = Some(format!("History unavailable: {error}")),
         }
-        app.history = self
+        let history = self
             .rows
             .iter()
             .enumerate()
@@ -374,7 +374,7 @@ impl History {
                 age: history::age(row.opened_at, now),
             })
             .collect();
-        app.recent = app.recent.min(self.rows.len().saturating_sub(1));
+        app.replace_history(history);
     }
     fn mutate(&mut self, app: &mut App, mutation: HistoryMutation) {
         let (token, _) = self.token();

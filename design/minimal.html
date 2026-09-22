@@ -44,7 +44,8 @@
     input { flex: 1; width: 100%; min-width: 0; border: 0; outline: none; background: none; font-size: 18px; caret-color: var(--accent); }
     input::placeholder { color: var(--muted); }
     .suggestions { margin-top: 12px; }
-    .suggestion { display: block; width: 100%; padding: 7px 12px; text-align: left; font-size: 13px; overflow-wrap: anywhere; }
+    .suggestion { display: block; width: 100%; padding: 7px 12px 7px 0; text-align: left; font-size: 13px; overflow-wrap: anywhere; }
+    .suggestion[aria-selected="true"] { text-decoration: underline; text-underline-offset: 4px; }
     .suggestion:hover, .suggestion[aria-selected="true"] { color: var(--accent); background: var(--raised); }
     .empty { color: var(--muted); margin: 12px 0 0; font-size: 12px; }
     .tool-line { display: flex; align-items: center; gap: 40px; }
@@ -55,12 +56,11 @@
     .launch:hover { background: var(--raised); }
     .launch span { margin-left: 15px; }
     .history { display: grid; gap: 3px; }
-    .recent { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; width: 100%; padding: 9px 10px 9px 0; text-align: left; }
+    .recent { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; width: 100%; padding: 9px 10px 9px 0; text-align: left; }
     .recent-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .recent-tool { font-size: 12px; color: var(--muted); }
-    .marker { color: var(--accent); visibility: hidden; }
     .section[data-active="true"] .recent[aria-selected="true"] { color: var(--accent); }
-    .section[data-active="true"] .recent[aria-selected="true"] .marker { visibility: visible; }
+    .section[data-active="true"] .recent[aria-selected="true"] .recent-path { text-decoration: underline; text-underline-offset: 4px; }
     .recent:hover { background: var(--raised); }
     footer { margin: 66px 0 0; min-height: 46px; color: var(--muted); font-size: 11px; }
     .hints { display: flex; gap: 25px; flex-wrap: wrap; opacity: .65; }
@@ -136,13 +136,13 @@
           <h2 id="recent-heading">Recent</h2>
           <div class="history" role="listbox" aria-label="Recent launches">
             <button class="recent" role="option" aria-selected="true" tabindex="0" data-tool="Claude" data-path="~/Projects/zellij-launchpad">
-              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/Projects/zellij-launchpad</span><span class="recent-tool">Claude</span>
+              <span class="recent-path">~/Projects/zellij-launchpad</span><span class="recent-tool">Claude</span>
             </button>
             <button class="recent" role="option" aria-selected="false" tabindex="-1" data-tool="Codex" data-path="~/Projects/website">
-              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/Projects/website</span><span class="recent-tool">Codex</span>
+              <span class="recent-path">~/Projects/website</span><span class="recent-tool">Codex</span>
             </button>
             <button class="recent" role="option" aria-selected="false" tabindex="-1" data-tool="Shell" data-path="~/notes">
-              <span class="marker" aria-hidden="true">›</span><span class="recent-path">~/notes</span><span class="recent-tool">Shell</span>
+              <span class="recent-path">~/notes</span><span class="recent-tool">Shell</span>
             </button>
           </div>
         </section>
