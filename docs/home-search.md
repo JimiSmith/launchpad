@@ -72,7 +72,18 @@ scratch. There is no expiry timer or filesystem watcher.
 ## Matching and input
 
 Frizbee ranks candidates using the existing normalization and matching behavior.
-The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
+Each directory scores the better of its full path and its own name. Equal scores
+are common because Frizbee ignores text after the best alignment, so ties are
+broken in order by:
+
+1. the directory's own name containing the query's last typed `/` segment
+   (substring; skipped for a trailing `/`, `~`, `.` and `..`), so `repo/branch`
+   prefers the checkout over folders inside it;
+2. the most recent launch from history;
+3. fewer path components;
+4. path order.
+
+Tie-breaks never outrank a higher score or change which directories match. The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
 Queries over 100 Unicode scalar values return no suggestions, including after
 HOME expansion. This bounds matcher scratch allocation; short queries can still
 match long directory names.
