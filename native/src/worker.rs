@@ -120,7 +120,11 @@ fn run(
                 state.restart();
             }
             let reply = match request {
-                RemoteRequest::Query { generation, text } => {
+                RemoteRequest::Query {
+                    generation,
+                    text,
+                    recent,
+                } => {
                     let mut bytes = 0;
                     let paths = if text.chars().count() > MAX_INPUT_CHARS {
                         Vec::new()
@@ -129,6 +133,7 @@ fn run(
                             &text,
                             state.dirs(),
                             home.to_str().unwrap(),
+                            &recent,
                         )
                         .into_iter()
                         .take(100)

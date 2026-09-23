@@ -148,6 +148,7 @@ fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation(
                 request: RemoteRequest::Query {
                     generation: 18,
                     text: "needle".into(),
+                    recent: Vec::new(),
                 },
             })
             .unwrap();

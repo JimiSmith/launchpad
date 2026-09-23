@@ -22,7 +22,10 @@ fn segment_edits_refresh_search_but_motion_does_not() {
         assert_eq!(app.editor.text, expected);
         assert!(app.touched);
         assert!(!app.apply_remote_results(old, vec!["/home/example/stale".into()]));
-        let Some(RemoteRequest::Query { text, generation }) = app.take_remote_request() else {
+        let Some(RemoteRequest::Query {
+            text, generation, ..
+        }) = app.take_remote_request()
+        else {
             panic!()
         };
         assert_eq!(text, expected);
@@ -95,14 +98,20 @@ fn async_search_coalesces_edits_and_rejects_dismissed_or_stale_results() {
     let mut app = App::from_remote("/home/example".into());
     app.update(Action::Clear);
     app.update(Action::Text("nts".into()));
-    let RemoteRequest::Query { generation, text } = app.take_remote_request().unwrap() else {
+    let RemoteRequest::Query {
+        generation, text, ..
+    } = app.take_remote_request().unwrap()
+    else {
         panic!()
     };
     assert_eq!(text, "nts");
     app.update(Action::Text("x".into()));
     app.update(Action::Backspace);
     assert!(!app.apply_remote_results(generation, vec!["/home/example/notes".into()]));
-    let RemoteRequest::Query { generation, text } = app.take_remote_request().unwrap() else {
+    let RemoteRequest::Query {
+        generation, text, ..
+    } = app.take_remote_request().unwrap()
+    else {
         panic!()
     };
     assert_eq!(text, "nts");
@@ -260,6 +269,7 @@ fn cancelling_delayed_validation_clears_status_and_restores_search() {
             let Some(RemoteRequest::Query {
                 generation: next,
                 text: query,
+                ..
             }) = app.take_remote_request()
             else {
                 panic!("cancelled validation must resume search: {start:?}, {action:?}")

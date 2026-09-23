@@ -26,8 +26,11 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
     crate::host_path::normalize(raw, home)
 }
 
-/// Embedded Frizbee ranks basename and full path; path order breaks ties.
-pub fn matches_in(raw: &str, dirs: &[Directory], home: &str) -> Vec<usize> {
+/// Embedded Frizbee ranks basename and full path. Equal scores prefer launch
+/// history (`recent`, most recent first), then shallower paths, then path order.
+/// History only breaks ties: Frizbee's local alignment ignores trailing text,
+/// so a project and all of its subdirectories often score identically.
+pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) -> Vec<usize> {
     use neo_frizbee::{Config, Matcher};
     if raw.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
@@ -87,16 +90,39 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str) -> Vec<usize> {
         let score = &mut scores[m.index as usize];
         *score = Some(score.unwrap_or(0).max(m.score));
     }
+    // History uses the index's canonical host form: no trailing separators, `~`
+    // expanded, and Windows components compared case-insensitively.
+    let recent: Vec<_> = recent
+        .iter()
+        .filter_map(|path| normalize_in(path, home))
+        .collect();
+    let launched = |path: &str| {
+        recent.iter().position(|r| {
+            if windows {
+                r.eq_ignore_ascii_case(path)
+            } else {
+                r == path
+            }
+        })
+    };
     let mut ranked: Vec<_> = scores
         .into_iter()
         .enumerate()
-        .filter_map(|(i, score)| score.map(|s| (i, s)))
+        .filter_map(|(i, score)| {
+            let score = score?;
+            let depth = paths[i].split('/').filter(|p| !p.is_empty()).count();
+            // Never-launched sorts after every launched directory.
+            let recency = launched(&dirs[i].path).unwrap_or(usize::MAX);
+            Some((i, score, recency, depth))
+        })
         .collect();
     ranked.sort_by(|a, b| {
         b.1.cmp(&a.1)
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(&b.3))
             .then_with(|| dirs[a.0].path.cmp(&dirs[b.0].path))
     });
-    ranked.into_iter().map(|(i, _)| i).collect()
+    ranked.into_iter().map(|(i, ..)| i).collect()
 }
 
 #[derive(Debug, Clone)]

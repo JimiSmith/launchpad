@@ -1,8 +1,17 @@
 //! UI-side worker demand: one replaceable latest query, never a catalogue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteRequest {
-    Query { generation: u64, text: String },
-    Validate { generation: u64, raw: String },
+    /// `recent` holds launch-history directories, most recent first; the
+    /// worker uses them only to break equal search scores.
+    Query {
+        generation: u64,
+        text: String,
+        recent: Vec<String>,
+    },
+    Validate {
+        generation: u64,
+        raw: String,
+    },
 }
 impl RemoteRequest {
     pub fn generation(&self) -> u64 {

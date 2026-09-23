@@ -174,7 +174,7 @@ fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
             expected.as_str(),
         ] {
             assert_eq!(index.validate(raw).unwrap(), expected);
-            let results = matches_in(raw, &index.dirs, home);
+            let results = matches_in(raw, &index.dirs, home, &[]);
             assert_eq!(index.dirs[results[0]].path, expected);
         }
         for invalid in [
@@ -203,9 +203,9 @@ fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
         note: "directory",
         error: None,
     }];
-    assert!(matches_in(&"a".repeat(101), &dirs, &home).is_empty());
-    assert!(matches_in("~/needle", &dirs, &home).is_empty());
-    assert_eq!(matches_in("needle", &dirs, &home), vec![0]);
+    assert!(matches_in(&"a".repeat(101), &dirs, &home, &[]).is_empty());
+    assert!(matches_in("~/needle", &dirs, &home, &[]).is_empty());
+    assert_eq!(matches_in("needle", &dirs, &home, &[]), vec![0]);
 }
 
 #[test]
@@ -775,4 +775,165 @@ fn byte_budget_stops_before_retaining_long_paths() {
     assert!(!index.is_scanning());
     assert!(index.dirs.is_empty());
     assert!(index.status().contains("limit"));
+}
+
+fn ranked(raw: &str, paths: &[String], home: &str, recent: &[String]) -> Vec<String> {
+    use zellij_launchpad_core::search::{Directory, matches_in};
+    let dirs: Vec<_> = paths
+        .iter()
+        .map(|path| Directory {
+            path: path.clone(),
+            note: "directory",
+            error: None,
+        })
+        .collect();
+    matches_in(raw, &dirs, home, recent)
+        .into_iter()
+        .map(|i| paths[i].clone())
+        .collect()
+}
+
+#[test]
+fn equal_scores_prefer_shallower_directories_over_path_order() {
+    // Frizbee's local alignment ignores trailing text, so `proj/zel` scores a
+    // project and every subdirectory of a sibling project identically.
+    let tree = Tree::new();
+    for sub in [
+        "crates/core/src",
+        "crates/cli/src",
+        "docs/adr",
+        "assets",
+        "target/debug",
+    ] {
+        tree.dir(&format!("Projects/zellij-agent-wrangler/{sub}"));
+    }
+    tree.dir("Projects/zellij-launchpad");
+    let mut index = HomeIndex::new("/home/ada".into(), tree.0.clone()).unwrap();
+    while index.is_scanning() {
+        index.step(128);
+    }
+    let paths: Vec<_> = index.dirs.iter().map(|d| d.path.clone()).collect();
+    for raw in ["proj/zel", "~/Projects/zel", "proj/zell"] {
+        let results = ranked(raw, &paths, "/home/ada", &[]);
+        let launchpad = results
+            .iter()
+            .position(|p| p == "/home/ada/Projects/zellij-launchpad")
+            .unwrap();
+        assert!(launchpad <= 1, "{raw}: {results:?}");
+        for (rank, path) in results.iter().enumerate() {
+            if path.starts_with("/home/ada/Projects/zellij-agent-wrangler/") {
+                assert!(rank > launchpad, "{raw}: {results:?}");
+            }
+        }
+    }
+    // Windows HOME paths count components the same way.
+    let home = r"C:\Users\Ada";
+    let paths: Vec<_> = [
+        r"C:\Users\Ada\Projects\zellij-agent-wrangler\crates\core",
+        r"C:\Users\Ada\Projects\zellij-agent-wrangler",
+        r"C:\Users\Ada\Projects\zellij-launchpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    let results = ranked("proj/zel", &paths, home, &[]);
+    assert_eq!(results[2], paths[0], "{results:?}");
+}
+
+#[test]
+fn equal_scores_prefer_recent_launches_then_depth() {
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/Projects/zellij-agent-wrangler/crates",
+        "/home/ada/Projects/zellij-agent-wrangler",
+        "/home/ada/Projects/zellij-launchpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    let wrangler = paths[1].clone();
+    let launchpad = paths[2].clone();
+    // Without history: depth, then path order.
+    assert_eq!(
+        ranked("proj/zel", &paths, home, &[])[..2],
+        [wrangler.clone(), launchpad.clone()]
+    );
+    // History spellings normalize to the index's canonical form.
+    for spelling in [
+        "/home/ada/Projects/zellij-launchpad",
+        "/home/ada/Projects/zellij-launchpad/",
+        "~/Projects/zellij-launchpad",
+        "/home/ada/Projects/./zellij-launchpad",
+    ] {
+        let results = ranked("proj/zel", &paths, home, &[spelling.into()]);
+        assert_eq!(results[0], launchpad, "{spelling}");
+        assert_eq!(results[1], wrangler, "{spelling}");
+    }
+    // More recent (earlier in history) wins; a launched deep directory beats
+    // unlaunched shallow ones, but never a higher score.
+    let recent = [launchpad.clone(), paths[0].clone()];
+    assert_eq!(
+        ranked("proj/zel", &paths, home, &recent),
+        [launchpad.clone(), paths[0].clone(), wrangler.clone()]
+    );
+    let recent = [paths[0].clone(), launchpad.clone()];
+    assert_eq!(
+        ranked("proj/zel", &paths, home, &recent),
+        [paths[0].clone(), launchpad.clone(), wrangler.clone()]
+    );
+    assert_eq!(ranked("launchpad", &paths, home, &[wrangler])[0], launchpad);
+    // Windows history compares case-insensitively and accepts either separator.
+    let home = r"C:\Users\Ada";
+    let paths: Vec<_> = [
+        r"C:\Users\Ada\Projects\zellij-agent-wrangler",
+        r"C:\Users\Ada\Projects\zellij-launchpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    for spelling in [
+        r"c:\users\ada\projects\ZELLIJ-LAUNCHPAD\",
+        "C:/Users/Ada/Projects/zellij-launchpad",
+        r"~\Projects\zellij-launchpad",
+    ] {
+        assert_eq!(
+            ranked("proj/zel", &paths, home, &[spelling.into()])[0],
+            paths[1],
+            "{spelling}"
+        );
+    }
+}
+
+#[test]
+fn launched_directories_win_suggestion_ties_locally_and_remotely() {
+    use zellij_launchpad_core::{
+        app::{Action, App, Launch, Tool},
+        remote::RemoteRequest,
+    };
+    let tree = Tree::new();
+    tree.dir("Projects/zellij-agent-wrangler");
+    tree.dir("Projects/zellij-launchpad");
+    let launchpad = tree.0.join("Projects/zellij-launchpad");
+    let launchpad = launchpad.to_str().unwrap().to_owned();
+    let history = vec![Launch {
+        id: 1,
+        path: launchpad.clone(),
+        tool: Tool::Shell,
+        age: "Just now".into(),
+    }];
+    let mut app = App::from_home(tree.0.clone(), tree.0.clone());
+    while app.is_indexing() {
+        app.index_tick();
+    }
+    app.update(Action::Clear);
+    app.update(Action::Text("proj/zel".into()));
+    assert_ne!(app.dirs[app.suggestions[0]].path, launchpad);
+    app.replace_history(history.clone());
+    app.update(Action::Clear);
+    app.update(Action::Text("proj/zel".into()));
+    assert_eq!(app.dirs[app.suggestions[0]].path, launchpad);
+    // The native worker ranks with the same history.
+    let mut app = App::from_remote("/home/ada".into());
+    app.replace_history(history);
+    let Some(RemoteRequest::Query { recent, .. }) = app.take_remote_request() else {
+        panic!()
+    };
+    assert_eq!(recent, [launchpad]);
 }
