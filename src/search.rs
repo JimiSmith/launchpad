@@ -26,12 +26,13 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
     crate::host_path::normalize(raw, home)
 }
 
-/// Embedded Frizbee ranks basename and full path. Equal scores prefer launch
+/// Embedded Frizbee ranks basename and full path. Equal scores prefer a
+/// directory whose own name contains the query's last `/` segment, then launch
 /// history (`recent`, most recent first), then shallower paths, then path order.
-/// History only breaks ties: Frizbee's local alignment ignores trailing text,
+/// These only break ties: Frizbee's local alignment ignores trailing text,
 /// so a project and all of its subdirectories often score identically.
 pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) -> Vec<usize> {
-    use neo_frizbee::{Config, Matcher};
+    use neo_frizbee::{Config, Matcher, Matching};
     if raw.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
     }
@@ -80,6 +81,13 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) 
         .iter()
         .map(|p| p.rsplit('/').next().unwrap_or(p))
         .collect();
+    // The last segment must appear in a directory's own name to win ties, so
+    // `repo/branch` prefers the checkout over launched folders inside it.
+    let mut last_segment = query
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| Matcher::new(segment, &config.matching(Matching::Substring)));
     let mut scores = vec![None; dirs.len()];
     let mut matcher = Matcher::new(&query, &config);
     for m in matcher
@@ -110,16 +118,20 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) 
         .enumerate()
         .filter_map(|(i, score)| {
             let score = score?;
+            let named = last_segment
+                .as_mut()
+                .is_none_or(|m| m.match_one(names[i], 0).is_some());
             let depth = paths[i].split('/').filter(|p| !p.is_empty()).count();
             // Never-launched sorts after every launched directory.
             let recency = launched(&dirs[i].path).unwrap_or(usize::MAX);
-            Some((i, score, recency, depth))
+            Some((i, score, named, recency, depth))
         })
         .collect();
     ranked.sort_by(|a, b| {
         b.1.cmp(&a.1)
-            .then(a.2.cmp(&b.2))
+            .then(b.2.cmp(&a.2))
             .then(a.3.cmp(&b.3))
+            .then(a.4.cmp(&b.4))
             .then_with(|| dirs[a.0].path.cmp(&dirs[b.0].path))
     });
     ranked.into_iter().map(|(i, ..)| i).collect()

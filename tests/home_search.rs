@@ -867,17 +867,21 @@ fn equal_scores_prefer_recent_launches_then_depth() {
         assert_eq!(results[0], launchpad, "{spelling}");
         assert_eq!(results[1], wrangler, "{spelling}");
     }
-    // More recent (earlier in history) wins; a launched deep directory beats
-    // unlaunched shallow ones, but never a higher score.
-    let recent = [launchpad.clone(), paths[0].clone()];
+    // More recent (earlier in history) wins; history never beats a higher score
+    // or a directory named by the last segment (`crates` does not contain `zel`).
+    let recent = [launchpad.clone(), wrangler.clone()];
     assert_eq!(
         ranked("proj/zel", &paths, home, &recent),
-        [launchpad.clone(), paths[0].clone(), wrangler.clone()]
+        [launchpad.clone(), wrangler.clone(), paths[0].clone()]
     );
-    let recent = [paths[0].clone(), launchpad.clone()];
+    let recent = [wrangler.clone(), launchpad.clone()];
     assert_eq!(
         ranked("proj/zel", &paths, home, &recent),
-        [paths[0].clone(), launchpad.clone(), wrangler.clone()]
+        [wrangler.clone(), launchpad.clone(), paths[0].clone()]
+    );
+    assert_eq!(
+        ranked("proj/zel", &paths, home, &[paths[0].clone()]),
+        [wrangler.clone(), launchpad.clone(), paths[0].clone()]
     );
     assert_eq!(ranked("launchpad", &paths, home, &[wrangler])[0], launchpad);
     // Windows history compares case-insensitively and accepts either separator.
@@ -936,4 +940,44 @@ fn launched_directories_win_suggestion_ties_locally_and_remotely() {
         panic!()
     };
     assert_eq!(recent, [launchpad]);
+}
+
+#[test]
+fn last_segment_names_the_checkout_over_launched_folders_inside_it() {
+    // Projects/<repo>/<branch> worktrees: a launched subfolder ties with its
+    // checkout on score, but only the checkout is named by `main` or `105`.
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/Projects/zellij-launchpad/fix-history",
+        "/home/ada/Projects/zellij-launchpad/fix-history/src",
+        "/home/ada/Projects/zellij-launchpad/main",
+        "/home/ada/Projects/zellij-launchpad/main/docs",
+        "/home/ada/Projects/zellij-launchpad/main/native",
+        "/home/ada/Projects/ov-tracker/issue-105",
+        "/home/ada/Projects/ov-tracker/issue-105/src/web",
+    ]
+    .map(str::to_owned)
+    .into();
+    let recent = [paths[3].clone(), paths[1].clone(), paths[6].clone()];
+    for (raw, checkout, launched) in [
+        ("launchpad/main", &paths[2], &paths[3]),
+        ("proj/launchpad/main", &paths[2], &paths[3]),
+        ("launchpad/fix", &paths[0], &paths[1]),
+        ("tracker/105", &paths[5], &paths[6]),
+    ] {
+        let results = ranked(raw, &paths, home, &recent);
+        assert_eq!(results[..2], [checkout.clone(), launched.clone()], "{raw}");
+    }
+    // Substring, not fuzzy: `tie` is scattered through `native` but only
+    // contained in the checkout's name.
+    let paths: Vec<_> = [
+        "/home/ada/Projects/zellij-launchpad/feat-search-tiebreaks",
+        "/home/ada/Projects/zellij-launchpad/feat-search-tiebreaks/native",
+    ]
+    .map(str::to_owned)
+    .into();
+    assert_eq!(
+        ranked("launchpad/tie", &paths, home, &[paths[1].clone()]),
+        paths
+    );
 }
