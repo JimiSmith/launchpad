@@ -919,7 +919,7 @@ fn launched_directories_win_suggestion_ties_locally_and_remotely() {
     let tree = Tree::new();
     tree.dir("Projects/zellij-agent-wrangler");
     tree.dir("Projects/zellij-launchpad");
-    let launchpad = tree.0.join("Projects/zellij-launchpad");
+    let launchpad = tree.0.join("Projects").join("zellij-launchpad");
     let launchpad = launchpad.to_str().unwrap().to_owned();
     let history = vec![Launch {
         id: 1,
@@ -985,4 +985,36 @@ fn last_segment_names_the_checkout_over_launched_folders_inside_it() {
         ranked("launchpad/tie", &paths, home, &[paths[1].clone()]),
         paths
     );
+}
+
+#[test]
+fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
+    // `~`, `./` and `..` expand to HOME, whose own name (`ada`) must not
+    // promote `canada` or `ada-lib` over recent launches.
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/canada",
+        "/home/ada/Projects",
+        "/home/ada/Projects/ada-lib",
+        "/home/ada/Projects/zellij-launchpad",
+        "/home/ada/work",
+    ]
+    .map(str::to_owned)
+    .into();
+    let recent = ["~/Projects/zellij-launchpad".into(), "~/work".into()];
+    for raw in ["~", "~/", "./", "~/Projects/.."] {
+        let results = ranked(raw, &paths, home, &recent);
+        assert_eq!(results[..2], [paths[3].clone(), paths[4].clone()], "{raw}");
+    }
+    // A trailing `/` means no segment rule: `Projects-archive` ties with the
+    // launched checkout but gets no boost for containing `Projects`.
+    let paths: Vec<_> = [
+        "/home/ada/Projects/Projects-archive",
+        "/home/ada/Projects/zellij-launchpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    let recent = ["~/Projects/zellij-launchpad".into()];
+    assert_eq!(ranked("~/Projects/", &paths, home, &recent)[0], paths[1]);
+    assert_eq!(ranked("~/Projects/", &paths, home, &[])[0], paths[0]);
 }

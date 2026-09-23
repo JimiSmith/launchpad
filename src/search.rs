@@ -81,12 +81,13 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) 
         .iter()
         .map(|p| p.rsplit('/').next().unwrap_or(p))
         .collect();
-    // The last segment must appear in a directory's own name to win ties, so
-    // `repo/branch` prefers the checkout over launched folders inside it.
-    let mut last_segment = query
+    // The last typed segment must appear in a directory's own name to win ties,
+    // so `repo/branch` prefers the checkout over launched folders inside it.
+    // Read it before HOME expansion: `~`, `./` and `..` name no folder.
+    let mut last_segment = raw
         .rsplit('/')
         .next()
-        .filter(|segment| !segment.is_empty())
+        .filter(|segment| !matches!(*segment, "" | "~" | "." | ".."))
         .map(|segment| Matcher::new(segment, &config.matching(Matching::Substring)));
     let mut scores = vec![None; dirs.len()];
     let mut matcher = Matcher::new(&query, &config);
