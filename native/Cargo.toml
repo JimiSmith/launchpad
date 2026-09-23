@@ -15,5 +15,7 @@ toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
+# The /dev/tty source stops reading at EOF; the default mio source spins forever on a hung-up terminal.
+crossterm = { version = "0.29", features = ["use-dev-tty"] }
 signal-hook = "0.3"
 libc = "0.2"

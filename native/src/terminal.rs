@@ -72,18 +72,17 @@ impl Drop for Screen {
 }
 
 /// Wait up to `timeout` for terminal input; true once the terminal hung up.
-/// Crossterm 0.29 loops forever reading EOF from a closed terminal, ignoring
-/// its timeout and our stop flag, so it must never be polled after a hang-up.
+/// After a hang-up, crossterm's /dev/tty source returns from every poll with
+/// no event rather than failing, so the event loop must check for it.
 #[cfg(unix)]
-pub fn hung_up(timeout: std::time::Duration) -> io::Result<bool> {
+pub fn hung_up() -> io::Result<bool> {
     let mut fd = libc::pollfd {
         fd: libc::STDIN_FILENO,
         events: libc::POLLIN,
         revents: 0,
     };
-    let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
     // SAFETY: one valid pollfd for the duration of the call.
-    if unsafe { libc::poll(&mut fd, 1, ms) } < 0 {
+    if unsafe { libc::poll(&mut fd, 1, 0) } < 0 {
         let error = io::Error::last_os_error();
         return match error.kind() {
             io::ErrorKind::Interrupted => Ok(false),
