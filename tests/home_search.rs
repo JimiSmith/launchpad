@@ -534,7 +534,9 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     tree.dir("Projects/research/notes");
     tree.dir("Projects/.archive/notes");
     tree.dir("team notes/修理");
-    let mut app = App::from_home(tree.0.clone(), tree.0.clone());
+    // A short logical HOME keeps `~` queries under the input limit wherever
+    // the checkout lives; the tree path alone can expand past it.
+    let mut app = App::from_home("/home/ada".into(), tree.0.clone());
     assert!(app.history.is_empty());
     for _ in 0..100 {
         app.index_tick();
@@ -554,6 +556,8 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
             .iter()
             .any(|&i| app.dirs[i].path.contains(".archive"))
     );
+    query(&mut app, "~/Projects/research");
+    assert!(!app.suggestions.is_empty(), "explicit HOME queries match");
     query(&mut app, "~/Projects/.archive");
     assert!(app.suggestions.is_empty());
     app.update(Action::Enter);
@@ -593,7 +597,8 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
     for i in 0..300 {
         tree.dir(&format!("notes-{i}"));
     }
-    let mut app = App::from_home(tree.0.clone(), tree.0.clone());
+    // The default `~` query expands HOME; keep it under the input limit.
+    let mut app = App::from_home("/home/ada".into(), tree.0.clone());
     // Recording in memory keeps one recent row for section-navigation coverage.
     app.simulate_launch = true;
     // Initialization may use a whole time slice before producing suggestions.
