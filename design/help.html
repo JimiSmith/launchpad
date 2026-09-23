@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Launchpad Keys Screen</title>
+  <style>
+    :root {
+      /* src/theme.rs defaults (Catppuccin Macchiato); black stands in for the terminal background. */
+      --background: #000000;
+      --surface: #1e2030;
+      --raised: #363a4f;
+      --border: #494d64;
+      --text: #cad3f5;
+      --muted: #a5adcb;
+      --accent: #c6a0f6;
+      --on-accent: #181926;
+      --error: #ed8796;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      color: var(--text);
+      background: var(--background);
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-size: 14px; line-height: 1.6; background: var(--background); }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+    button:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+    .page { width: min(100%, 1180px); margin: auto; padding: 32px 16px 48px; }
+    .draft { display: flex; justify-content: space-between; gap: 20px; color: var(--muted); font-size: 11px; opacity: .65; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px 32px; margin: 28px 0 18px; font-size: 12px; color: var(--muted); }
+    .control { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+    .control > span { opacity: .65; }
+    .option { padding: 2px 0 4px; color: var(--muted); border-bottom: 1px solid transparent; }
+    .option[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+    /* One terminal cell = 1ch × 1 row. Everything inside .term is drawn on that grid. */
+    .frame { overflow-x: auto; border: 1px solid var(--border); padding: 0; width: fit-content; max-width: 100%; }
+    .term { font-size: 13px; line-height: 18px; white-space: pre; background: var(--background); }
+    .row { height: 18px; }
+    .accent { color: var(--accent); }
+    .text { color: var(--text); }
+    .muted { color: var(--muted); }
+    .error { color: var(--error); }
+    .border { color: var(--border); }
+    .size { margin-top: 8px; color: var(--muted); font-size: 11px; opacity: .65; }
+    .notes { max-width: 760px; margin-top: 44px; color: var(--muted); font-size: 13px; }
+    .notes h2 { font-size: 12px; font-weight: 400; color: var(--accent); margin: 30px 0 10px; }
+    .notes p, .notes li { margin: 0 0 8px; }
+    .notes ul { padding-left: 18px; margin: 0; }
+    .notes code { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="draft"><span>Design draft / 02 · Keys screen (F1)</span><span>Terminal-cell mockup</span></div>
+
+    <div class="controls" role="group" aria-label="Mockup controls">
+      <div class="control"><span>Screen</span>
+        <button class="option" data-group="view" data-value="after" aria-pressed="true">Proposed</button>
+        <button class="option" data-group="view" data-value="before" aria-pressed="false">Current</button>
+      </div>
+      <div class="control"><span>Columns</span>
+        <button class="option" data-group="width" data-value="120" aria-pressed="false">120</button>
+        <button class="option" data-group="width" data-value="100" aria-pressed="true">100</button>
+        <button class="option" data-group="width" data-value="80" aria-pressed="false">80</button>
+        <button class="option" data-group="width" data-value="64" aria-pressed="false">64</button>
+        <button class="option" data-group="width" data-value="46" aria-pressed="false">46</button>
+      </div>
+      <div class="control"><span>Rows</span>
+        <button class="option" data-group="height" data-value="40" aria-pressed="true">40</button>
+        <button class="option" data-group="height" data-value="30" aria-pressed="false">30</button>
+        <button class="option" data-group="height" data-value="20" aria-pressed="false">20</button>
+      </div>
+      <div class="control"><span>Config</span>
+        <button class="option" data-group="config" data-value="shortcuts" aria-pressed="true">Shortcuts</button>
+        <button class="option" data-group="config" data-value="none" aria-pressed="false">No shortcuts</button>
+        <button class="option" data-group="config" data-value="errors" aria-pressed="false">Errors</button>
+      </div>
+    </div>
+
+    <div class="frame"><div class="term" id="term" role="img" aria-label="Launchpad keys screen mockup"></div></div>
+    <p class="size" id="size"></p>
+
+    <section class="notes" aria-label="Design notes">
+      <h2>What changes</h2>
+      <ul>
+        <li>The tool row loses the shortcut suffixes: it reads <code>Shell   Claude   Codex   Copilot   Hermes</code> again.
+          Shortcuts live only here, in the <em>Launch</em> group, one row per command.</li>
+        <li>Prose goes. Every row is <em>key</em> then <em>action</em>. Search policy, mouse details and
+          launch semantics are in the README already; the screen keeps only what you press.</li>
+        <li>Groups follow the dashboard's own sections and names: Directory, Tool, Recent. They are headed
+          the way dashboard sections are, not in capitals.</li>
+      </ul>
+      <h2>Grid rules (for the ratatui implementation)</h2>
+      <ul>
+        <li>Same frame as the dashboard: 1–2 column side margin, centred at most 96 columns, the
+          <code>›_ Launchpad</code> header and a footer on the second-to-last row.</li>
+        <li>Two columns when the content is 72 or more cells wide, with a 4-cell gutter; otherwise one column.
+          The left column holds Launch, Tool and Directory; the right column holds Move, Recent and Launchpad.</li>
+        <li>Key column width = the longest key in the column + 2 cells; Status reuses the left column's width.
+          Alternatives are written <code>Home / End</code>, never with bare spaces. Keys use <code>text</code>, actions
+          <code>muted</code>, group headings <code>accent</code>. Long actions are clipped with <code>…</code>;
+          only the Launch note and configuration errors wrap.</li>
+        <li>Key names are written one way throughout: <code>Ctrl+P</code>, <code>Alt+C</code>,
+          <code>Shift+Tab</code>, arrows as <code>↑ ↓ ← →</code>, Enter as <code>↵</code> as on the dashboard.
+          Configured shortcuts are shown in this form (<code>alt+shift+c</code> → <code>Alt+Shift+C</code>).</li>
+        <li>Status spans both columns under the groups: the search status, then each configuration
+          error in <code>error</code> with a <code>!</code> in the key column, wrapped.</li>
+        <li>When the content is taller than the space, the body scrolls. A position counter appears on the
+          header row, matching Recent's <code>1–9 / 10</code>, and the footer adds <code>↑↓ scroll</code>.</li>
+        <li>With no shortcuts configured, Launch shows one line saying how to add one.</li>
+      </ul>
+    </section>
+  </div>
+
+  <script>
+    // Sample data only. Colour names map one-to-one onto src/theme.rs styles.
+    const commands = [
+      { label: 'Claude', key: 'Alt+C' },
+      { label: 'Codex', key: 'Alt+X' },
+      { label: 'Copilot', key: 'Ctrl+Shift+O' },
+      { label: 'Hermes', key: null },
+    ];
+    const errors = [
+      'hermes: shortcut "ctrl+p": conflicts with a built-in key',
+      'ignore[2]: require a literal absolute path of at most 4096 bytes without controls; entry skipped',
+    ];
+    const state = { view: 'after', width: 100, height: 40, config: 'shortcuts' };
+
+    const width = s => [...s].length;
+    const clip = (s, n) => width(s) <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…';
+    function wrap(s, n) {
+      const lines = []; let line = '';
+      for (const word of s.split(' ')) {
+        if (line && width(line) + 1 + width(word) > n) { lines.push(line); line = ''; }
+        line = line ? line + ' ' + word : word;
+        while (width(line) > n) { lines.push([...line].slice(0, n).join('')); line = [...line].slice(n).join(''); }
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    function groups() {
+      const shortcuts = state.config === 'none' ? [] : commands.filter(c => c.key);
+      const launch = [['↵', 'Launch selected tool']];
+      if (shortcuts.length) {
+        for (const c of shortcuts) launch.push([c.key, c.label]);
+        launch.push({ note: 'Shortcuts use the typed path, or the selected recent row.' });
+      } else {
+        launch.push({ note: 'Add shortcut = "alt+c" to a command for one-key launches.' });
+      }
+      return {
+        left: [
+          ['Launch', launch],
+          ['Tool', [['← →', 'Choose tool']]],
+          ['Directory', [
+            ['↑ ↓', 'Highlight suggestion'],
+            ['↵', 'Accept highlight'],
+            ['← →', 'Move cursor'],
+            ['Ctrl+← →', 'Move by segment'],
+            ['Ctrl+Bksp', 'Delete segment left'],
+            ['Ctrl+Del', 'Delete segment right'],
+            ['Ctrl+A / E', 'Start / end'],
+            ['Ctrl+U', 'Clear'],
+          ]],
+        ],
+        right: [
+          ['Move', [
+            ['Tab', 'Next section'],
+            ['Shift+Tab', 'Previous section'],
+            ['Ctrl+P', 'Directory'],
+            ['Ctrl+T', 'Tool'],
+            ['Ctrl+R', 'Recent'],
+          ]],
+          ['Recent', [
+            ['↑ ↓', 'Choose entry'],
+            ['Home / End', 'First / last'],
+            ['Delete', 'Remove entry'],
+            ['Ctrl+L ×2', 'Clear all'],
+          ]],
+          ['Launchpad', [
+            ['F1 / Esc', 'Close keys'],
+            ['F5', 'Refresh and reset'],
+            ['Esc', 'Dismiss, then quit'],
+            ['Ctrl+Q', 'Quit'],
+          ]],
+        ],
+      };
+    }
+
+    // A row is a list of [text, colour] segments; pad() fills it to an exact cell width.
+    function pad(segments, n) {
+      const out = []; let used = 0;
+      for (const [t, c] of segments) {
+        const s = clip(t, n - used);
+        if (!s) break;
+        out.push([s, c]); used += width(s);
+      }
+      if (used < n) out.push([' '.repeat(n - used), 'text']);
+      return out;
+    }
+
+    function column(list, cw) {
+      const kw = Math.max(...list.flatMap(([, rows]) => rows.filter(r => !r.note).map(r => width(r[0])))) + 2;
+      const rows = [];
+      list.forEach(([title, items], i) => {
+        if (i) rows.push([]);
+        rows.push([[title, 'accent']]);
+        for (const item of items) {
+          if (item.note) {
+            for (const line of wrap(item.note, cw - kw)) rows.push([[' '.repeat(kw), 'text'], [line, 'muted']]);
+          } else {
+            rows.push([[item[0].padEnd(kw), 'text'], [item[1], 'muted']]);
+          }
+        }
+      });
+      return { rows: rows.map(r => pad(r, cw)), kw };
+    }
+
+    function status(inner, kw) {
+      const rows = [[], [['Status', 'accent']]];
+      rows.push([['Search'.padEnd(kw), 'text'], ['HOME indexed · 12,480 directories', 'muted']]);
+      if (state.config === 'errors') {
+        for (const e of errors) {
+          wrap(e, inner - kw).forEach((line, i) =>
+            rows.push([[(i ? '' : '!').padEnd(kw), 'error'], [line, 'error']]));
+        }
+      }
+      return rows.map(r => pad(r, inner));
+    }
+
+    function after(W, H) {
+      const margin = W >= 80 ? 2 : 1;
+      const inner = Math.min(W - margin * 2, 96);
+      const left = Math.floor((W - inner) / 2);
+      const top = H >= 30 ? 2 : 0;
+      const g = groups();
+      let body;
+      let kw;
+      if (inner >= 72) {
+        const cw = Math.floor((inner - 4) / 2);
+        const a = column(g.left, cw).rows, b = column(g.right, cw).rows;
+        kw = column(g.left, cw).kw;
+        body = [];
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+          body.push([...(a[i] || pad([], cw)), ['    ', 'text'], ...(b[i] || pad([], cw)), ...pad([], inner - cw * 2 - 4)]);
+        }
+      } else {
+        ({ rows: body, kw } = column([...g.left.slice(0, 2), ...g.right.slice(0, 1), g.left[2], ...g.right.slice(1)], inner));
+      }
+      body.push(...status(inner, kw));
+
+      const headerY = top, bodyY = top + 2, footY = H - 2;
+      const space = Math.max(0, footY - 1 - bodyY);
+      const scrolls = body.length > space;
+      const shown = body.slice(0, space);
+
+      const rows = Array.from({ length: H }, () => pad([], inner));
+      const counter = scrolls ? `1–${space} / ${body.length}` : '';
+      rows[headerY] = pad([['›_', 'accent'], [' Launchpad', 'text'], ['  keys', 'muted'],
+        [' '.repeat(Math.max(1, inner - 18 - width(counter))), 'text'], [counter, 'muted']], inner);
+      shown.forEach((r, i) => rows[bodyY + i] = r);
+      const hint = scrolls ? [['↑↓', 'text'], [' scroll  ', 'muted'], ['Home / End', 'text']] : [];
+      const back = [['Esc', 'text'], [' back', 'muted']];
+      const used = hint.reduce((n, [t]) => n + width(t), 0);
+      rows[footY] = pad([...hint, [' '.repeat(Math.max(1, inner - used - 8)), 'text'], ...back], inner);
+      return rows.map(r => [[' '.repeat(left), 'text'], ...r, [' '.repeat(W - left - inner), 'text']]);
+    }
+
+    function before(W, H) {
+      // Current src/help.rs output, abbreviated only at the bottom by the screen height.
+      const lines = [
+        'F1 / Esc  Back to the launcher', 'Ctrl+Q / Ctrl+C  Quit Launchpad', 'Ctrl+P / Ctrl+T / Ctrl+R  Path / tools / recent', '',
+        'PATH   Type a home directory path or fuzzy query, e.g. notes / nts', 'Tab / Shift+Tab  Next / previous section',
+        '↑ / ↓  Highlight suggestions; Enter accepts', 'Enter without a highlight  Validate and replace this pane',
+        '← / →  Move by grapheme · Home / End  Beginning / end', 'Ctrl+← / Ctrl+→  Move by path segment',
+        'Ctrl+A / Ctrl+E  Home / end · Ctrl+U  Clear input', 'Backspace / Delete  Remove a whole grapheme',
+        'Ctrl+Backspace / Ctrl+Delete  Delete segment left / right', 'Ctrl+H also deletes left (legacy Ctrl+Backspace)',
+        'Segment edits skip separators; spaces stay within a segment.', '',
+        'TOOLS  ← / → select · ↑ path · ↓ recent · Enter launch', 'RECENT ↑ / ↓ select · Home / End · Enter replay',
+        'Command shortcuts launch the typed path, or the selected recent', 'directory, with that tool. Highlighted suggestions are not accepted.',
+        'Delete removes selected recent entry · Ctrl+L clear (confirm)', '',
+        'F5  Refresh HOME / reset form; loaded configuration is preserved', 'Esc dismisses transient UI, then quits an untouched dashboard',
+        'The dashboard closes on launch; it does not return on command exit.', '',
+        'MOUSE Left click: place path cursor, accept a suggestion,', 'select a tool or select a recent row. Selection never launches.',
+        'Selecting a recent row fills Directory and Tool; Enter or Launch opens it.', 'Wheel over suggestions / recent / help scrolls that section.',
+        'Click F1 help or Esc back. F5 resets; Ctrl+Q quits.', 'Drag, release, right click ignored; host handles modifiers.', '',
+        'Search: HOME only; relative paths start at HOME, not CWD.', 'Hidden/ignored directories can still be entered literally.',
+        'Symlinks, non-UTF-8 and control-character names are skipped.', '',
+        'Shell uses Zellij\'s default shell; configured commands use literal argv.',
+        'No command availability checks. Recent validated attempts persist in shared history.', '',
+        'Search: HOME indexed', '', 'Configured commands (Shell first):', 'shell: Shell', 'claude: Claude  alt+c', 'codex: Codex  alt+x',
+      ];
+      const margin = W >= 80 ? 2 : 1;
+      const inner = Math.min(W - margin * 2, 96);
+      const left = Math.floor((W - inner) / 2);
+      const body = lines.flatMap(l => l ? wrap(l, inner) : ['']);
+      const rows = [pad([['Launchpad / help', 'accent'], [' '.repeat(Math.max(1, inner - 28)), 'text'], ['REPLACE PANE', 'accent']], inner), pad([], inner)];
+      for (let i = 0; i < H - 3; i++) rows.push(pad([[body[i] || '', 'text']], inner));
+      rows.push(pad([['↑↓ / wheel scroll · Home/End', 'accent'], [' '.repeat(Math.max(1, inner - 36)), 'text'], ['Esc back', 'text']], inner));
+      return rows.map(r => [[' '.repeat(left), 'text'], ...r, [' '.repeat(W - left - inner), 'text']]);
+    }
+
+    function render() {
+      const { width: W, height: H } = state;
+      const rows = state.view === 'after' ? after(W, H) : before(W, H);
+      const term = document.getElementById('term');
+      term.replaceChildren(...rows.map(segments => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        for (const [t, c] of segments) {
+          const span = document.createElement('span');
+          span.className = c;
+          span.textContent = t;
+          row.append(span);
+        }
+        return row;
+      }));
+      term.style.width = W + 'ch';
+      document.getElementById('size').textContent = `${W} × ${H} cells`;
+    }
+
+    document.querySelectorAll('.option').forEach(button => button.addEventListener('click', () => {
+      const group = button.dataset.group;
+      state[group] = isNaN(button.dataset.value) ? button.dataset.value : Number(button.dataset.value);
+      document.querySelectorAll(`.option[data-group="${group}"]`).forEach(b =>
+        b.setAttribute('aria-pressed', String(b === button)));
+      render();
+    }));
+    render();
+  </script>
+</body>
+</html>
