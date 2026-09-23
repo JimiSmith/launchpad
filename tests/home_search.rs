@@ -728,7 +728,9 @@ fn search_diagnostics_are_readable_in_help() {
             (0..80)
                 .map(|x| b[(x, y)].symbol())
                 .collect::<String>()
-                .contains("Search: HOME indexed")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                == ["Search", "HOME", "indexed"]
         })
         .unwrap();
     assert_eq!(b[(2, y)].fg, Theme::default().text);

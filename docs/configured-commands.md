@@ -50,7 +50,8 @@ errors. F1 lists per-command, theme and ignore errors.
 path or tools section it uses the typed directory text, never a highlighted
 suggestion; from the recent section it uses the selected row's directory and
 this command instead of the row's tool. It validates like Enter; on failure the
-form keeps this command selected. Shortcuts are ignored while help is open.
+form keeps this command selected. Shortcuts are ignored while the keys screen
+is open; F1 lists every configured shortcut in its Launch group.
 
 Syntax is `modifier+…+key`, case-insensitive:
 

@@ -182,7 +182,7 @@ fn theme_errors_join_command_errors_and_reconfiguration_clears_them() {
     view::render_buffer(&mut buffer, &app);
     let text: String = buffer.content.iter().map(|c| c.symbol()).collect();
     assert!(text.contains("all 2 errors"));
-    let help = zellij_launchpad_core::help::lines(&app).join("\n");
+    let help = zellij_launchpad_core::help::lines(&app, 92).join("\n");
     assert!(help.contains("command_missing"));
     assert!(help.contains("theme_text: expected #RRGGBB"));
     app.configure(&BTreeMap::new());

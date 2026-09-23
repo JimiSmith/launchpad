@@ -311,10 +311,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let (mut column, mut tool_row) = (0u16, 0u16);
     for &tool in &tools {
         let label = match app.commands.get(tool) {
-            Some(c) => match c.shortcut {
-                Some(s) => format!("{} {s}", c.label),
-                None => c.label.clone(),
-            },
+            Some(c) => c.label.clone(),
             None => format!("! {}", app.tool_label(tool)),
         };
         let label = clip(&label, tool_width as usize);
@@ -540,42 +537,98 @@ fn suggestions(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
 }
 
 fn help(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
+    use crate::help::Tone;
     let theme = f.theme;
-    hits.wheels.push((
-        Rect::new(area.x, area.y + 1, area.width, area.height - 2),
-        ScrollTarget::Help,
-    ));
-    pair(
-        f,
-        at(area, area.y, 1),
-        "Launchpad / help",
-        if app.simulate_launch {
-            "SUPPRESSED"
-        } else {
-            "REPLACE PANE"
-        },
-        theme.accent(),
+    // Share the dashboard's frame so opening keys does not shift the header or footer.
+    let short = area.height < 18;
+    let roomy = area.height >= 30;
+    let header_y = area.y + if roomy { 2 } else { u16::from(!short) };
+    let footer_y = area.bottom() - 1 - u16::from(roomy);
+    let body = Rect::new(
+        area.x,
+        header_y + 2,
+        area.width,
+        footer_y.saturating_sub(header_y + 3),
     );
-    let lines: Vec<_> = crate::help::lines(app).into_iter().map(Line::raw).collect();
-    let content = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
-    let paragraph = Paragraph::new(lines)
-        .style(theme.base())
-        .wrap(Wrap { trim: false });
-    // Use the same Ratatui cell/grapheme wrapper for measuring and painting.
-    let max = paragraph
-        .line_count(content.width)
-        .saturating_sub(content.height as usize);
+    let rows = crate::help::rows(app, area.width as usize);
+    let space = body.height as usize;
+    let max = rows.len().saturating_sub(space);
     app.help_scroll_max.set(max);
-    f.render_widget(
-        paragraph.scroll((app.help_scroll.min(max) as u16, 0)),
-        content,
-    );
-    let foot = at(area, area.bottom() - 1, 1);
-    row(f, foot, "↑↓ / wheel scroll · Home/End", theme.accent());
-    controls(
+    let start = app.help_scroll.min(max);
+    hits.wheels.push((body, ScrollTarget::Help));
+
+    let style = |tone| match tone {
+        Tone::Text => theme.base(),
+        Tone::Muted => theme.muted(),
+        Tone::Accent => theme.accent(),
+        Tone::Error => theme.base().fg(theme.error),
+    };
+    let segments = |f: &mut Canvas, y: u16, x: u16, items: &[(&str, Tone)]| {
+        let mut x = x;
+        for (text, tone) in items {
+            let w = width(text) as u16;
+            row(
+                f,
+                Rect::new(x, y, w, 1).intersection(area),
+                text,
+                style(*tone),
+            );
+            x += w;
+        }
+    };
+
+    let counter = if max > 0 {
+        format!("{}–{} / {}", start + 1, start + space, rows.len())
+    } else {
+        String::new()
+    };
+    let header = at(area, header_y, 1);
+    segments(
         f,
-        hits,
-        Rect::new(foot.right() - 8, foot.y, 8, 1),
-        &[("Esc back", Action::Escape)],
+        header.y,
+        header.x,
+        &[
+            ("›_", Tone::Accent),
+            (" Launchpad", Tone::Text),
+            ("  keys", Tone::Muted),
+        ],
     );
+    let w = width(&counter) as u16;
+    row(
+        f,
+        Rect::new(header.right().saturating_sub(w), header.y, w, 1),
+        &counter,
+        theme.muted(),
+    );
+
+    for (i, segments) in rows.iter().skip(start).take(space).enumerate() {
+        let mut x = body.x;
+        for (text, tone) in segments {
+            let w = width(text) as u16;
+            row(f, Rect::new(x, body.y + i as u16, w, 1), text, style(*tone));
+            x += w;
+        }
+    }
+
+    let foot = at(area, footer_y, 1);
+    if max > 0 {
+        segments(
+            f,
+            foot.y,
+            foot.x,
+            &[
+                ("↑↓", Tone::Text),
+                (" scroll  ", Tone::Muted),
+                ("Home / End", Tone::Text),
+            ],
+        );
+    }
+    let back = Rect::new(foot.right() - 8, foot.y, 8, 1);
+    segments(
+        f,
+        back.y,
+        back.x,
+        &[("Esc", Tone::Text), (" back", Tone::Muted)],
+    );
+    hits.add(back, Action::Escape);
 }

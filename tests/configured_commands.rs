@@ -214,12 +214,12 @@ fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
 }
 
 #[test]
-fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
+fn every_keys_screen_row_is_reachable_at_narrow_and_wide_sizes() {
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{cells::width, view::render_with_hits};
+    use zellij_launchpad_core::{cells::width, help, shortcut::Shortcut, view::render_with_hits};
     for label in [
         format!("{} END_OF_LABEL", "x".repeat(243)),
-        format!("{} END_OF_LABEL", "界é👩🏽‍💻🇬🇧✈️ ".repeat(5)),
+        format!("{} END_OF_LABEL", "界é👩🏽‍💻🇬🇧✈️ ".repeat(5)),
     ] {
         for (w, h) in [(40, 10), (80, 24), (200, 36)] {
             let id = "i".repeat(64);
@@ -230,9 +230,20 @@ fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
                 (format!("label_{id}"), label.clone()),
             ]));
             assert!(app.commands.errors.is_empty());
+            app.commands.entries[1].shortcut = Shortcut::parse("alt+c").ok();
+            // A long status wraps under the key column.
+            app.search_status = format!("{} END_OF_STATUS", label);
             app.update(Action::Help);
+            let inner = (w.min(96) - if w >= 80 { 4 } else { 2 }) as usize;
+            let expected = help::lines(&app, inner);
+            assert!(
+                expected
+                    .iter()
+                    .any(|l| l.contains("Alt+C") && l.contains('…')),
+                "long labels clip at {w}x{h}"
+            );
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-            let mut collected = String::new();
+            let mut seen = Vec::new();
             for step in 0..1000 {
                 // Inspect the completed render buffer, not TestBackend's diff replay
                 // (it does not emulate terminal erasure of wide continuations).
@@ -251,23 +262,31 @@ fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
                     }
                     line
                 };
-                collected.push_str(&row(2));
+                let header = (0..h)
+                    .find(|&y| row(y).contains("Launchpad  keys"))
+                    .unwrap();
+                let footer = (0..h).find(|&y| row(y).contains("Esc back")).unwrap();
+                let body: Vec<_> = (header + 2..footer - 1).map(row).collect();
                 let before = app.help_scroll;
                 app.update(Action::Down);
                 if app.help_scroll == before {
-                    for y in 3..h - 1 {
-                        collected.push_str(&row(y));
-                    }
+                    seen.extend(body);
                     break;
                 }
+                seen.push(body[0].clone());
                 assert!(step < 999, "help scroll must be bounded");
             }
-            let compact = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            // Unscrolled content leaves blank rows below it.
+            while seen.len() > expected.len() && seen.last().is_some_and(|l| l.trim().is_empty()) {
+                seen.pop();
+            }
+            let compact = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
             assert_eq!(
-                compact(collected),
-                compact(zellij_launchpad_core::help::lines(&app).join("")),
-                "all text reachable at {w}x{h}"
+                seen.iter().map(|l| compact(l)).collect::<Vec<_>>(),
+                expected.iter().map(|l| compact(l)).collect::<Vec<_>>(),
+                "all rows reachable at {w}x{h}"
             );
+            let scrolls = app.help_scroll > 0;
             app.update(Action::Home);
             assert_eq!(app.help_scroll, 0);
             app.update(Action::End);
@@ -284,17 +303,19 @@ fn every_wrapped_help_cell_is_reachable_at_narrow_and_wide_sizes() {
                 .map(|c| c.symbol())
                 .collect();
             assert!(
-                end.contains("END_OF_LABEL"),
-                "End reaches final label at {w}x{h}"
+                end.contains("END_OF_STATUS"),
+                "End reaches the final row at {w}x{h}"
             );
-            app.update(Action::Up);
-            let before = app.help_scroll;
-            app.update(Action::Down);
-            assert_eq!(
-                app.help_scroll,
-                before + 1,
-                "Up after End moves immediately"
-            );
+            if scrolls {
+                app.update(Action::Up);
+                let before = app.help_scroll;
+                app.update(Action::Down);
+                assert_eq!(
+                    app.help_scroll,
+                    before + 1,
+                    "Up after End moves immediately"
+                );
+            }
         }
     }
 }

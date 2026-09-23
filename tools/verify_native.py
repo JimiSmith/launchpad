@@ -9,6 +9,7 @@ from pathlib import Path
 import pty
 import select
 import shlex
+import re
 import shutil
 import signal
 import struct
@@ -196,7 +197,7 @@ for line in sys.stdin:
     def wait_indexed(self):
         self.expect('Launchpad')
         self.send('\x1bOP')  # Search diagnostics now live in help.
-        self.expect('Quit Launchpad')
+        self.expect('Launchpad  keys')
         self.send('\x1b[F')
         self.expect('HOME indexed')
         self.send('\x1b[H')
@@ -497,8 +498,15 @@ def shortcut_cases():
     s = Session(shortcuts=True)
     try:
         s.wait_indexed()
-        s.expect('Keys alt+k')
-        s.expect('Fixture alt+f')
+        # The tool row shows labels only; shortcuts are listed on the keys screen.
+        s.expect('Keys')
+        assert 'alt+' not in s.display().lower(), s.display()
+        s.send('\x1bOP')  # F1
+        s.expect('Launchpad  keys')
+        for row in [r'Alt\+K +Keys', r'Alt\+F +Fixture']:
+            assert re.search(row, s.display()), row + '\n' + s.display()
+        s.send('\x1b')
+        s.expect('F1 help')
         # Shortcuts launch the typed text even with a different suggestion highlighted.
         s.send('\x10\x15notes')
         s.expect('notes-archive/')
@@ -670,7 +678,7 @@ esac
             s.send('\x15\x1b[200~notes\x1b[201~')
             s.expect('~/notes/')
             s.send('\x1bOP')  # F1
-            s.expect('Quit Launchpad')
+            s.expect('Launchpad  keys')
             s.send('\x1b')
             s.send('\x1b[15~')  # F5
             s.wait_indexed()
@@ -685,7 +693,7 @@ esac
             y, line = next((y, line) for y, line in enumerate(s.screen.display) if 'F1 help' in line)
             x = line.index('F1 help')
             s.send(f'\x1b[<0;{x+1};{y+1}M\x1b[<0;{x+1};{y+1}m')
-            s.expect('Quit Launchpad')
+            s.expect('Launchpad  keys')
             if ending == 'quit':
                 s.send('\x11')
             else:

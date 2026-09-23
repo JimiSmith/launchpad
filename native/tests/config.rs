@@ -22,8 +22,8 @@ ignore = ["/home/ada/cache/../archive/./", "~/cache", "cache", 42, "", "/bad\nna
     app.update(Action::Reset);
     assert_eq!(app.ignore_errors, warnings);
     assert_eq!(app.config_errors().count(), 6);
-    let help = zellij_launchpad_core::help::lines(&app).join("\n");
-    assert!(help.contains("Config error: ignore[2]:"));
+    let help = zellij_launchpad_core::help::lines(&app, 92).join("\n");
+    assert!(help.contains("!   ") && help.contains("ignore[2]:"));
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
     terminal
         .draw(|f| zellij_launchpad_core::view::render(f, &app))
@@ -157,8 +157,12 @@ shortcut = "ctrl+f6"
             r#"bare: shortcut "x": require ctrl, alt or super"#,
         ]
     );
-    let help = zellij_launchpad_core::help::lines(&app).join("\n");
-    assert!(help.contains("claude: claude  alt+shift+c"));
+    let help = zellij_launchpad_core::help::lines(&app, 92);
+    assert!(
+        help.iter()
+            .any(|line| line.trim_start().starts_with("Alt+Shift+C  claude")),
+        "{help:#?}"
+    );
     assert_eq!(
         app.commands
             .by_shortcut(zellij_launchpad_core::shortcut::Shortcut::parse("ctrl+f6").unwrap()),

@@ -99,7 +99,8 @@ Shell stays first. Commands follow file order; the first duplicate ID wins.
 Labels default to IDs. Invalid individual definitions are skipped with a visible
 error, while valid commands stay usable. F1 lists all configuration errors.
 The interface uses open sections with dimmed inactive content and a compact
-contextual footer. F1 contains the full controls and search status.
+contextual footer. F1 opens the keys screen: every control, configured
+shortcuts, search status and configuration errors.
 Colours default to Catppuccin Macchiato over the terminal background; invalid
 colour values keep their defaults.
 
@@ -135,8 +136,8 @@ fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
 - A configured command shortcut (for example Alt+C) launches that command from
-  any section; the tool row shows each shortcut beside its label.
-- F1 opens help. F5 refreshes HOME and shared history and restores the invoking cwd.
+  any section; F1 lists the configured shortcuts.
+- F1 opens the keys screen. F5 refreshes HOME and shared history and restores the invoking cwd.
 - Selecting a recent row fills Directory and Tool. Enter or Launch revalidates
   and opens that selection. Delete removes, Ctrl+L twice clears;
   Esc cancels confirmation.

@@ -124,6 +124,34 @@ impl Shortcut {
         Ok(Self::new(ctrl, alt, super_, shift, key))
     }
 }
+impl Shortcut {
+    /// Title-case form for display, e.g. `Alt+Shift+C` or `Ctrl+PageDown`.
+    pub fn label(&self) -> String {
+        let mut out = String::new();
+        for (on, name) in [
+            (self.ctrl, "Ctrl+"),
+            (self.alt, "Alt+"),
+            (self.super_, "Super+"),
+            (self.shift, "Shift+"),
+        ] {
+            if on {
+                out.push_str(name);
+            }
+        }
+        match self.key {
+            Key::Char(c) => out.extend(c.to_uppercase()),
+            Key::F(n) => out.push_str(&format!("F{n}")),
+            Key::PageUp => out.push_str("PageUp"),
+            Key::PageDown => out.push_str("PageDown"),
+            key => {
+                let name = NAMED.iter().find(|(_, k)| *k == key).unwrap().0;
+                out.push_str(&name[..1].to_uppercase());
+                out.push_str(&name[1..]);
+            }
+        }
+        out
+    }
+}
 impl fmt::Display for Shortcut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (on, name) in [
@@ -188,6 +216,20 @@ mod tests {
             "",
         ] {
             assert!(Shortcut::parse(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn labels_are_title_case() {
+        for (text, label) in [
+            ("alt+c", "Alt+C"),
+            ("alt+shift+c", "Alt+Shift+C"),
+            ("ctrl+pagedown", "Ctrl+PageDown"),
+            ("super+f6", "Super+F6"),
+            ("ctrl+alt+enter", "Ctrl+Alt+Enter"),
+            ("alt++", "Alt++"),
+        ] {
+            assert_eq!(Shortcut::parse(text).unwrap().label(), label);
         }
     }
 

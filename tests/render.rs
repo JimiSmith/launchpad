@@ -71,8 +71,8 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     a.update(Action::End);
     let b = draw(&a, 40, 12);
     assert!(
-        text(&b).contains("hermes: Hermes"),
-        "End reaches the configured command list at the end of help"
+        text(&b).contains("Search"),
+        "End reaches the status group at the end of the keys screen"
     );
     a.update(Action::Escape);
     a.update(Action::Clear);
