@@ -1169,6 +1169,7 @@ version = "0.9.0"
 dependencies = [
  "clap",
  "crossterm",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

@@ -460,6 +460,39 @@ def history_and_layout_cases():
         s.close()
 
 
+def launchpad_pids(home):
+    """Launchpad processes whose HOME belongs to this isolated session."""
+    pids = []
+    for proc in Path('/proc').iterdir():
+        try:
+            if proc.name.isdigit() and os.readlink(proc / 'exe') == str(BINARY.resolve()) and \
+                    f'HOME={home}'.encode() in (proc / 'environ').read_bytes().split(b'\0'):
+                pids.append(int(proc.name))
+        except OSError:
+            pass
+    return pids
+
+
+def hangup_case():
+    # Crossterm spins forever reading EOF from a hung-up terminal, and the
+    # stop flag is never checked; closing the session must still end Launchpad.
+    s = Session()
+    try:
+        s.wait_indexed()
+        pids = launchpad_pids(s.home)
+        assert pids, 'Launchpad process not found'
+    finally:
+        s.close()
+    deadline = time.monotonic() + 5
+    while launchpad_pids(s.home) and time.monotonic() < deadline:
+        time.sleep(.1)
+    survivors = launchpad_pids(s.home)
+    for pid in survivors:
+        os.kill(pid, signal.SIGKILL)
+    assert not survivors, f'Launchpad outlived its terminal: {survivors}'
+    print('PASS terminal hang-up ends Launchpad', flush=True)
+
+
 def shortcut_cases():
     s = Session(shortcuts=True)
     try:
@@ -688,3 +721,4 @@ if __name__ == '__main__':
         recovery_cases()
         history_and_layout_cases()
         shortcut_cases()
+        hangup_case()

@@ -296,9 +296,18 @@ fn run(args: Args) -> Result<(), String> {
                 .map_err(|e| format!("Draw launcher: {e}"))?;
             dirty = false;
         }
-        if event::poll(Duration::from_millis(16))
-            .map_err(|e| format!("Poll terminal input: {e}"))?
-        {
+        #[cfg(unix)]
+        let timeout = {
+            if zellij_launchpad::terminal::hung_up(Duration::from_millis(16))
+                .map_err(|e| format!("Poll terminal input: {e}"))?
+            {
+                break;
+            }
+            Duration::ZERO
+        };
+        #[cfg(not(unix))]
+        let timeout = Duration::from_millis(16);
+        if event::poll(timeout).map_err(|e| format!("Poll terminal input: {e}"))? {
             let action = match event::read().map_err(|e| format!("Read terminal input: {e}"))? {
                 Event::Key(key) => input::event_action(key, &app.commands),
                 Event::Paste(text) => Some(Action::Text(text)),

@@ -16,3 +16,4 @@ clap = { version = "4", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
+libc = "0.2"

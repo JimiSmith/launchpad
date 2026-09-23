@@ -8,7 +8,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io::{self, Stdout};
+use std::{
+    io::{self, Stdout},
+    time::Duration,
+};
 
 pub struct Screen {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -69,4 +72,26 @@ impl Drop for Screen {
     fn drop(&mut self) {
         self.suspend();
     }
+}
+
+/// Wait up to `timeout` for terminal input; true once the terminal hung up.
+/// Crossterm 0.29 loops forever reading EOF from a closed terminal, ignoring
+/// its timeout and our stop flag, so it must never be polled after a hang-up.
+#[cfg(unix)]
+pub fn hung_up(timeout: Duration) -> io::Result<bool> {
+    let mut fd = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    // SAFETY: one valid pollfd for the duration of the call.
+    if unsafe { libc::poll(&mut fd, 1, ms) } < 0 {
+        let error = io::Error::last_os_error();
+        return match error.kind() {
+            io::ErrorKind::Interrupted => Ok(false),
+            _ => Err(error),
+        };
+    }
+    Ok(fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0)
 }
