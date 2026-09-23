@@ -1,6 +1,9 @@
 use crossterm::{
     cursor::Show,
-    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -12,6 +15,9 @@ pub struct Screen {
     active: bool,
 }
 pub fn restore() {
+    // Pop before leaving: Kitty keeps separate stacks per screen, and a
+    // launched tool must not inherit the encoding. Unsupported on Windows.
+    let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
     let _ = execute!(
         io::stdout(),
         DisableMouseCapture,
@@ -44,6 +50,12 @@ impl Screen {
             EnableMouseCapture,
             EnableBracketedPaste
         )?;
+        // Zellij forwards Kitty's disambiguated keys, so Ctrl+I differs from
+        // Tab. Windows console input distinguishes them without this.
+        let _ = execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
         self.terminal.clear()
     }
     pub fn suspend(&mut self) {

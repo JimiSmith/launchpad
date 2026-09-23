@@ -37,11 +37,45 @@ ID wins; at most 64 unique configured IDs are accepted.
 - Arguments: at most 256 values / 16384 total bytes, no NUL. Empty arguments,
   spaces and shell metacharacters remain literal. No expansion or shell splitting.
 - Label: nonempty, at most 256 bytes, no controls.
+- Shortcut: optional key combination; see [Shortcuts](#shortcuts).
 
 Invalid individual definitions produce visible errors and are skipped. Missing
 default files mean Shell-only; explicit missing files, unreadable files, malformed
 TOML and invalid top-level structure fail startup. Unknown top-level settings are
 errors. F1 lists per-command, theme and ignore errors.
+
+## Shortcuts
+
+`shortcut = "alt+c"` launches the command without selecting it first. From the
+path or tools section it uses the typed directory text, never a highlighted
+suggestion; from the recent section it uses the selected row's directory and
+this command instead of the row's tool. It validates like Enter; on failure the
+form keeps this command selected. Shortcuts are ignored while help is open.
+
+Syntax is `modifier+…+key`, case-insensitive:
+
+- Modifiers: `ctrl`, `alt`, `super`, `shift`. At least one of Ctrl, Alt or
+  Super is required; Shift alone is typing.
+- Keys: one visible character; `f1`–`f24`; or `enter`, `tab`, `space`,
+  `backspace`, `delete`, `insert`, `home`, `end`, `pageup`, `pagedown`, `up`,
+  `down`, `left`, `right`, `esc`. `alt++` names the plus key.
+- An uppercase letter means Shift: `alt+C` equals `alt+shift+c`. Shift is
+  rejected with other characters; terminals disagree on how they report
+  shifted punctuation, so prefer letters, digits and named keys.
+
+A shortcut that a built-in key already handles (for example `ctrl+p`,
+`ctrl+left` or `ctrl+shift+u`) or that an earlier command already uses is
+dropped with a configuration error; the command remains available. Shell has
+no shortcut because Enter launches it by default.
+
+Launchpad requests the Kitty keyboard protocol's disambiguation level, which
+Zellij forwards. With a host terminal that supports it (kitty, WezTerm, foot,
+Ghostty), combinations such as Ctrl+I, Ctrl+M and
+Ctrl+Shift+letter are distinct. Legacy terminals send Ctrl+I as Tab, so such a
+shortcut never fires there; it cannot trigger by accident. Launchpad cannot
+detect the host terminal's support, because Zellij answers on its behalf. Alt
+shortcuts work everywhere; on macOS, enable Option as Meta. The protocol is
+popped before a launch so tools inherit the normal encoding.
 
 `[theme]` accepts `background`, `surface`, `raised`, `border`, `text`, `muted`,
 `accent`, `on_accent`, and `error`, with `#RRGGBB` or `default` strings. Invalid

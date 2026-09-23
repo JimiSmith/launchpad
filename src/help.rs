@@ -18,6 +18,8 @@ const LINES: &[&str] = &[
     "",
     "TOOLS  ← / → select · ↑ path · ↓ recent · Enter launch",
     "RECENT ↑ / ↓ select · Home / End · Enter replay",
+    "Command shortcuts launch the typed path, or the selected recent",
+    "directory, with that tool. Highlighted suggestions are not accepted.",
     "Delete removes selected recent entry · Ctrl+L clear (confirm)",
     "",
     "F5  Refresh HOME / reset form; loaded configuration is preserved",
@@ -51,7 +53,10 @@ pub fn lines(app: &crate::app::App) -> Vec<String> {
     lines.push(String::new());
     lines.push("Configured commands (Shell first):".into());
     for c in &app.commands.entries {
-        lines.push(format!("{}: {}", c.id.as_str(), c.label));
+        match c.shortcut {
+            Some(s) => lines.push(format!("{}: {}  {s}", c.id.as_str(), c.label)),
+            None => lines.push(format!("{}: {}", c.id.as_str(), c.label)),
+        }
     }
     for error in app.config_errors() {
         lines.push(format!("Config error: {error}"));

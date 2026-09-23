@@ -5,6 +5,7 @@ id = "claude"
 label = "Claude in Worktree"
 executable = "claude"
 arguments = ["-w"]
+shortcut = "alt+c"
 
 [[commands]]
 id = "hermes"
@@ -15,6 +16,7 @@ executable = "hermes"
 id = "codex"
 label = "Codex"
 executable = "codex"
+shortcut = "alt+x"
 
 [theme]
 background = "default"

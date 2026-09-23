@@ -72,6 +72,7 @@ id = "claude"
 label = "Claude in Worktree"
 executable = "claude"
 arguments = ["-w"]
+shortcut = "alt+c"
 
 [[commands]]
 id = "hermes"
@@ -106,6 +107,16 @@ Arguments never expand `$HOME`, `~`, globs, or shell operators. Use an explicit
 shell executable with `arguments = ["-c", "your script"]` if you want shell
 interpretation. [Configuration details](docs/configured-commands.md).
 
+An optional `shortcut` launches that command in one keypress: the typed
+directory text (not a highlighted suggestion), or the selected recent row's
+directory with this tool instead of its own. Shortcuts need Ctrl, Alt or Super
+and must not clash with a built-in key or another shortcut; invalid ones are
+dropped with a visible error while the command stays usable. Shell needs none,
+since Enter launches it by default. Alt shortcuts work in any terminal. Ctrl
+shortcuts that legacy encodings cannot express, such as Ctrl+I (Tab) or Ctrl+M
+(Enter), need a terminal with the Kitty keyboard protocol; elsewhere they never
+fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
+
 ## Controls and directory policy
 
 - Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or history.
@@ -123,6 +134,8 @@ interpretation. [Configuration details](docs/configured-commands.md).
   Type a fuzzy query; arrows select suggestions and Enter accepts.
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
+- A configured command shortcut (for example Alt+C) launches that command from
+  any section; the tool row shows each shortcut beside its label.
 - F1 opens help. F5 refreshes HOME and shared history and restores the invoking cwd.
 - Selecting a recent row fills Directory and Tool. Enter or Launch revalidates
   and opens that selection. Delete removes, Ctrl+L twice clears;

@@ -33,7 +33,8 @@ class Screen(pyte.Screen):
 
 
 class Session:
-    def __init__(self, floating=False, probe=False, only=False, outside=False, interactive=False):
+    def __init__(self, floating=False, probe=False, only=False, outside=False, interactive=False,
+                 shortcuts=False):
         self.name = 'native-' + uuid.uuid4().hex[:8]
         self.out = ROOT / 'target' / self.name
         for name in ['home', 'bin', 'cache', 'config', 'data', 'state', 'runtime', 'sock']:
@@ -74,6 +75,15 @@ arguments = ["a b", "", "$HOME", ";", "$(touch NO_EXPANSION)"]
 id = "missing"
 executable = "missing"
 ''')
+        if shortcuts:
+            self.keyboard_fixture('keys')
+            with native_config.open('a') as f:
+                f.write('[[commands]]\nid = "keys"\nlabel = "Keys"\nexecutable = "keys"\nshortcut = "alt+k"\n')
+            # Fixture gets its shortcut in place; missing keeps none.
+            native_config.write_text(native_config.read_text().replace(
+                'executable = "fixture"\n', 'executable = "fixture"\nshortcut = "alt+f"\n', 1))
+            for name in ['notes', 'notes-archive']:
+                (self.home / name).mkdir()
         command = str(self.out / 'bin/fixture') if probe else str(BINARY)
         if interactive:
             command = '/bin/bash'
@@ -107,6 +117,30 @@ executable = "missing"
 import json, os, sys
 with open({str(self.log)!r}, 'a') as f:
     f.write(json.dumps(dict(exe=os.path.basename(sys.argv[0]), argv=sys.argv[1:], cwd=os.getcwd(), pid=os.getpid())) + '\\n')
+print('FIXTURE_READY', flush=True)
+for line in sys.stdin:
+    if line.startswith('exit'):
+        sys.exit(int(line.split()[1]))
+''')
+        path.chmod(0o700)
+
+    def keyboard_fixture(self, name):
+        """Record the Kitty keyboard flags Zellij reports to the launched tool."""
+        path = self.out / 'bin' / name
+        path.write_text(f'''#!{Path(sys.executable).resolve()}
+import json, os, re, select, sys, termios, time, tty
+saved = termios.tcgetattr(0)
+tty.setraw(0)
+os.write(1, b'\\x1b[?u\\x1b[c')
+reply, deadline = b'', time.monotonic() + 3
+while not re.search(rb'\\x1b\\[\\?[0-9;]*c', reply) and time.monotonic() < deadline:
+    if select.select([0], [], [], .05)[0]:
+        reply += os.read(0, 1024)
+termios.tcsetattr(0, termios.TCSANOW, saved)
+flags = re.search(rb'\\x1b\\[\\?([0-9]+)u', reply)
+with open({str(self.log)!r}, 'a') as f:
+    f.write(json.dumps(dict(exe=os.path.basename(sys.argv[0]), argv=sys.argv[1:], cwd=os.getcwd(), pid=os.getpid(),
+                            kitty_flags=flags and int(flags.group(1)))) + '\\n')
 print('FIXTURE_READY', flush=True)
 for line in sys.stdin:
     if line.startswith('exit'):
@@ -426,6 +460,55 @@ def history_and_layout_cases():
         s.close()
 
 
+def shortcut_cases():
+    s = Session(shortcuts=True)
+    try:
+        s.wait_indexed()
+        s.expect('Keys alt+k')
+        s.expect('Fixture alt+f')
+        # Shortcuts launch the typed text even with a different suggestion highlighted.
+        s.send('\x10\x15notes')
+        s.expect('notes-archive/')
+        s.send('\x1b[B\x1b[B')
+        s.send('\x1b[107;3u')  # Kitty-encoded Alt+K from the host terminal.
+        s.wait_record('keys', str(s.home / 'notes'))
+        record = next(r for r in s.records() if r['exe'] == 'keys')
+        assert record['kitty_flags'] == 0, record
+        launched = next(p for p in s.panes() if not p['is_plugin'] and p['title'] != 'neighbor')
+        assert launched['tab_name'] == 'notes · Keys', launched
+        s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
+        s.pump(.3)
+        # On a recent row, a legacy-encoded Alt+F replaces the row's tool.
+        s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
+        s.wait_indexed()
+        s.send('\x12')
+        s.expect('↑↓ recent')
+        s.send('\x1bf')
+        s.wait_record('fixture', str(s.home / 'notes'))
+        state = json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())
+        assert [(e['path'], e['tool']) for e in state['entries'][:2]] == [
+            (str(s.home / 'notes'), 'fixture'), (str(s.home / 'notes'), 'keys')], state
+        print('PASS configured shortcuts, typed text and recent row', s.out, flush=True)
+    finally:
+        s.close()
+    # Launches get a fresh pane; quitting returns to the invoking shell, which
+    # must not inherit the Kitty keyboard flags Launchpad pushed.
+    s = Session(interactive=True, shortcuts=True)
+    try:
+        s.expect('LAUNCHPAD_TEST_SHELL>')
+        s.send(shlex.quote(str(BINARY)) + '\n')
+        s.wait_indexed()
+        s.send('\x11')
+        s.expect('LAUNCHPAD_TEST_SHELL>')
+        s.send('keys\n')
+        s.wait_record('keys', str(s.cwd))
+        record = next(r for r in s.records() if r['exe'] == 'keys')
+        assert record['kitty_flags'] == 0, record
+        print('PASS quit pops the keyboard protocol for the invoking shell', s.out, flush=True)
+    finally:
+        s.close()
+
+
 def path_editing_case(s, explicit_backspace=False):
     def expect_input(text, cursor):
         deadline = time.monotonic() + 12
@@ -604,3 +687,4 @@ if __name__ == '__main__':
         interactive_shell_history_cases()
         recovery_cases()
         history_and_layout_cases()
+        shortcut_cases()

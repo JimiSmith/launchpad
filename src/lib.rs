@@ -6,5 +6,6 @@ pub mod help;
 pub mod host_path;
 pub mod remote;
 pub mod search;
+pub mod shortcut;
 pub mod theme;
 pub mod view;

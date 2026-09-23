@@ -102,3 +102,66 @@ fn missing_default_is_shell_only_but_explicit_missing_is_an_error() {
     assert!(Config::load(missing, true).is_err());
     assert!(toml::from_str::<Config>("commands = ???").is_err());
 }
+
+#[test]
+fn invalid_or_conflicting_shortcuts_are_dropped_but_commands_stay() {
+    let config: Config = toml::from_str(
+        r#"
+[[commands]]
+id = "claude"
+executable = "claude"
+shortcut = "Alt+C"
+[[commands]]
+id = "codex"
+executable = "codex"
+shortcut = "alt+shift+c"
+[[commands]]
+id = "hermes"
+executable = "hermes"
+shortcut = "ctrl+p"
+[[commands]]
+id = "bare"
+executable = "bare"
+shortcut = "x"
+[[commands]]
+id = "fkey"
+executable = "fkey"
+shortcut = "ctrl+f6"
+"#,
+    )
+    .unwrap();
+    let mut app = App::default();
+    config.apply(&mut app);
+    let shortcuts: Vec<_> = app
+        .commands
+        .entries
+        .iter()
+        .map(|c| (c.id.as_str(), c.shortcut.map(|s| s.to_string())))
+        .collect();
+    assert_eq!(
+        shortcuts,
+        [
+            ("shell", None),
+            ("claude", Some("alt+shift+c".into())),
+            ("codex", None),
+            ("hermes", None),
+            ("bare", None),
+            ("fkey", Some("ctrl+f6".into())),
+        ]
+    );
+    assert_eq!(
+        app.commands.errors,
+        [
+            r#"codex: shortcut "alt+shift+c": already used by claude"#,
+            r#"hermes: shortcut "ctrl+p": conflicts with a built-in key"#,
+            r#"bare: shortcut "x": require ctrl, alt or super"#,
+        ]
+    );
+    let help = zellij_launchpad_core::help::lines(&app).join("\n");
+    assert!(help.contains("claude: claude  alt+shift+c"));
+    assert_eq!(
+        app.commands
+            .by_shortcut(zellij_launchpad_core::shortcut::Shortcut::parse("ctrl+f6").unwrap()),
+        Tool::new("fkey")
+    );
+}

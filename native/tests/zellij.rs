@@ -52,6 +52,7 @@ fn tool() -> Command {
         label: "Fixture".into(),
         executable: Some("fixture".into()),
         arguments: vec!["".into(), "a b".into(), "$HOME".into(), ";".into()],
+        shortcut: None,
     }
 }
 #[test]

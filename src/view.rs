@@ -310,10 +310,12 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let mut positions = Vec::new();
     let (mut column, mut tool_row) = (0u16, 0u16);
     for &tool in &tools {
-        let label = if app.available(tool) {
-            app.tool_label(tool)
-        } else {
-            format!("! {}", app.tool_label(tool))
+        let label = match app.commands.get(tool) {
+            Some(c) => match c.shortcut {
+                Some(s) => format!("{} {s}", c.label),
+                None => c.label.clone(),
+            },
+            None => format!("! {}", app.tool_label(tool)),
         };
         let label = clip(&label, tool_width as usize);
         let w = width(&label) as u16;

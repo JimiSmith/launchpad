@@ -6,6 +6,7 @@ use std::{
 use zellij_launchpad_core::{
     app::App,
     commands::{Command, Commands, Tool},
+    shortcut::Shortcut,
     theme::Theme,
 };
 
@@ -24,6 +25,7 @@ struct Definition {
     executable: String,
     #[serde(default)]
     arguments: Vec<String>,
+    shortcut: Option<String>,
 }
 impl Config {
     pub fn load(path: &Path, explicit: bool) -> Result<Self, String> {
@@ -79,10 +81,31 @@ impl Config {
                     .push("commands exceeds 64 unique IDs; remaining entries skipped".into());
                 break;
             }
-            match definition.validate() {
-                Ok(command) => commands.entries.push(command),
-                Err(error) => commands.errors.push(error),
+            let shortcut = definition.shortcut.clone();
+            let mut command = match definition.validate() {
+                Ok(command) => command,
+                Err(error) => {
+                    commands.errors.push(error);
+                    continue;
+                }
+            };
+            // A bad shortcut is dropped; the command itself stays usable.
+            if let Some(text) = shortcut {
+                let fail = |s: String| format!("{}: shortcut {text:?}: {s}", command.id.as_str());
+                match Shortcut::parse(&text) {
+                    Err(e) => commands.errors.push(fail(e)),
+                    Ok(s) if crate::input::clashes(s) => commands
+                        .errors
+                        .push(fail("conflicts with a built-in key".into())),
+                    Ok(s) => match commands.by_shortcut(s) {
+                        Some(other) => commands
+                            .errors
+                            .push(fail(format!("already used by {}", other.as_str()))),
+                        None => command.shortcut = Some(s),
+                    },
+                }
             }
+            commands.entries.push(command);
         }
         app.commands = commands;
         let known = [
@@ -143,6 +166,7 @@ impl Definition {
             label: label.into(),
             executable: Some(self.executable),
             arguments: self.arguments,
+            shortcut: None,
         })
     }
 }

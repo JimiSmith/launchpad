@@ -41,6 +41,8 @@ pub struct Command {
     pub label: String,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
+    /// Launches this command with the typed path; see `Action::Shortcut`.
+    pub shortcut: Option<crate::shortcut::Shortcut>,
 }
 #[derive(Debug, Clone)]
 pub struct Commands {
@@ -55,6 +57,7 @@ impl Default for Commands {
                 label: "Shell".into(),
                 executable: None,
                 arguments: Vec::new(),
+                shortcut: None,
             }],
             errors: Vec::new(),
         }
@@ -135,6 +138,7 @@ impl Commands {
                     label,
                     executable: Some(executable.clone()),
                     arguments,
+                    shortcut: None,
                 })
             })();
             match definition {
@@ -146,5 +150,11 @@ impl Commands {
     }
     pub fn get(&self, id: Tool) -> Option<&Command> {
         self.entries.iter().find(|c| c.id == id)
+    }
+    pub fn by_shortcut(&self, shortcut: crate::shortcut::Shortcut) -> Option<Tool> {
+        self.entries
+            .iter()
+            .find(|c| c.shortcut == Some(shortcut))
+            .map(|c| c.id)
     }
 }

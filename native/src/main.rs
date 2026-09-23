@@ -300,7 +300,7 @@ fn run(args: Args) -> Result<(), String> {
             .map_err(|e| format!("Poll terminal input: {e}"))?
         {
             let action = match event::read().map_err(|e| format!("Read terminal input: {e}"))? {
-                Event::Key(key) => input::key_action(key),
+                Event::Key(key) => input::event_action(key, &app.commands),
                 Event::Paste(text) => Some(Action::Text(text)),
                 Event::Resize(_, _) => {
                     dirty = true;

@@ -22,6 +22,9 @@ pub enum Action {
     SelectTool(Tool),
     SelectHistory(u64),
     LaunchForm,
+    /// A configured command shortcut: launch the typed path, or the selected
+    /// recent row's directory, with this tool.
+    Shortcut(Tool),
     Text(String),
     Left,
     Right,
@@ -398,8 +401,10 @@ impl App {
         }
         // Never turn a pending completion into a launch of the old editor.
         // Likewise, repeated submit must not replace an in-flight launch request.
-        if matches!(action, Action::Enter | Action::LaunchForm)
-            && self.remote.as_ref().is_some_and(|r| r.validation.is_some())
+        if matches!(
+            action,
+            Action::Enter | Action::LaunchForm | Action::Shortcut(_)
+        ) && self.remote.as_ref().is_some_and(|r| r.validation.is_some())
         {
             return;
         }
@@ -433,6 +438,7 @@ impl App {
                         | Action::Enter
                         | Action::AcceptSuggestion(_)
                         | Action::LaunchForm
+                        | Action::Shortcut(_)
                         | Action::Escape
                         | Action::Reset
                         | Action::Help
@@ -580,6 +586,20 @@ impl App {
                 return;
             }
             self.launch(self.editor.text.clone(), self.tool);
+            return;
+        }
+        if let Action::Shortcut(tool) = action {
+            if !self.available(tool) {
+                return;
+            }
+            self.tool = tool;
+            self.touched = true;
+            // Suggestions stay unaccepted: the shortcut uses the typed text.
+            let path = (self.focus == Focus::History)
+                .then(|| self.history.get(self.recent).map(|e| e.path.clone()))
+                .flatten()
+                .unwrap_or_else(|| self.editor.text.clone());
+            self.launch(path, tool);
             return;
         }
         if let Action::Scroll(target, down) = action {
@@ -1100,6 +1120,71 @@ mod tests {
         a.update(Action::ClearHistory);
         assert_eq!(a.history.len(), 2);
         assert_eq!(a.take_history_mutation(), Some(HistoryMutation::Clear));
+    }
+
+    #[test]
+    fn shortcut_launches_the_typed_text_not_the_highlighted_suggestion() {
+        let mut a = app();
+        let claude = tool("claude");
+        query(&mut a, "nts");
+        results(&mut a, &["/home/example/Projects/notes"]);
+        a.update(Action::Down);
+        assert_eq!(a.highlighted, Some(0));
+        a.update(Action::Shortcut(claude));
+        let Some(RemoteRequest::Validate { raw, .. }) = a.remote.as_mut().unwrap().outbound.clone()
+        else {
+            panic!("expected a pending validation");
+        };
+        assert_eq!(raw, "nts");
+        // A second shortcut or Enter never replaces the in-flight launch.
+        a.update(Action::Shortcut(Tool::Shell));
+        a.update(Action::Enter);
+        validate(&mut a, Ok("/home/example/nts".into()));
+        let launch = a.take_launch().expect("one launch request");
+        assert_eq!(
+            (launch.path.as_str(), launch.tool),
+            ("/home/example/nts", claude)
+        );
+    }
+
+    #[test]
+    fn shortcut_on_a_recent_row_replaces_its_tool() {
+        let mut a = app();
+        a.history = vec![Launch {
+            id: 0,
+            path: "/home/example/Projects/notes".into(),
+            tool: Tool::Shell,
+            age: "12m ago".into(),
+        }];
+        a.update(Action::Focus(Focus::History));
+        a.update(Action::Shortcut(tool("codex")));
+        validate(&mut a, Err("gone".into()));
+        assert_eq!(a.tool, tool("codex"), "a failed shortcut shows its tool");
+        a.update(Action::Shortcut(tool("codex")));
+        validate(&mut a, Ok("/home/example/Projects/notes".into()));
+        let launch = a.take_launch().expect("one launch request");
+        assert_eq!(
+            (launch.path.as_str(), launch.tool),
+            ("/home/example/Projects/notes", tool("codex"))
+        );
+    }
+
+    #[test]
+    fn shortcuts_are_ignored_under_help_and_for_unknown_tools() {
+        let mut a = app();
+        let validates = |a: &mut App| {
+            matches!(
+                a.take_remote_request(),
+                Some(RemoteRequest::Validate { .. })
+            )
+        };
+        a.update(Action::Help);
+        a.update(Action::Shortcut(tool("claude")));
+        assert!(!validates(&mut a));
+        a.update(Action::Help);
+        a.update(Action::Shortcut(tool("retired")));
+        assert!(!validates(&mut a));
+        assert_eq!(a.tool, Tool::Shell);
     }
 
     #[test]
