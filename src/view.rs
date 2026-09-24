@@ -397,9 +397,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         y += h;
     }
     let history_y = y;
-    let free_rows = footer_y.saturating_sub(y + 1) as usize;
-    let row_step = if roomy { 2 } else { 1 };
-    let available_rows = free_rows.div_ceil(row_step);
+    let available_rows = footer_y.saturating_sub(y + 1) as usize;
     let count = app.history.len();
     let start = app.recent.saturating_sub(available_rows.saturating_sub(1));
     let range = if available_rows > 0 && available_rows < count {
@@ -456,7 +454,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         };
         let tool = clip(&tool, (a.width / 2) as usize);
         pair(f, a, &app.path_label(&event.path), &tool, style);
-        y += row_step as u16;
+        y += 1;
     }
     dim_section(
         f,
