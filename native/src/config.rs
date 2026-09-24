@@ -16,6 +16,8 @@ pub struct Config {
     commands: Vec<toml::Value>,
     theme: BTreeMap<String, String>,
     ignore: Vec<toml::Value>,
+    /// Shell's executable; unset means the host's default shell.
+    default_shell: Option<toml::Value>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,6 +65,14 @@ impl Config {
             }
         }
         let mut commands = Commands::default();
+        if let Some(value) = &self.default_shell {
+            match value.as_str().filter(|s| valid_executable(s)) {
+                Some(shell) => commands.entries[0].executable = Some(shell.trim().into()),
+                None => commands.errors.push(
+                    "default_shell: require an executable of at most 4096 bytes without controls; using the default shell".into(),
+                ),
+            }
+        }
         let mut seen = HashSet::new();
         for value in self.commands {
             let definition: Definition = match value.try_into() {
@@ -137,12 +147,9 @@ impl Definition {
         let fail = |s| format!("{}: {s}", self.id);
         let id = Tool::new(&self.id).ok_or_else(|| fail("invalid command ID"))?;
         if id == Tool::Shell {
-            return Err(fail("shell is reserved for Zellij's default shell"));
+            return Err(fail("shell is reserved; set default_shell instead"));
         }
-        if self.executable.trim().is_empty()
-            || self.executable.len() > 4096
-            || self.executable.chars().any(char::is_control)
-        {
+        if !valid_executable(&self.executable) {
             return Err(fail(
                 "require an executable of at most 4096 bytes without controls",
             ));
@@ -169,6 +176,9 @@ impl Definition {
             shortcut: None,
         })
     }
+}
+fn valid_executable(text: &str) -> bool {
+    !text.trim().is_empty() && text.len() <= 4096 && !text.chars().any(char::is_control)
 }
 pub fn xdg_path(variable: &str, fallback: &str, home: &Path) -> PathBuf {
     std::env::var_os(variable)

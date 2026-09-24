@@ -1,5 +1,7 @@
 pub mod config;
+pub mod herdr;
 pub mod history;
+pub mod host;
 pub mod index_store;
 pub mod input;
 pub mod search;

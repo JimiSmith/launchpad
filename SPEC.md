@@ -1,6 +1,7 @@
 # Launchpad native specification
 
-Launchpad is a Linux x86_64 native Rust executable requiring Zellij >= 0.45.0.
+Launchpad is a Linux x86_64 native Rust executable requiring Zellij >= 0.45.0
+or a herdr pane.
 The dashboard uses Ratatui/Crossterm with a reusable pure application core.
 
 The behavioral contract and configuration are documented in [README.md](README.md).
@@ -18,9 +19,10 @@ HOME-only search policy, exact invoking-cwd exception, ten-pair tool–directory
 stable command IDs and close-on-exit tool lifecycle. Configuration lives outside
 Zellij in XDG TOML; history lives in XDG state. Existing plugin caches are untouched.
 
-Outside Zellij the executable reports an error; help/version remain available.
-Do not create/attach sessions automatically or directly launch tools outside
-Zellij. Do not use shell interpolation, terminal command injection, automatic
+Outside Zellij and herdr the executable reports an error; help/version remain
+available. Do not create/attach sessions automatically or directly launch tools
+outside a host pane. Under herdr, Launchpad runs the tool as its own child in its
+pane, because herdr has no in-place replacement. Do not use shell interpolation, terminal command injection, automatic
 launch retries, or a focused-pane fallback. Quit restores the invoking terminal.
 
 The release contains no WASM plugin or separate companion helper executable.

@@ -29,6 +29,9 @@ Literal path entry and history launches retain their usual validation rules.
 
 An ordered `[[commands]]` array holds `id`, `executable`, optional `label`, and
 optional `arguments` (a string array). Shell is always first; `shell` is reserved.
+The top-level `default_shell` string sets Shell's executable, with the same
+rules as a command's `executable` and no arguments. An invalid value is a visible
+configuration error and leaves the host default in place.
 Labels default to IDs and arguments default to an empty array. First duplicate
 ID wins; at most 64 unique configured IDs are accepted.
 

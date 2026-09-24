@@ -1,22 +1,22 @@
 use clap::Parser;
 use crossterm::event::{self, Event, MouseButton, MouseEventKind};
 use std::{
-    io::{self, IsTerminal},
+    io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use zellij_launchpad::{
     config::{Config, xdg_path},
     history::{self, Entry, Store},
+    host::{Failure, Host, Kind, Launched, Origin, tab_name},
     input,
     search::SearchScheduler,
     terminal::Screen,
     worker::{self, Reply, Request, Worker},
-    zellij::{Failure, Zellij, tab_name},
 };
 use zellij_launchpad_core::{
     app::{Action, App, HistoryMutation, Launch},
@@ -26,12 +26,15 @@ use zellij_launchpad_core::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "Find a directory and launch a tool in your Zellij pane"
+    about = "Find a directory and launch a tool in your Zellij or herdr pane"
 )]
 struct Args {
     /// TOML configuration (default: $XDG_CONFIG_HOME/zellij-launchpad/config.toml)
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Terminal multiplexer, when both Zellij and herdr are detected
+    #[arg(long, value_enum, env = "LAUNCHPAD_HOST")]
+    host: Option<Kind>,
     /// Private handoff between two instances; not a user-facing launch mode.
     #[arg(long, hide = true)]
     shell_handoff: Option<String>,
@@ -41,18 +44,35 @@ struct ShellHandoff {
     config: PathBuf,
     explicit_config: bool,
     attempt: String,
-    tab_id: u32,
+    /// Older releases wrote Zellij's numeric ID; an upgraded binary may
+    /// receive a handoff from a Launchpad that was already open.
+    #[serde(deserialize_with = "tab_id")]
+    tab_id: String,
     previous_name: String,
     attempted_name: String,
 }
+fn tab_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Number(u64),
+        Text(String),
+    }
+    Ok(match serde::Deserialize::deserialize(deserializer)? {
+        Id::Number(id) => id.to_string(),
+        Id::Text(id) => id,
+    })
+}
 fn main() {
     if let Err(error) = run(Args::parse()) {
-        eprintln!("Launchpad: {error}");
+        // After a herdr tool exits, the pane may already be gone; a failed
+        // write to its terminal must not panic.
+        let _ = writeln!(io::stderr(), "Launchpad: {error}");
         std::process::exit(1);
     }
 }
 fn run(args: Args) -> Result<(), String> {
-    let host = Zellij::discover()?;
+    let host = Host::discover(args.host)?;
     let handoff: Option<ShellHandoff> = args
         .shell_handoff
         .as_deref()
@@ -61,13 +81,13 @@ fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("Invalid shell handoff: {e}"))?;
     // The CLI discards --cwd when command is absent. This instance was launched
     // with an explicit command/cwd, so Zellij can inherit its actual cwd.
-    let shell_failure = if handoff.is_some() {
-        match host.launch_default_shell() {
+    let shell_failure = match (&host, &handoff) {
+        (Host::Zellij(zellij), Some(_)) => match zellij.launch_default_shell() {
             Ok(()) => return Ok(()),
             Err(error) => Some(error),
-        }
-    } else {
-        None
+        },
+        (_, Some(_)) => return Err("Shell handoff requires Zellij".into()),
+        _ => None,
     };
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("Launchpad requires an interactive terminal".into());
@@ -108,10 +128,8 @@ fn run(args: Args) -> Result<(), String> {
             if let Err(e) = history.store.remove(&handoff.attempt, &token) {
                 message.push_str(&format!(" History rollback failed: {e}"));
             }
-            let original = zellij_launchpad::zellij::Pane {
-                id: host.pane_id,
-                is_plugin: false,
-                tab_id: handoff.tab_id,
+            let original = Origin {
+                tab_id: handoff.tab_id.clone(),
                 tab_name: handoff.previous_name.clone(),
             };
             if let Err(e) = host.restore_name(&original, &handoff.attempted_name) {
@@ -133,6 +151,14 @@ fn run(args: Args) -> Result<(), String> {
     ] {
         signal_hook::flag::register(signal, stop.clone()).map_err(|e| e.to_string())?;
     }
+    // A tool Launchpad runs itself (herdr) receives terminal signals directly,
+    // but a SIGTERM or SIGHUP aimed at Launchpad must reach it too.
+    let forward = Arc::new(AtomicUsize::new(0));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP] {
+        signal_hook::flag::register_usize(signal, forward.clone(), signal as usize)
+            .map_err(|e| e.to_string())?;
+    }
     let mut screen = Screen::new().map_err(|e| format!("Initialize terminal: {e}"))?;
     let mut hits = HitMap::default();
     let mut area = ratatui::layout::Rect::default();
@@ -141,6 +167,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut search = SearchScheduler::new(&app, Instant::now());
     let mut mouse_after = Instant::now();
     let mut launch_unknown = matches!(shell_failure, Some(Failure::Unknown(_)));
+    let mut running = None;
     loop {
         if stop.load(Ordering::Relaxed) || app.quit {
             break;
@@ -207,7 +234,7 @@ fn run(args: Args) -> Result<(), String> {
                 }
             };
             let name = tab_name(&launch.path, &command.label);
-            if let Err(error) = host.rename(original.tab_id, &name) {
+            if let Err(error) = host.rename(&original.tab_id, &name) {
                 let _ = host.restore_name(&original, &name);
                 app.launch_rejected();
                 app.message = Some(error.to_string());
@@ -215,7 +242,8 @@ fn run(args: Args) -> Result<(), String> {
                 continue;
             }
             let attempt = history.record(&launch);
-            if command.executable.is_none() {
+            // herdr runs its default shell directly; see Host::launch.
+            if command.executable.is_none() && host.kind() == Kind::Zellij {
                 command.executable = Some(
                     std::env::current_exe()
                         .map_err(|e| e.to_string())?
@@ -224,12 +252,14 @@ fn run(args: Args) -> Result<(), String> {
                         .into(),
                 );
                 command.arguments = vec![
+                    "--host".into(),
+                    "zellij".into(),
                     "--shell-handoff".into(),
                     serde_json::to_string(&ShellHandoff {
                         config: config_path.clone(),
                         explicit_config,
                         attempt: attempt.clone(),
-                        tab_id: original.tab_id,
+                        tab_id: original.tab_id.clone(),
                         previous_name: original.tab_name.clone(),
                         attempted_name: name.clone(),
                     })
@@ -238,7 +268,11 @@ fn run(args: Args) -> Result<(), String> {
             }
             screen.suspend();
             match host.launch(&launch.path, &command) {
-                Ok(()) => break,
+                Ok(Launched::Replaced) => break,
+                Ok(Launched::Running(child)) => {
+                    running = Some(child);
+                    break;
+                }
                 Err(error) => {
                     let rejected = matches!(error, Failure::Rejected(_));
                     let mut message = error.to_string();
@@ -338,6 +372,12 @@ fn run(args: Args) -> Result<(), String> {
             }
         }
     }
+    if let Some(child) = running {
+        // Stop indexing and release the terminal before handing it over.
+        drop(worker);
+        drop(screen);
+        host.finish(child, &forward)?;
+    }
     Ok(())
 }
 struct History {
@@ -409,5 +449,19 @@ impl History {
             eprintln!("Launchpad: history not saved: {error}");
         }
         id
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::ShellHandoff;
+    #[test]
+    fn handoff_accepts_numeric_tab_ids_from_older_releases() {
+        for id in ["3", "\"3\""] {
+            let handoff: ShellHandoff = serde_json::from_str(&format!(
+                r#"{{"config":"/c","explicit_config":false,"attempt":"a","tab_id":{id},"previous_name":"p","attempted_name":"n"}}"#
+            ))
+            .unwrap();
+            assert_eq!(handoff.tab_id, "3");
+        }
     }
 }

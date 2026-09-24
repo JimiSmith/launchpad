@@ -47,7 +47,8 @@ class Session:
         self.cwd.mkdir()
         self.log = self.out / 'executions.jsonl'
         self.socket_dir = tempfile.TemporaryDirectory(prefix='launchpad-')
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('ZELLIJ') and k != 'TMUX'}
+        self.env = {k: v for k, v in os.environ.items()
+                    if not k.startswith(('ZELLIJ', 'HERDR', 'LAUNCHPAD_HOST')) and k != 'TMUX'}
         # Rendering checks must exercise colour even when the runner disables it.
         self.env.pop('NO_COLOR', None)
         self.env.update(HOME=str(self.home), PATH=str(self.out / 'bin'), SHELL='/bin/false',
@@ -650,7 +651,9 @@ action) echo '[{"id":7,"is_plugin":false,"tab_id":3,"tab_name":"Original"}]';;
 esac
 ''')
         fake.chmod(0o700)
-        env = dict(os.environ, HOME=str(out / 'home'), PATH=str(out / 'bin'),
+        # A runner inside herdr must not make Launchpad see two hosts.
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR', 'LAUNCHPAD_HOST'))}
+        env.update(HOME=str(out / 'home'), PATH=str(out / 'bin'),
                    ZELLIJ_SESSION_NAME='fake-native-terminal', ZELLIJ_PANE_ID='7',
                    XDG_CONFIG_HOME=str(out / 'config'), XDG_STATE_HOME=str(out / 'state'),
                    XDG_CACHE_HOME=str(out / 'cache'),

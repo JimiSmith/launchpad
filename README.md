@@ -1,12 +1,15 @@
 # Launchpad
 
-A native directory-and-tool dashboard for Zellij. Fuzzy-find a directory, choose
-Shell or a configured command, and replace the dashboard's pane with that tool.
-Launchpad names the originating tab `directory · command label`; tool panes close
-on exit without returning to the dashboard.
+A native directory-and-tool dashboard for Zellij and [herdr](https://herdr.dev).
+Fuzzy-find a directory, choose Shell or a configured command, and run that tool
+in the dashboard's pane: Zellij replaces the pane; under herdr Launchpad runs the
+tool itself (see [herdr](#herdr)). Launchpad names the originating tab
+`directory · command label`; tool panes close on exit without returning to the
+dashboard.
 
-Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**. Launchpad must run inside a
-Zellij terminal pane. No plugin, WASM runtime, or plugin permissions are needed.
+Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**, or inside
+herdr (tested with 0.9.0; see [herdr](#herdr)). Launchpad must run inside a Zellij
+or herdr terminal pane. No plugin, WASM runtime, or plugin permissions are needed.
 
 ## Install and run
 
@@ -56,6 +59,84 @@ HOME is indexing. Shell uses Zellij's configured default shell. Configured tools
 receive the chosen directory and literal argument arrays. No command availability
 or authentication checks run before launch.
 
+## herdr
+
+Inside a herdr pane Launchpad needs no extra setup:
+
+```sh
+zellij-launchpad
+```
+
+herdr cannot replace a pane in place, so Launchpad runs the chosen tool itself,
+in the same pane and the chosen directory, and closes the pane with
+`herdr pane close` when the tool exits. A small Launchpad process stays alive
+under each tool until then. The tab is renamed `directory · command label` as in
+Zellij.
+
+Shell starts [`default_shell`](#configure-commands-and-colours) if set.
+Otherwise it starts `$SHELL`; failing that, `pwsh.exe` if it is on PATH, else
+`powershell.exe` on Windows, and `bash` if it is on PATH, else `/bin/sh`
+elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
+if herdr is configured to use a different shell.
+
+Launchpad moves into the chosen directory before starting a tool, so herdr's
+"new pane follows cwd" and git detection see the right folder. PowerShell's `cd`
+does not change the process directory, so herdr cannot see it in a PowerShell
+Launchpad started. To fix that for every PowerShell, add this to your `$PROFILE`;
+it reports the folder at each prompt, as herdr's own PowerShell panes do:
+
+```powershell
+if ($null -eq $global:LaunchpadOriginalPrompt) {
+    $global:LaunchpadOriginalPrompt = $function:prompt
+    function global:prompt {
+        # Run the original prompt first, so it still sees the last command's $?.
+        $out = @(& $global:LaunchpadOriginalPrompt) -join ''
+        $loc = $ExecutionContext.SessionState.Path.CurrentLocation
+        if ($loc.Provider.Name -eq 'FileSystem') {
+            try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}
+            $out += "$([char]27)]9;9;$($loc.ProviderPath)$([char]27)\"
+        }
+        $out
+    }
+}
+```
+
+On Windows, Launchpad ignores Ctrl+C while a tool runs; the tool still gets it.
+On Unix, a tool without its own job control shares Launchpad's process group,
+so Ctrl+Z stops both and the pane stops responding; shells are unaffected.
+
+### Open Launchpad in every new herdr pane
+
+Make Launchpad herdr's default shell in herdr's `config.toml`
+(`~/.config/herdr/config.toml`; `%APPDATA%\herdr\config.toml` on Windows):
+
+```toml
+[terminal]
+default_shell = "zellij-launchpad"  # or an absolute path
+```
+
+Then run `herdr server reload-config`. New tabs, splits and workspaces open
+Launchpad in the directory herdr picks for them. Shell starts Launchpad's own
+`default_shell` or detected shell, never herdr's setting, so it does not start
+Launchpad again. Quit closes the pane. Panes that already exist keep their shell.
+
+`herdr agent start` and `herdr pane run` need a shell prompt, so they do not
+work in a pane still showing Launchpad; choose Shell first, or split from a
+shell pane.
+
+### Zellij inside herdr
+
+Zellij panes started from a herdr pane inherit herdr's environment, and the
+environment cannot tell which multiplexer owns Launchpad's pane. Launchpad then
+refuses to start until you choose. Set it once where you start Zellij, so
+layouts and `zellij run` commands need no changes:
+
+```sh
+LAUNCHPAD_HOST=zellij zellij
+```
+
+`--host zellij` or `--host herdr` on the command line overrides the variable.
+
 ## Configure commands and colours
 
 The default file is `$XDG_CONFIG_HOME/zellij-launchpad/config.toml`, falling back
@@ -66,6 +147,7 @@ An explicit missing file, unreadable file, or malformed TOML is a startup error.
 
 ```toml
 ignore = ["/home/james/cache", "/home/james/old-projects"]
+default_shell = "/usr/bin/fish"  # optional; see below
 
 [[commands]]
 id = "claude"
@@ -95,7 +177,10 @@ on_accent = "#181926"
 error = "#ed8796"
 ```
 
-Shell stays first. Commands follow file order; the first duplicate ID wins.
+Shell stays first. `default_shell` is the executable Shell runs, a name or
+path without arguments. Unset, Shell uses Zellij's configured default shell, or
+under herdr the detected shell (see [herdr](#herdr)). Commands follow file
+order; the first duplicate ID wins.
 Labels default to IDs. Invalid individual definitions are skipped with a visible
 error, while valid commands stay usable. F1 lists all configuration errors.
 The interface uses open sections with dimmed inactive content and a compact

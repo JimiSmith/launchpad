@@ -169,3 +169,27 @@ shortcut = "ctrl+f6"
         Tool::new("fkey")
     );
 }
+
+#[test]
+fn default_shell_becomes_shells_executable_and_bad_values_are_reported() {
+    let shell = |text: &str| {
+        let mut app = App::default();
+        toml::from_str::<Config>(text).unwrap().apply(&mut app);
+        let entry = app.commands.get(Tool::Shell).unwrap().clone();
+        (entry.executable, entry.arguments, app.commands.errors)
+    };
+    assert_eq!(shell(""), (None, vec![], vec![]));
+    assert_eq!(
+        shell("default_shell = ' pwsh.exe '"),
+        (Some("pwsh.exe".into()), vec![], vec![])
+    );
+    for bad in [
+        "default_shell = ''",
+        "default_shell = 7",
+        "default_shell = \"a\\nb\"",
+    ] {
+        let (executable, _, errors) = shell(bad);
+        assert_eq!(executable, None, "{bad}");
+        assert!(errors[0].starts_with("default_shell:"), "{bad}: {errors:?}");
+    }
+}

@@ -1,26 +1,14 @@
+use crate::host::{self, clean};
+pub use crate::host::{Failure, tab_name};
 use serde::Deserialize;
 use std::{
-    io::Read,
     path::PathBuf,
-    process::{Command, Stdio},
-    sync::mpsc,
+    process::Command,
     thread,
     time::{Duration, Instant},
 };
 use zellij_launchpad_core::commands::Command as ToolCommand;
 
-#[derive(Debug)]
-pub enum Failure {
-    Rejected(String),
-    Unknown(String),
-}
-impl std::fmt::Display for Failure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Rejected(s) | Self::Unknown(s) => f.write_str(s),
-        }
-    }
-}
 #[derive(Debug, Deserialize)]
 pub struct Pane {
     pub id: u32,
@@ -68,66 +56,26 @@ impl Zellij {
         self.call_until(args, Instant::now() + self.timeout)
     }
     fn call_until(&self, args: &[String], deadline: Instant) -> Result<String, Failure> {
-        let mut child = Command::new(&self.executable)
-            .args(["--session", &self.session])
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| Failure::Rejected(format!("Cannot start Zellij CLI: {e}")))?;
-        // Drain both pipes concurrently to avoid deadlocking on CLI diagnostics.
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
-        let (output_tx, output_rx) = mpsc::sync_channel(2);
-        let error_tx = output_tx.clone();
-        thread::spawn(move || {
-            let _ = output_tx.send((false, read_output(stdout)));
-        });
-        thread::spawn(move || {
-            let _ = error_tx.send((true, read_output(stderr)));
-        });
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-                outcome => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    // A CLI descendant may still hold a pipe open. Never wait
-                    // for its reader thread after the command deadline.
-                    return Err(Failure::Unknown(format!(
-                        "Launch outcome unknown. Quit/reopen; do not automatically retry. Zellij response: {outcome:?}"
-                    )));
-                }
-            }
-        };
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-        for _ in 0..2 {
-            let (is_error, output) = output_rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .map_err(|_| Failure::Unknown("Launch outcome unknown: Zellij output did not complete. Quit/reopen; do not automatically retry.".into()))?;
-            if is_error {
-                stderr = output;
-            } else {
-                stdout = output;
-            }
-        }
-        if !status.success() {
+        let mut command = Command::new(&self.executable);
+        command.args(["--session", &self.session]).args(args);
+        let output = host::run(command, "Zellij", deadline)?;
+        if !output.status.success() {
             // Replacing an interactive shell's pane can hang up its foreground
             // process group, including this CLI child, after Zellij accepts the
             // action. A signal is not a rejection and must not undo history.
-            if status.code().is_none() {
+            if output.status.code().is_none() {
                 return Err(Failure::Unknown(format!(
-                    "Launch outcome unknown: Zellij CLI interrupted ({status}). Quit/reopen; do not automatically retry."
+                    "Launch outcome unknown: Zellij CLI interrupted ({}). Quit/reopen; do not automatically retry.",
+                    output.status
                 )));
             }
             return Err(Failure::Rejected(format!(
-                "Zellij rejected the action ({status}): {}",
-                clean(&stderr)
+                "Zellij rejected the action ({}): {}",
+                output.status,
+                clean(&output.stderr)
             )));
         }
-        Ok(stdout)
+        Ok(output.stdout)
     }
     pub fn origin(&self) -> Result<Pane, Failure> {
         let deadline = Instant::now() + self.timeout;
@@ -171,13 +119,6 @@ impl Zellij {
             return Err(Failure::Rejected(
                 "Originating tab changed; no launch. Retry.".into(),
             ));
-        }
-        Ok(())
-    }
-    pub fn restore_name(&self, original: &Pane, attempted: &str) -> Result<(), Failure> {
-        let pane = self.origin()?;
-        if pane.tab_id == original.tab_id && pane.tab_name == attempted {
-            self.rename(original.tab_id, &original.tab_name)?;
         }
         Ok(())
     }
@@ -228,30 +169,9 @@ impl Zellij {
         ))
     }
 }
-fn read_output(reader: impl Read) -> String {
-    let mut bytes = Vec::new();
-    // Continue draining after the display bound, without retaining unbounded text.
-    let mut reader = reader;
-    let mut chunk = [0u8; 4096];
-    while let Ok(n) = reader.read(&mut chunk) {
-        if n == 0 {
-            break;
-        }
-        let keep = n.min((1024 * 1024usize).saturating_sub(bytes.len()));
-        bytes.extend_from_slice(&chunk[..keep]);
-    }
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-fn clean(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).take(500).collect()
-}
 pub fn supported_version(text: &str) -> bool {
     let mut numbers = text.trim().strip_prefix("zellij ").unwrap_or("").split('.');
     let major = numbers.next().and_then(|n| n.parse::<u32>().ok());
     let minor = numbers.next().and_then(|n| n.parse::<u32>().ok());
     matches!((major, minor), (Some(major), Some(minor)) if major > 0 || minor >= 45)
-}
-pub fn tab_name(path: &str, label: &str) -> String {
-    let basename = zellij_launchpad_core::host_path::basename(path);
-    format!("{basename} · {label}")
 }
