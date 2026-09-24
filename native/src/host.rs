@@ -3,7 +3,7 @@ use crate::{herdr::Herdr, zellij::Zellij};
 use std::{
     io::Read,
     process::{Child, Command, ExitStatus, Stdio},
-    sync::{atomic::AtomicUsize, mpsc},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -126,16 +126,94 @@ impl Host {
         }
     }
     /// Waits for a tool Launchpad runs itself, then closes the pane with it.
-    /// `forward` holds a pending signal number to pass on to the tool.
-    pub fn finish(&self, mut child: Child, forward: &AtomicUsize) -> Result<(), String> {
+    pub fn finish(&self, mut child: Child, forward: Forward) -> Result<(), String> {
         match self {
             Self::Herdr(host) => host.finish(child, forward),
             // Zellij replaces the pane instead; see `launch`.
-            Self::Zellij(_) => child
-                .wait()
-                .map(|_| ())
+            Self::Zellij(_) => forward
+                .wait(&mut child)
                 .map_err(|e| format!("Wait for tool: {e}")),
         }
+    }
+}
+
+/// Passes SIGTERM and SIGHUP aimed at Launchpad on to a tool it waits for;
+/// the terminal already delivers SIGINT and SIGQUIT to the tool itself.
+pub struct Forward {
+    #[cfg(unix)]
+    signals: signal_hook::iterator::Signals,
+}
+impl Forward {
+    pub fn new() -> std::io::Result<Self> {
+        Ok(Self {
+            #[cfg(unix)]
+            signals: signal_hook::iterator::Signals::new([
+                signal_hook::consts::SIGTERM,
+                signal_hook::consts::SIGHUP,
+            ])?,
+        })
+    }
+    /// Blocks until the tool exits, forwarding signals from another thread.
+    pub fn wait(self, child: &mut Child) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::sync::{Arc, Mutex};
+            let pid = child.id() as libc::pid_t;
+            let exited = Arc::new(Mutex::new(false));
+            let handle = self.signals.handle();
+            let forwarder = {
+                let exited = exited.clone();
+                let mut signals = self.signals;
+                thread::Builder::new()
+                    .name("signal-forward".into())
+                    .spawn(move || {
+                        for signal in signals.forever() {
+                            // Unreaped until `exited` is set, so the PID is
+                            // still the tool's.
+                            let exited = exited.lock().unwrap_or_else(|e| e.into_inner());
+                            if !*exited {
+                                // SAFETY: plain syscall on our own child.
+                                unsafe { libc::kill(pid, signal) };
+                            }
+                        }
+                    })
+            };
+            // Without a thread there is no forwarding, but the tool must
+            // still be waited for so the pane closes.
+            let Ok(forwarder) = forwarder else {
+                return child.wait().map(|_| ());
+            };
+            // Wait without reaping, so no forward can reach a reused PID.
+            let waited = loop {
+                // SAFETY: waitid only writes the zeroed siginfo it is given.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let options = libc::WEXITED | libc::WNOWAIT;
+                if unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, options) } == 0
+                {
+                    // Some macOS versions were reported to return for a
+                    // stopped child despite WEXITED (Go issue #19314); keep
+                    // forwarding until a real exit, pausing between checks
+                    // in case such a return repeats at once.
+                    if matches!(
+                        info.si_code,
+                        libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED
+                    ) {
+                        break Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    break Err(error);
+                }
+            };
+            *exited.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            handle.close();
+            let _ = forwarder.join();
+            waited?;
+        }
+        child.wait().map(|_| ())
     }
 }
 

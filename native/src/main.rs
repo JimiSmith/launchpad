@@ -5,14 +5,14 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use zellij_launchpad::{
     config::{Config, xdg_path},
     history::{self, Entry, Store},
-    host::{Failure, Host, Kind, Launched, Origin, tab_name},
+    host::{Failure, Forward, Host, Kind, Launched, Origin, tab_name},
     input,
     search::SearchScheduler,
     terminal::Screen,
@@ -73,6 +73,13 @@ fn main() {
     }
 }
 fn run(args: Args) -> Result<(), String> {
+    // An ignored SIGCHLD survives exec and makes the kernel reap children
+    // itself, so Forward::wait could forward to a reused PID.
+    #[cfg(unix)]
+    // SAFETY: resets one disposition before any thread or child exists.
+    unsafe {
+        libc::signal(libc::SIGCHLD, libc::SIG_DFL)
+    };
     let host = Host::discover(
         args.host
             .map_or_else(Kind::from_env, |kind| Ok(Some(kind)))?,
@@ -157,14 +164,8 @@ fn run(args: Args) -> Result<(), String> {
     ] {
         signal_hook::flag::register(signal, stop.clone()).map_err(|e| e.to_string())?;
     }
-    // A tool Launchpad runs itself (herdr) receives terminal signals directly,
-    // but a SIGTERM or SIGHUP aimed at Launchpad must reach it too.
-    let forward = Arc::new(AtomicUsize::new(0));
-    #[cfg(unix)]
-    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGHUP] {
-        signal_hook::flag::register_usize(signal, forward.clone(), signal as usize)
-            .map_err(|e| e.to_string())?;
-    }
+    // Registered now so a signal before a herdr tool starts is not lost.
+    let forward = Forward::new().map_err(|e| e.to_string())?;
     let mut screen = Screen::new().map_err(|e| format!("Initialize terminal: {e}"))?;
     let mut hits = HitMap::default();
     let mut area = ratatui::layout::Rect::default();
@@ -271,6 +272,15 @@ fn run(args: Args) -> Result<(), String> {
                     })
                     .map_err(|e| e.to_string())?,
                 ];
+            }
+            // A stop signal during the rename or history write means quit:
+            // undo this attempt rather than start a tool that the pending
+            // signal would at once be forwarded to.
+            if stop.load(Ordering::Relaxed) {
+                let _ = host.restore_name(&original, &name);
+                let (token, _) = history.token();
+                let _ = history.store.remove(&attempt, &token);
+                break;
             }
             screen.suspend();
             match host.launch(&launch.path, &command) {
@@ -382,7 +392,7 @@ fn run(args: Args) -> Result<(), String> {
         // Stop indexing and release the terminal before handing it over.
         drop(worker);
         drop(screen);
-        host.finish(child, &forward)?;
+        host.finish(child, forward)?;
     }
     Ok(())
 }

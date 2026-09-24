@@ -1,8 +1,8 @@
 #![cfg(unix)]
-use std::{path::PathBuf, sync::atomic::AtomicUsize, time::Duration};
+use std::{path::PathBuf, time::Duration};
 use zellij_launchpad::{
     herdr::Herdr,
-    host::{Failure, Host, Launched},
+    host::{Failure, Forward, Host, Launched},
 };
 use zellij_launchpad_core::commands::{Command, Tool};
 
@@ -158,7 +158,7 @@ fn tool_runs_in_the_directory_with_literal_arguments_then_closes_the_pane() {
     else {
         panic!("herdr launches run as a child");
     };
-    host.finish(child, &AtomicUsize::new(0)).unwrap();
+    host.finish(child, Forward::new().unwrap()).unwrap();
     assert_eq!(
         std::fs::read_to_string(dir.join("out")).unwrap(),
         format!("{}\n|a b|$HOME|;|", dir.display())
@@ -180,7 +180,7 @@ fn failing_tool_still_closes_the_pane() {
     let Launched::Running(child) = host.launch("/tmp", &tool("false", &[])).unwrap() else {
         panic!("herdr launches run as a child");
     };
-    host.finish(child, &AtomicUsize::new(0)).unwrap();
+    host.finish(child, Forward::new().unwrap()).unwrap();
     assert_eq!(f.calls().last().unwrap(), "pane|close|w1:p2|");
 }
 #[test]
@@ -218,7 +218,7 @@ fn a_pane_that_is_already_gone_is_reported_after_the_tool_is_reaped() {
         panic!("herdr launches run as a child");
     };
     let pid = child.id();
-    let error = host.finish(child, &AtomicUsize::new(0)).unwrap_err();
+    let error = host.finish(child, Forward::new().unwrap()).unwrap_err();
     assert!(error.contains("pane w1:p2 not found"), "{error}");
     // SAFETY: probe only. A reaped child no longer exists under its PID.
     let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
@@ -231,10 +231,18 @@ fn termination_signals_are_forwarded_to_the_tool() {
     let Launched::Running(child) = host.launch("/tmp", &tool("sleep", &["30"])).unwrap() else {
         panic!("herdr launches run as a child");
     };
+    // Registered before the signal, as main does at startup; this process
+    // then survives SIGTERM and passes it on.
+    let forward = Forward::new().unwrap();
+    let sender = std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_millis(300));
+        // SAFETY: plain syscall to this test process.
+        unsafe { libc::kill(libc::getpid(), libc::SIGTERM) };
+    });
     let started = std::time::Instant::now();
-    host.finish(child, &AtomicUsize::new(libc::SIGTERM as usize))
-        .unwrap();
+    host.finish(child, forward).unwrap();
     assert!(started.elapsed() < Duration::from_secs(5));
+    sender.join().unwrap();
     assert_eq!(f.calls().last().unwrap(), "pane|close|w1:p2|");
 }
 #[test]
@@ -263,7 +271,7 @@ fn launchpad_follows_the_tool_into_its_directory_but_not_on_failure() {
         std::env::current_dir().unwrap(),
         dir.canonicalize().unwrap()
     );
-    host.finish(child, &AtomicUsize::new(0)).unwrap();
+    host.finish(child, Forward::new().unwrap()).unwrap();
 }
 #[test]
 fn only_the_panes_own_process_counts_as_its_root() {

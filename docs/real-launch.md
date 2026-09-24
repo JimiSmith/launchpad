@@ -109,7 +109,14 @@ over process cwds for session state, custom commands and the workspace root; the
 invoking shell may have reported its own directory before starting Launchpad.
 Without a report, herdr reads the foreground group leader's cwd on Unix (also
 first for new panes) and the pane process's on Windows, and either can be
-Launchpad. SIGTERM and SIGHUP sent to Launchpad are forwarded to the tool;
+Launchpad. On Unix, Launchpad blocks in `waitid(WNOWAIT)` while a signal thread
+forwards SIGTERM and SIGHUP sent to Launchpad to the tool; the exit is reaped
+only after that thread stops, so no signal can reach a reused PID. Some macOS
+versions were reported to return from `waitid` for a stopped child (Go issue
+#19314), so only an exit, kill or core dump `si_code` ends the wait, with a 100
+ms pause between checks otherwise. Launchpad resets SIGCHLD to its default at
+startup, since an inherited ignored SIGCHLD would let the kernel reap the tool
+itself. If the thread cannot start, Launchpad still waits, without forwarding.
 SIGINT and SIGQUIT only set Launchpad's stop flag, since the terminal delivers
 them to the tool itself. On Windows, Launchpad installs a console handler that
 ignores Ctrl+C and Ctrl+Break, and removes it if the spawn fails; handlers are
@@ -122,6 +129,11 @@ Launchpad's config if set, else `$SHELL` unless its file name is Launchpad's own
 first present of `pwsh.exe` then `powershell.exe` on Windows, or `bash` then
 `/bin/sh` elsewhere. Presence means a file of that name in a PATH directory.
 Launchpad does not read herdr's configuration.
+
+A stop signal (SIGTERM, SIGHUP, SIGINT, SIGQUIT) that arrives after a tool is
+chosen but before it starts, for example during the tab rename, cancels the
+launch: the tab name and history attempt are rolled back and Launchpad quits,
+so the signal is not passed on to a tool that has just started.
 
 A spawn failure, such as a missing executable or directory, is a
 known rejection: the form returns, the tab name is restored and the history

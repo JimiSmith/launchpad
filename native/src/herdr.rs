@@ -1,10 +1,8 @@
-use crate::host::{self, Failure, Launched, Origin, clean};
+use crate::host::{self, Failure, Forward, Launched, Origin, clean};
 use serde::de::DeserializeOwned;
 use std::{
     path::PathBuf,
     process::{Child, Command},
-    sync::atomic::{AtomicUsize, Ordering},
-    thread,
     time::{Duration, Instant},
 };
 use zellij_launchpad_core::commands::Command as ToolCommand;
@@ -178,23 +176,10 @@ impl Herdr {
     }
     /// Waits for the tool, passing on termination signals Launchpad receives,
     /// then closes this pane as Zellij's close-on-exit would.
-    pub fn finish(&self, mut child: Child, forward: &AtomicUsize) -> Result<(), String> {
-        let waited = loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break Ok(()),
-                Ok(None) => (),
-                Err(e) => break Err(format!("Wait for tool: {e}")),
-            }
-            #[cfg(unix)]
-            if let signal @ 1.. = forward.swap(0, Ordering::Relaxed) {
-                // SAFETY: plain syscall; the child is unreaped, so its PID is
-                // still its own.
-                unsafe { libc::kill(child.id() as libc::pid_t, signal as libc::c_int) };
-            }
-            #[cfg(not(unix))]
-            let _ = forward.load(Ordering::Relaxed);
-            thread::sleep(Duration::from_millis(50));
-        };
+    pub fn finish(&self, mut child: Child, forward: Forward) -> Result<(), String> {
+        let waited = forward
+            .wait(&mut child)
+            .map_err(|e| format!("Wait for tool: {e}"));
         let closed = self
             .pane()
             .and_then(|pane| self.call::<serde_json::Value>(&["pane", "close", &pane.pane_id]))
