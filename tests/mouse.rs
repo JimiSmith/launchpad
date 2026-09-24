@@ -1,12 +1,12 @@
 mod common;
 
 use common::app;
-use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::{Action, App, Focus},
     remote::RemoteRequest,
     view::{self, HitMap, Pointer},
 };
+use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
 /// Take the outstanding validation request as (generation, raw path).
 fn pending(app: &mut App) -> (u64, String) {
@@ -160,7 +160,7 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
 }
 #[test]
 fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
-    use zellij_launchpad_core::app::Tool;
+    use launchpad_core::app::Tool;
     for (w, h) in [(80, 24), (120, 36), (40, 12)] {
         let mut app = app();
         click_label(&mut app, w, h, "Codex");
@@ -183,7 +183,7 @@ fn suggestion_click_accepts_without_launching() {
 }
 #[test]
 fn scrolled_input_maps_visible_origin_and_clipped_tail() {
-    use zellij_launchpad_core::cells::{input_cursor, input_window};
+    use launchpad_core::cells::{input_cursor, input_window};
     // Still wider than both viewports, with room under the input cap to edit.
     let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(80));
     for (w, h, x, y, budget) in [(80, 24, 4, 4, 74), (40, 10, 3, 2, 36)] {

@@ -37,9 +37,9 @@ and the new index each have their own retained-data budget.
 ## Persistent index
 
 The worker loads a versioned `index.json` before it begins traversal. Linux uses
-`$XDG_CACHE_HOME/zellij-launchpad` (fallback `~/.cache/zellij-launchpad`), macOS
-uses `~/Library/Caches/zellij-launchpad`, and Windows uses
-`%LOCALAPPDATA%/zellij-launchpad` (fallback `~/AppData/Local/zellij-launchpad`).
+`$XDG_CACHE_HOME/launchpad` (fallback `~/.cache/launchpad`), macOS
+uses `~/Library/Caches/launchpad`, and Windows uses
+`%LOCALAPPDATA%/launchpad` (fallback `~/AppData/Local/launchpad`).
 Environment overrides must be absolute. Configuration and history locations are
 unchanged.
 

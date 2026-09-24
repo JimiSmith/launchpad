@@ -1,5 +1,6 @@
 //! The terminal multiplexer Launchpad runs in: Zellij or herdr.
 use crate::{herdr::Herdr, zellij::Zellij};
+use launchpad_core::commands::Command as ToolCommand;
 use std::{
     io::Read,
     process::{Child, Command, ExitStatus, Stdio},
@@ -7,7 +8,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use zellij_launchpad_core::commands::Command as ToolCommand;
 
 #[derive(Debug)]
 pub enum Failure {
@@ -293,6 +293,6 @@ pub(crate) fn clean(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).take(500).collect()
 }
 pub fn tab_name(path: &str, label: &str) -> String {
-    let basename = zellij_launchpad_core::host_path::basename(path);
+    let basename = launchpad_core::host_path::basename(path);
     format!("{basename} · {label}")
 }

@@ -1,8 +1,8 @@
-use std::{path::PathBuf, time::Duration};
 #[cfg(unix)]
-use zellij_launchpad::zellij::Failure;
-use zellij_launchpad::zellij::{Zellij, supported_version};
-use zellij_launchpad_core::commands::{Command, Tool};
+use launchpad::zellij::Failure;
+use launchpad::zellij::{Zellij, supported_version};
+use launchpad_core::commands::{Command, Tool};
+use std::{path::PathBuf, time::Duration};
 #[cfg(unix)]
 static FIXTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(unix)]

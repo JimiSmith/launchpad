@@ -6,14 +6,14 @@ dependencies:
 
 | Platform | Rust target | Runner | Archive |
 | --- | --- | --- | --- |
-| Linux x64 | `x86_64-unknown-linux-gnu` | Ubuntu 24.04 | `zellij-launchpad-linux-x86_64.tar.gz` |
-| Windows x64 | `x86_64-pc-windows-msvc` | Windows 2022 | `zellij-launchpad-windows-x86_64.zip` |
-| macOS Intel x64 | `x86_64-apple-darwin` | macOS 15 Intel | `zellij-launchpad-macos-x86_64.tar.gz` |
-| macOS Apple Silicon ARM64 | `aarch64-apple-darwin` | macOS 15 ARM64 | `zellij-launchpad-macos-aarch64.tar.gz` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | Ubuntu 24.04 | `launchpad-linux-x86_64.tar.gz` |
+| Windows x64 | `x86_64-pc-windows-msvc` | Windows 2022 | `launchpad-windows-x86_64.zip` |
+| macOS Intel x64 | `x86_64-apple-darwin` | macOS 15 Intel | `launchpad-macos-x86_64.tar.gz` |
+| macOS Apple Silicon ARM64 | `aarch64-apple-darwin` | macOS 15 ARM64 | `launchpad-macos-aarch64.tar.gz` |
 
 The Linux GNU binary requires a compatible glibc (Ubuntu 24.04 or newer).
 
-Each archive includes the executable (`zellij-launchpad.exe` on Windows), README,
+Each archive includes the executable (`launchpad.exe` on Windows), README,
 documentation, layouts and example config. Every archive has a matching `.sha256`
 checksum file.
 

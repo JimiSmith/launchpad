@@ -18,7 +18,7 @@ struct Snapshot {
     version: u32,
     entries: Vec<Entry>,
 }
-use zellij_launchpad_core::app::Tool;
+use launchpad_core::app::Tool;
 
 pub struct Store {
     root: PathBuf,
@@ -56,8 +56,7 @@ fn valid_token(token: &str) -> bool {
 fn valid_entry(entry: &Entry) -> bool {
     valid_token(&entry.id)
         && entry.path.len() <= 4096
-        && zellij_launchpad_core::host_path::HostPath::parse(&entry.path)
-            .is_some_and(|p| !p.has_parent())
+        && launchpad_core::host_path::HostPath::parse(&entry.path).is_some_and(|p| !p.has_parent())
         && !entry.path.chars().any(char::is_control)
 }
 fn safe_path(path: &Path, directory: bool) -> Result<(), String> {

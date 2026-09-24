@@ -2,8 +2,8 @@
 //! builds one, seeded from settled worker replies. There is no fixture data
 //! inside the shipped crate, so every test states its own directories.
 #![allow(dead_code)]
-use zellij_launchpad_core::app::{Action, App, Launch, Tool};
-use zellij_launchpad_core::remote::RemoteRequest;
+use launchpad_core::app::{Action, App, Launch, Tool};
+use launchpad_core::remote::RemoteRequest;
 
 pub const HOME: &str = "/home/example";
 

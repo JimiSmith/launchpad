@@ -1,6 +1,6 @@
 //! Debounce search at dispatch, independently of which action changed the input.
+use launchpad_core::{app::App, remote::RemoteRequest};
 use std::time::{Duration, Instant};
-use zellij_launchpad_core::{app::App, remote::RemoteRequest};
 
 pub struct SearchScheduler {
     text: String,
@@ -40,7 +40,7 @@ impl SearchScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zellij_launchpad_core::app::{Action, Focus};
+    use launchpad_core::app::{Action, Focus};
 
     fn query(request: Option<RemoteRequest>, expected: &str) {
         let Some(RemoteRequest::Query { text, .. }) = request else {

@@ -1,9 +1,9 @@
+use launchpad_core::search::HomeIndex;
 use std::{
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
-use zellij_launchpad_core::search::HomeIndex;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -155,7 +155,7 @@ impl Drop for Tree {
 }
 #[test]
 fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
-    use zellij_launchpad_core::{
+    use launchpad_core::{
         app::{Action, App},
         search::matches_in,
     };
@@ -196,7 +196,7 @@ fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
 
 #[test]
 fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
-    use zellij_launchpad_core::search::{Directory, matches_in};
+    use launchpad_core::search::{Directory, matches_in};
     let home = format!("/home/{}", "a".repeat(101));
     let dirs = [Directory {
         path: format!("{home}/needle"),
@@ -210,7 +210,7 @@ fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
 
 #[test]
 fn selected_long_path_is_preserved_and_launches_exact_target() {
-    use zellij_launchpad_core::app::{Action, App};
+    use launchpad_core::app::{Action, App};
     let tree = Tree::new();
     let name = format!("{}-needle", "a".repeat(110));
     tree.dir(&name);
@@ -529,7 +529,7 @@ fn bounded_scan_reports_limits_and_read_errors() {
 
 #[test]
 fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
-    use zellij_launchpad_core::app::{Action, App};
+    use launchpad_core::app::{Action, App};
     let tree = Tree::new();
     tree.dir("Projects/research/notes");
     tree.dir("Projects/.archive/notes");
@@ -592,7 +592,7 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
 
 #[test]
 fn background_indexing_respects_dismissal_and_section_navigation() {
-    use zellij_launchpad_core::app::{Action, App, Focus};
+    use launchpad_core::app::{Action, App, Focus};
     let tree = Tree::new();
     for i in 0..300 {
         tree.dir(&format!("notes-{i}"));
@@ -632,8 +632,8 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
 
 #[test]
 fn restricted_state_is_visible_at_minimum_size() {
+    use launchpad_core::{app::App, view};
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{app::App, view};
     let mut app = App::default();
     app.remote_failed("HOME access denied. Reopen Launchpad.".into());
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
@@ -691,7 +691,7 @@ fn directory_entry_and_depth_caps_remain_explicit() {
 
 #[test]
 fn hidden_home_spelling_does_not_hide_normal_descendants() {
-    use zellij_launchpad_core::app::{Action, App};
+    use launchpad_core::app::{Action, App};
     let tree = Tree::new();
     tree.dir(".home/notes");
     tree.dir(".home/.secret/notes");
@@ -710,12 +710,12 @@ fn hidden_home_spelling_does_not_hide_normal_descendants() {
 
 #[test]
 fn search_diagnostics_are_readable_in_help() {
-    use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{
+    use launchpad_core::{
         app::{Action, App},
         theme::Theme,
         view,
     };
+    use ratatui::{Terminal, backend::TestBackend};
     let mut app = App::default();
     app.search_status = "HOME indexed".into();
     app.update(Action::Help);
@@ -785,7 +785,7 @@ fn byte_budget_stops_before_retaining_long_paths() {
 }
 
 fn ranked(raw: &str, paths: &[String], home: &str, recent: &[String]) -> Vec<String> {
-    use zellij_launchpad_core::search::{Directory, matches_in};
+    use launchpad_core::search::{Directory, matches_in};
     let dirs: Vec<_> = paths
         .iter()
         .map(|path| Directory {
@@ -914,7 +914,7 @@ fn equal_scores_prefer_recent_launches_then_depth() {
 
 #[test]
 fn launched_directories_win_suggestion_ties_locally_and_remotely() {
-    use zellij_launchpad_core::{
+    use launchpad_core::{
         app::{Action, App, Launch, Tool},
         remote::RemoteRequest,
     };

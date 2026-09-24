@@ -22,24 +22,24 @@ jobs:
           - os: ubuntu-24.04
             platform: linux-x86_64
             target: x86_64-unknown-linux-gnu
-            binary: zellij-launchpad
+            binary: launchpad
           - os: windows-2022
             platform: windows-x86_64
             target: x86_64-pc-windows-msvc
-            binary: zellij-launchpad.exe
+            binary: launchpad.exe
           - os: macos-15-intel
             platform: macos-x86_64
             target: x86_64-apple-darwin
-            binary: zellij-launchpad
+            binary: launchpad
           - os: macos-15
             platform: macos-aarch64
             target: aarch64-apple-darwin
-            binary: zellij-launchpad
+            binary: launchpad
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       CARGO_BUILD_TARGET: ${{ matrix.target }}
-      ARCHIVE_BASE: zellij-launchpad-${{ matrix.platform }}
+      ARCHIVE_BASE: launchpad-${{ matrix.platform }}
     defaults:
       run:
         shell: bash
@@ -57,7 +57,7 @@ jobs:
           cargo fmt --all --check
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo build --locked --release -p zellij-launchpad
+          cargo build --locked --release -p launchpad
       - name: Stage native binary and documentation
         env:
           BINARY: ${{ matrix.binary }}
@@ -68,7 +68,7 @@ jobs:
       - name: Package Unix archive and checksum
         if: runner.os != 'Windows'
         run: |
-          tar -czf "dist/$ARCHIVE_BASE.tar.gz" -C dist/package zellij-launchpad README.md config.toml docs examples
+          tar -czf "dist/$ARCHIVE_BASE.tar.gz" -C dist/package launchpad README.md config.toml docs examples
           cd dist
           shasum -a 256 "$ARCHIVE_BASE.tar.gz" > "$ARCHIVE_BASE.tar.gz.sha256"
           shasum -a 256 --check "$ARCHIVE_BASE.tar.gz.sha256"
@@ -110,10 +110,10 @@ jobs:
         working-directory: dist
         run: |
           for archive in \
-            zellij-launchpad-linux-x86_64.tar.gz \
-            zellij-launchpad-windows-x86_64.zip \
-            zellij-launchpad-macos-x86_64.tar.gz \
-            zellij-launchpad-macos-aarch64.tar.gz; do
+            launchpad-linux-x86_64.tar.gz \
+            launchpad-windows-x86_64.zip \
+            launchpad-macos-x86_64.tar.gz \
+            launchpad-macos-aarch64.tar.gz; do
             test -s "$archive"
             sha256sum --check "$archive.sha256"
           done

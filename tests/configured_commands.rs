@@ -1,5 +1,5 @@
+use launchpad_core::app::{Action, App, Tool};
 use std::collections::BTreeMap;
-use zellij_launchpad_core::app::{Action, App, Tool};
 
 fn config(items: &[(&str, &str)]) -> BTreeMap<String, String> {
     items
@@ -28,10 +28,10 @@ fn configured_ids_select_real_structured_launch_after_validation() {
             .collect::<Vec<_>>(),
         vec!["Shell", "Claude in Worktree", "hermes", "other"]
     );
-    app.update(Action::Focus(zellij_launchpad_core::app::Focus::Tools));
+    app.update(Action::Focus(launchpad_core::app::Focus::Tools));
     app.update(Action::Right);
     app.update(Action::Enter);
-    let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
+    let Some(launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
         app.take_remote_request()
     else {
         panic!("validation missing")
@@ -162,11 +162,11 @@ fn configuration_bounds_reject_oversize_fields_and_preserve_neighbor_entries() {
 
 #[test]
 fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
-    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-    use zellij_launchpad_core::{
+    use launchpad_core::{
         app::Focus,
         view::{Pointer, render_with_hits},
     };
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
     let mut cfg = config(&[(
         "commands",
         &(0..64)
@@ -215,8 +215,8 @@ fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
 
 #[test]
 fn every_keys_screen_row_is_reachable_at_narrow_and_wide_sizes() {
+    use launchpad_core::{cells::width, help, shortcut::Shortcut, view::render_with_hits};
     use ratatui::{Terminal, backend::TestBackend};
-    use zellij_launchpad_core::{cells::width, help, shortcut::Shortcut, view::render_with_hits};
     for label in [
         format!("{} END_OF_LABEL", "x".repeat(243)),
         format!("{} END_OF_LABEL", "界é👩🏽‍💻🇬🇧✈️ ".repeat(5)),
@@ -322,11 +322,11 @@ fn every_keys_screen_row_is_reachable_at_narrow_and_wide_sizes() {
 
 #[test]
 fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
-    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-    use zellij_launchpad_core::{
+    use launchpad_core::{
         app::{Focus, Launch},
         view::{Pointer, render_with_hits},
     };
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
     for (w, h) in [(40, 10), (40, 12), (80, 24), (200, 36)] {
         let mut app = App::from_remote("/fixture".into());
         app.take_remote_request();
@@ -363,7 +363,7 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
         assert_eq!(app.recent, 0);
         assert!(app.take_launch().is_none(), "selection never launches");
         app.update(Action::Enter);
-        let Some(zellij_launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
+        let Some(launchpad_core::remote::RemoteRequest::Validate { generation, .. }) =
             app.take_remote_request()
         else {
             panic!("history validation missing")

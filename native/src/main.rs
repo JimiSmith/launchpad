@@ -1,5 +1,18 @@
 use clap::Parser;
 use crossterm::event::{self, Event, MouseButton, MouseEventKind};
+use launchpad::{
+    config::{Config, xdg_path},
+    history::{self, Entry, Store},
+    host::{Failure, Forward, Host, Kind, Launched, Origin, tab_name},
+    input,
+    search::SearchScheduler,
+    terminal::Screen,
+    worker::{self, Reply, Request, Worker},
+};
+use launchpad_core::{
+    app::{Action, App, HistoryMutation, Launch},
+    view::{self, HitMap, Pointer},
+};
 use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
@@ -9,19 +22,6 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use zellij_launchpad::{
-    config::{Config, xdg_path},
-    history::{self, Entry, Store},
-    host::{Failure, Forward, Host, Kind, Launched, Origin, tab_name},
-    input,
-    search::SearchScheduler,
-    terminal::Screen,
-    worker::{self, Reply, Request, Worker},
-};
-use zellij_launchpad_core::{
-    app::{Action, App, HistoryMutation, Launch},
-    view::{self, HitMap, Pointer},
-};
 
 #[derive(Parser)]
 #[command(
@@ -29,7 +29,7 @@ use zellij_launchpad_core::{
     about = "Find a directory and launch a tool in your Zellij or herdr pane"
 )]
 struct Args {
-    /// TOML configuration (default: $XDG_CONFIG_HOME/zellij-launchpad/config.toml)
+    /// TOML configuration (default: $XDG_CONFIG_HOME/launchpad/config.toml)
     #[arg(long)]
     config: Option<PathBuf>,
     /// Terminal multiplexer, when both Zellij and herdr are detected
@@ -103,9 +103,9 @@ fn run(args: Args) -> Result<(), String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("Launchpad requires an interactive terminal".into());
     }
-    let home = zellij_launchpad::config::home_from_env(|key| std::env::var_os(key))
+    let home = launchpad::config::home_from_env(|key| std::env::var_os(key))
         .ok_or("Home directory is missing; set HOME or USERPROFILE")?;
-    zellij_launchpad_core::search::HomeIndex::new(home.clone(), home.clone())?;
+    launchpad_core::search::HomeIndex::new(home.clone(), home.clone())?;
     let cwd = worker::initial_cwd()?;
     let default_config = xdg_path("XDG_CONFIG_HOME", ".config", &home).join("config.toml");
     let config_path = handoff
@@ -150,7 +150,7 @@ fn run(args: Args) -> Result<(), String> {
         }
         app.message = Some(message);
     }
-    let cache_root = zellij_launchpad::index_store::cache_root(&home);
+    let cache_root = launchpad::index_store::cache_root(&home);
     let worker =
         Worker::start_with_cache(home, cwd, ignore, Some(cache_root)).map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -347,7 +347,7 @@ fn run(args: Args) -> Result<(), String> {
             dirty = false;
         }
         #[cfg(unix)]
-        if zellij_launchpad::terminal::hung_up().map_err(|e| format!("Poll terminal input: {e}"))? {
+        if launchpad::terminal::hung_up().map_err(|e| format!("Poll terminal input: {e}"))? {
             break;
         }
         if event::poll(Duration::from_millis(16))

@@ -1,9 +1,9 @@
-use zellij_launchpad::config::Config;
-use zellij_launchpad_core::{app::App, commands::Tool};
+use launchpad::config::Config;
+use launchpad_core::{app::App, commands::Tool};
 
 #[test]
 fn ignore_entries_are_validated_individually_and_warnings_survive_reset() {
-    use zellij_launchpad_core::app::Action;
+    use launchpad_core::app::Action;
     let config: Config = toml::from_str(r#"
 ignore = ["/home/ada/cache/../archive/./", "~/cache", "cache", 42, "", "/bad\nname", "C:relative", 'C:\Users\Ada\cache', '/home/ada/$HOME/*']
 "#).unwrap();
@@ -22,11 +22,11 @@ ignore = ["/home/ada/cache/../archive/./", "~/cache", "cache", 42, "", "/bad\nna
     app.update(Action::Reset);
     assert_eq!(app.ignore_errors, warnings);
     assert_eq!(app.config_errors().count(), 6);
-    let help = zellij_launchpad_core::help::lines(&app, 92).join("\n");
+    let help = launchpad_core::help::lines(&app, 92).join("\n");
     assert!(help.contains("!   ") && help.contains("ignore[2]:"));
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
     terminal
-        .draw(|f| zellij_launchpad_core::view::render(f, &app))
+        .draw(|f| launchpad_core::view::render(f, &app))
         .unwrap();
     let screen: String = terminal
         .backend()
@@ -157,7 +157,7 @@ shortcut = "ctrl+f6"
             r#"bare: shortcut "x": require ctrl, alt or super"#,
         ]
     );
-    let help = zellij_launchpad_core::help::lines(&app, 92);
+    let help = launchpad_core::help::lines(&app, 92);
     assert!(
         help.iter()
             .any(|line| line.trim_start().starts_with("Alt+Shift+C  claude")),
@@ -165,7 +165,7 @@ shortcut = "ctrl+f6"
     );
     assert_eq!(
         app.commands
-            .by_shortcut(zellij_launchpad_core::shortcut::Shortcut::parse("ctrl+f6").unwrap()),
+            .by_shortcut(launchpad_core::shortcut::Shortcut::parse("ctrl+f6").unwrap()),
         Tool::new("fkey")
     );
 }

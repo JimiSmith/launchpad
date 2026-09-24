@@ -1,7 +1,7 @@
 # TOML configuration
 
-Read `$XDG_CONFIG_HOME/zellij-launchpad/config.toml`, falling back to
-`~/.config/zellij-launchpad/config.toml`, or supply `--config PATH`. Relative
+Read `$XDG_CONFIG_HOME/launchpad/config.toml`, falling back to
+`~/.config/launchpad/config.toml`, or supply `--config PATH`. Relative
 explicit paths resolve from the invoking cwd. Relative XDG environment values
 are ignored. The file is limited to 1 MiB and loaded once per invocation.
 

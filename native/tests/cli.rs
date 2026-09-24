@@ -2,16 +2,16 @@ use std::process::Command;
 #[test]
 fn help_and_version_work_without_a_host_and_normal_invocation_requires_one() {
     for argument in ["--help", "--version"] {
-        let result = Command::new(env!("CARGO_BIN_EXE_zellij-launchpad"))
+        let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
             .env_clear()
             .arg(argument)
             .output()
             .unwrap();
         assert!(result.status.success());
-        assert!(String::from_utf8_lossy(&result.stdout).contains("zellij-launchpad"));
+        assert!(String::from_utf8_lossy(&result.stdout).contains("launchpad"));
         assert!(!String::from_utf8_lossy(&result.stdout).contains("shell-handoff"));
     }
-    let result = Command::new(env!("CARGO_BIN_EXE_zellij-launchpad"))
+    let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
         .env_clear()
         .output()
         .unwrap();
@@ -27,7 +27,7 @@ fn help_and_version_work_without_a_host_and_normal_invocation_requires_one() {
 }
 #[test]
 fn both_hosts_require_an_explicit_choice() {
-    let result = Command::new(env!("CARGO_BIN_EXE_zellij-launchpad"))
+    let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
         .env_clear()
         .env("ZELLIJ_SESSION_NAME", "outer")
         .env("HERDR_ENV", "1")
@@ -37,7 +37,7 @@ fn both_hosts_require_an_explicit_choice() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("LAUNCHPAD_HOST"));
 }
 fn stderr(env: &[(&str, &str)], args: &[&str]) -> String {
-    let result = Command::new(env!("CARGO_BIN_EXE_zellij-launchpad"))
+    let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
         .env_clear()
         .envs(env.iter().copied())
         .args(args)

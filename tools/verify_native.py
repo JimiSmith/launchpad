@@ -24,7 +24,7 @@ import pyte
 
 ROOT = Path(__file__).resolve().parents[1]
 ZELLIJ = shutil.which('zellij')
-BINARY = ROOT / 'target/release/zellij-launchpad'
+BINARY = ROOT / 'target/release/launchpad'
 
 
 class Screen(pyte.Screen):
@@ -60,13 +60,13 @@ class Session:
         if interactive:
             self.env['PS1'] = 'LAUNCHPAD_TEST_SHELL> '
         (self.out / 'bin/zellij').symlink_to(ZELLIJ)
-        (self.out / 'bin/zellij-launchpad').symlink_to(BINARY)
+        (self.out / 'bin/launchpad').symlink_to(BINARY)
         for name in ['default-shell', 'neighbor', 'fixture']:
             self.fixture(name)
         config = self.out / 'config.kdl'
         config.write_text((ROOT / 'examples/locked.kdl').read_text() +
                           f'\nsession_name "{self.name}"\ndefault_shell "{self.out}/bin/default-shell"\n')
-        native_config = self.out / 'config/zellij-launchpad/config.toml'
+        native_config = self.out / 'config/launchpad/config.toml'
         native_config.parent.mkdir()
         native_config.write_text('''[[commands]]
 id = "fixture"
@@ -299,7 +299,7 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                     s.cli('action', 'focus-pane-id', str(origin['id']))
                     s.expect('Zellij did not create')
                     assert any(p['id'] == origin['id'] for p in s.panes())
-                    assert not list((s.out / 'state/zellij-launchpad/history.d').glob('*.json'))
+                    assert not list((s.out / 'state/launchpad/history.d').glob('*.json'))
                     s.fixture('missing')
                     s.send('\r')
                     s.pump(.6)
@@ -315,7 +315,7 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                 assert record['cwd'] == str(target), record
                 if selected == 'Fixture':
                     assert record['argv'] == ['a b', '', '$HOME', ';', '$(touch NO_EXPANSION)'], record
-                state = json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())
+                state = json.loads((s.out / 'state/launchpad/history.json').read_text())
                 assert state['entries'][0]['path'] == str(target)
                 assert state['entries'][0]['tool'] == selected.lower()
                 s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit ' + ('17' if floating else '0') + '\n')
@@ -334,7 +334,7 @@ def interactive_shell_history_cases():
             s = Session(floating=floating, interactive=True)
             try:
                 s.expect('LAUNCHPAD_TEST_SHELL>')
-                state_root = s.out / 'state/zellij-launchpad'
+                state_root = s.out / 'state/launchpad'
                 journal = state_root / 'history.d'
                 journal.mkdir(parents=True)
                 previous = dict(id='000000000000000000000000000000000000001-seed',
@@ -368,7 +368,7 @@ def recovery_cases():
         (s.out / 'bin/default-shell').unlink()
         s.send('\r')
         s.expect('Default shell failed')
-        assert not json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())['entries']
+        assert not json.loads((s.out / 'state/launchpad/history.json').read_text())['entries']
         panes = [p for p in s.panes() if not p['is_plugin']]
         assert len(panes) == 2 and all(p['tab_name'] == 'Tab #1' for p in panes)
         s.fixture('default-shell')
@@ -439,7 +439,7 @@ def history_and_layout_cases():
         s.expect('Recent')
         s.send('\x12\x1b[3~')
         s.expect('No recent launches')
-        assert not json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())['entries']
+        assert not json.loads((s.out / 'state/launchpad/history.json').read_text())['entries']
         s.screen.reset()  # Reopen assertions must observe the new launcher's render.
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
         s.wait_indexed()
@@ -527,7 +527,7 @@ def shortcut_cases():
         s.expect('↑↓ recent')
         s.send('\x1bf')
         s.wait_record('fixture', str(s.home / 'notes'))
-        state = json.loads((s.out / 'state/zellij-launchpad/history.json').read_text())
+        state = json.loads((s.out / 'state/launchpad/history.json').read_text())
         assert [(e['path'], e['tool']) for e in state['entries'][:2]] == [
             (str(s.home / 'notes'), 'fixture'), (str(s.home / 'notes'), 'keys')], state
         print('PASS configured shortcuts, typed text and recent row', s.out, flush=True)

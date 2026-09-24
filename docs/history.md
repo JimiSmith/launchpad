@@ -14,7 +14,7 @@ Replay uses this instance's current configuration, never an executable stored in
 history. Label/executable changes do not change the stable association. Removed
 or invalid IDs stay unavailable; replay never substitutes Shell.
 `history.d/` is its small **authoritative recovery journal**. Both are
-inside `$XDG_STATE_HOME/zellij-launchpad` (fallback `~/.local/state/zellij-launchpad`).
+inside `$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`).
 The native executable starts fresh and never imports or modifies plugin caches.
 Removing only `history.json` does not clear history: refresh repairs it from the
 journal. Use the UI's clear action. The core's test-only simulation never writes

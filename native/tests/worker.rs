@@ -1,6 +1,6 @@
+use launchpad::worker::{Reply, Request, Worker, validate};
+use launchpad_core::{remote::RemoteRequest, search::HomeIndex};
 use std::{path::PathBuf, time::Duration};
-use zellij_launchpad::worker::{Reply, Request, Worker, validate};
-use zellij_launchpad_core::{remote::RemoteRequest, search::HomeIndex};
 struct Fixture(PathBuf);
 impl Fixture {
     fn new(name: &str) -> Self {
@@ -11,12 +11,9 @@ impl Fixture {
         let root = root.canonicalize().unwrap();
         // Keep the same host spelling the index returns on Windows.
         Self(
-            zellij_launchpad_core::host_path::normalize(
-                root.to_str().unwrap(),
-                root.to_str().unwrap(),
-            )
-            .unwrap()
-            .into(),
+            launchpad_core::host_path::normalize(root.to_str().unwrap(), root.to_str().unwrap())
+                .unwrap()
+                .into(),
         )
     }
 }
@@ -96,12 +93,12 @@ fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation(
     let home = f.0.join("home");
     std::fs::create_dir_all(home.join("needle/deep")).unwrap();
     std::fs::create_dir(home.join("needle-old")).unwrap();
-    let config: zellij_launchpad::config::Config = toml::from_str(&format!(
+    let config: launchpad::config::Config = toml::from_str(&format!(
         "ignore = [{}]",
         toml::Value::String(home.join("needle").to_str().unwrap().into())
     ))
     .unwrap();
-    let ignore = config.apply(&mut zellij_launchpad_core::app::App::default());
+    let ignore = config.apply(&mut launchpad_core::app::App::default());
     let worker =
         Worker::start_with_ignore(home.clone(), home.to_str().unwrap().into(), ignore).unwrap();
     for epoch in [0, 1] {

@@ -20,16 +20,16 @@ macOS Apple Silicon ARM64, each with a SHA-256 checksum. See
 Or build from this checkout with the pinned Rust toolchain. On Linux and macOS:
 
 ```sh
-cargo build --release --locked -p zellij-launchpad
+cargo build --release --locked -p launchpad
 mkdir -p ~/.local/bin
-install -m755 target/release/zellij-launchpad ~/.local/bin/zellij-launchpad
+install -m755 target/release/launchpad ~/.local/bin/launchpad
 ```
 
 On Windows, build with the same Cargo command, then run from PowerShell inside
 Zellij:
 
 ```powershell
-.\target\release\zellij-launchpad.exe
+.\target\release\launchpad.exe
 ```
 
 Launchpad uses `HOME`, falling back to `USERPROFILE`, then `HOMEDRIVE` +
@@ -37,10 +37,10 @@ Launchpad uses `HOME`, falling back to `USERPROFILE`, then `HOMEDRIVE` +
 `~` refers to that home directory. Drive-relative paths such as `C:notes` are
 rejected.
 
-Run `zellij-launchpad` inside Zellij, or start it in its own pane:
+Run `launchpad` inside Zellij, or start it in its own pane:
 
 ```sh
-zellij run --close-on-exit -- zellij-launchpad
+zellij run --close-on-exit -- launchpad
 ```
 
 For a new tab, use [examples/launchpad.kdl](examples/launchpad.kdl):
@@ -49,7 +49,7 @@ For a new tab, use [examples/launchpad.kdl](examples/launchpad.kdl):
 zellij action new-tab --layout "$(pwd)/examples/launchpad.kdl"
 ```
 
-Ensure `zellij-launchpad` is on the Zellij server's PATH. Layouts also accept an
+Ensure `launchpad` is on the Zellij server's PATH. Layouts also accept an
 absolute executable path. Use Zellij's locked mode (normally Ctrl+G) so shortcuts
 reach Launchpad. Quit returns to the invoking shell, or closes a dedicated pane
 started with `--close-on-exit` / `close_on_exit true`.
@@ -64,7 +64,7 @@ or authentication checks run before launch.
 Inside a herdr pane Launchpad needs no extra setup:
 
 ```sh
-zellij-launchpad
+launchpad
 ```
 
 herdr cannot replace a pane in place, so Launchpad starts the chosen tool
@@ -125,7 +125,7 @@ Make Launchpad herdr's default shell in herdr's `config.toml`
 
 ```toml
 [terminal]
-default_shell = "zellij-launchpad"  # or an absolute path
+default_shell = "launchpad"  # or an absolute path
 ```
 
 Then run `herdr server reload-config`. New tabs, splits and workspaces open
@@ -159,9 +159,9 @@ line overrides the variable.
 
 ## Configure commands and colours
 
-The default file is `$XDG_CONFIG_HOME/zellij-launchpad/config.toml`, falling back
-to `~/.config/zellij-launchpad/config.toml`. Override it with
-`zellij-launchpad --config /path/to/config.toml`. Reopen to apply edits; F5
+The default file is `$XDG_CONFIG_HOME/launchpad/config.toml`, falling back
+to `~/.config/launchpad/config.toml`. Override it with
+`launchpad --config /path/to/config.toml`. Reopen to apply edits; F5
 preserves the loaded configuration. Missing default configuration means Shell-only.
 An explicit missing file, unreadable file, or malformed TOML is a startup error.
 
@@ -271,7 +271,7 @@ history paths are never truncated. Index limits are 200,000 directories,
 traversal, and validation run on a bounded background worker so input remains
 responsive. [Search policy](docs/home-search.md).
 
-The directory index is saved as `zellij-launchpad/index.json` under the OS cache
+The directory index is saved as `launchpad/index.json` under the OS cache
 location: `$XDG_CACHE_HOME` (fallback `~/.cache`) on Linux, `~/Library/Caches` on
 macOS, and `%LOCALAPPDATA%` (fallback `~/AppData/Local`) on Windows. Launchpad
 loads it before starting a background rebuild. Cached results stay searchable
@@ -282,7 +282,7 @@ a cold start; a changed HOME, ignore configuration, or index format also causes
 a fresh scan. Cache failures are nonfatal and appear in the search status.
 
 Recent history remembers ten unique command ID–directory pairs under
-`$XDG_STATE_HOME/zellij-launchpad` (fallback `~/.local/state/zellij-launchpad`).
+`$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`).
 It is shared across panes and sessions. F5 reloads other instances' changes.
 Replay uses the current configuration; removed IDs remain unavailable.
 History records validated attempts, not successful tool execution.
@@ -300,14 +300,14 @@ longer supported.
 
 ## Development
 
-`zellij-launchpad-core` owns the state machine, renderer and search implementation;
+`launchpad-core` owns the state machine, renderer and search implementation;
 `native/` owns terminal input, TOML, worker threads, persistence, and CLI launches.
 
 ```sh
 cargo fmt --all --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo build --release --locked -p zellij-launchpad
+cargo build --release --locked -p launchpad
 python3 -m venv target/verification-venv
 target/verification-venv/bin/pip install pyte==0.8.2
 bash tools/verify_native.sh

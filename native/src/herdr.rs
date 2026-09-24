@@ -1,11 +1,11 @@
 use crate::host::{self, Failure, Forward, Launched, Origin, clean};
+use launchpad_core::commands::Command as ToolCommand;
 use serde::de::DeserializeOwned;
 use std::{
     path::PathBuf,
     process::{Child, Command},
     time::{Duration, Instant},
 };
-use zellij_launchpad_core::commands::Command as ToolCommand;
 
 /// herdr has no in-place pane replacement, so Launchpad runs tools as its own
 /// child in its pane and closes that pane when the tool exits.
@@ -317,13 +317,13 @@ mod tests {
     }
     #[test]
     fn launchpad_is_recognised_as_shell_by_file_name() {
-        let own = Some(Path::new("/home/u/.local/bin/zellij-launchpad"));
-        assert!(names_launchpad("/opt/bin/zellij-launchpad", own));
+        let own = Some(Path::new("/home/u/.local/bin/launchpad"));
+        assert!(names_launchpad("/opt/bin/launchpad", own));
         assert!(!names_launchpad("/bin/zsh", own));
         assert!(!names_launchpad("", own));
-        assert!(!names_launchpad("zellij-launchpad", None));
-        let own = Some(Path::new(r"C:\Tools\zellij-launchpad.exe"));
-        assert!(names_launchpad(r"C:\Tools\Zellij-Launchpad.EXE", own));
+        assert!(!names_launchpad("launchpad", None));
+        let own = Some(Path::new(r"C:\Tools\launchpad.exe"));
+        assert!(names_launchpad(r"C:\Tools\Launchpad.EXE", own));
     }
     #[test]
     fn shell_prefers_shell_env_then_what_is_installed() {

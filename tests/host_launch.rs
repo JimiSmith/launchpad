@@ -1,4 +1,4 @@
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::{Action, App, Tool},
     remote::RemoteRequest,
 };
@@ -22,7 +22,7 @@ fn validate(app: &mut App, result: Result<String, String>) {
 }
 #[test]
 fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
-    use zellij_launchpad_core::app::{Focus, Launch};
+    use launchpad_core::app::{Focus, Launch};
     let mut app = app();
     app.history.push(Launch {
         id: 1,
@@ -44,14 +44,14 @@ fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
     );
     assert_eq!(
         app.take_history_mutation(),
-        Some(zellij_launchpad_core::app::HistoryMutation::Clear)
+        Some(launchpad_core::app::HistoryMutation::Clear)
     );
     assert!(app.take_history_mutation().is_none());
     app.update(Action::Delete);
     assert_eq!(app.history.len(), 1, "delete also waits for persistence");
     assert_eq!(
         app.take_history_mutation(),
-        Some(zellij_launchpad_core::app::HistoryMutation::Remove(1))
+        Some(launchpad_core::app::HistoryMutation::Remove(1))
     );
 }
 #[test]

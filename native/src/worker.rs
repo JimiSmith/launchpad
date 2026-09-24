@@ -1,14 +1,14 @@
 //! One bounded native worker owns persistence, traversal, matching and validation.
+use launchpad_core::{
+    editor::MAX_INPUT_CHARS,
+    remote::RemoteRequest,
+    search::{HomeIndex, ScanState},
+};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
     thread,
     time::{Duration, Instant},
-};
-use zellij_launchpad_core::{
-    editor::MAX_INPUT_CHARS,
-    remote::RemoteRequest,
-    search::{HomeIndex, ScanState},
 };
 
 use crate::index_store::{Snapshot, Store};
@@ -129,7 +129,7 @@ fn run(
                     let paths = if text.chars().count() > MAX_INPUT_CHARS {
                         Vec::new()
                     } else {
-                        zellij_launchpad_core::search::matches_in(
+                        launchpad_core::search::matches_in(
                             &text,
                             state.dirs(),
                             home.to_str().unwrap(),
@@ -204,7 +204,7 @@ impl SearchIndex {
             warning,
         }
     }
-    fn dirs(&self) -> &[zellij_launchpad_core::search::Directory] {
+    fn dirs(&self) -> &[launchpad_core::search::Directory] {
         self.active
             .as_ref()
             .map_or(&self.building.dirs, |s| &s.dirs)
@@ -276,7 +276,7 @@ pub fn validate(index: &HomeIndex, cwd: &str, raw: &str) -> Result<String, Strin
     let label = index
         .home
         .to_str()
-        .and_then(|home| zellij_launchpad_core::host_path::label(cwd, home));
+        .and_then(|home| launchpad_core::host_path::label(cwd, home));
     if raw == cwd || label.as_deref() == Some(raw) {
         std::fs::read_dir(cwd)
             .map_err(|e| format!("Invoking directory unavailable; no fallback: {e}"))?;

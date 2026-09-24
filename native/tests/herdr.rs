@@ -1,10 +1,10 @@
 #![cfg(unix)]
-use std::{path::PathBuf, time::Duration};
-use zellij_launchpad::{
+use launchpad::{
     herdr::Herdr,
     host::{Failure, Forward, Host, Launched},
 };
-use zellij_launchpad_core::commands::{Command, Tool};
+use launchpad_core::commands::{Command, Tool};
+use std::{path::PathBuf, time::Duration};
 
 static FIXTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// A fake herdr CLI that logs its argv and answers for pane w1:p2 in tab w1:t3.

@@ -57,7 +57,7 @@ jobs:
           cargo fmt --all --check
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo build --release --locked -p zellij-launchpad
+          cargo build --release --locked -p launchpad
       - name: Retain failure evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

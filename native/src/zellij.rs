@@ -1,5 +1,6 @@
 use crate::host::{self, clean};
 pub use crate::host::{Failure, tab_name};
+use launchpad_core::commands::Command as ToolCommand;
 use serde::Deserialize;
 use std::{
     path::PathBuf,
@@ -7,7 +8,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use zellij_launchpad_core::commands::Command as ToolCommand;
 
 #[derive(Debug, Deserialize)]
 pub struct Pane {
@@ -147,7 +147,7 @@ impl Zellij {
     pub fn launch_default_shell(&self) -> Result<(), Failure> {
         self.launch(
             ".",
-            &zellij_launchpad_core::commands::Commands::default().entries[0],
+            &launchpad_core::commands::Commands::default().entries[0],
         )
     }
     pub fn launch(&self, path: &str, tool: &ToolCommand) -> Result<(), Failure> {

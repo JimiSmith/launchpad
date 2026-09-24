@@ -1,6 +1,6 @@
 ---
 name: release-version
-description: Prepare and release a new zellij-launchpad version using the repository's native GitHub release workflow. Use for version bumps, release preparation, tagging, and publication verification.
+description: Prepare and release a new launchpad version using the repository's native GitHub release workflow. Use for version bumps, release preparation, tagging, and publication verification.
 ---
 
 # Releasing a New Version

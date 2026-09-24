@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::{Action, Focus},
     commands::Commands,
     shortcut::{Key, Shortcut},
@@ -214,15 +214,13 @@ mod tests {
     #[test]
     fn configured_shortcuts_take_precedence_over_dropping_modified_keys() {
         let mut commands = Commands::default();
-        commands
-            .entries
-            .push(zellij_launchpad_core::commands::Command {
-                id: zellij_launchpad_core::commands::Tool::new("claude").unwrap(),
-                label: "Claude".into(),
-                executable: Some("claude".into()),
-                arguments: Vec::new(),
-                shortcut: Some(Shortcut::parse("alt+c").unwrap()),
-            });
+        commands.entries.push(launchpad_core::commands::Command {
+            id: launchpad_core::commands::Tool::new("claude").unwrap(),
+            label: "Claude".into(),
+            executable: Some("claude".into()),
+            arguments: Vec::new(),
+            shortcut: Some(Shortcut::parse("alt+c").unwrap()),
+        });
         let tool = commands.entries[1].id;
         assert_eq!(
             event_action(

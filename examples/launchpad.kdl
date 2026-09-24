@@ -1,6 +1,6 @@
-// Install zellij-launchpad on the Zellij server's PATH first.
+// Install launchpad on the Zellij server's PATH first.
 layout {
     tab name="Launch" focus=true {
-        pane borderless=true command="zellij-launchpad" close_on_exit=true
+        pane borderless=true command="launchpad" close_on_exit=true
     }
 }

@@ -1,8 +1,8 @@
-// Copy examples/config.toml to ~/.config/zellij-launchpad/config.toml first.
+// Copy examples/config.toml to ~/.config/launchpad/config.toml first.
 // To use a custom file, add: args "--config" "/absolute/path/config.toml"
 layout {
     default_tab_template {
-        pane borderless=true command="zellij-launchpad" close_on_exit=true
+        pane borderless=true command="launchpad" close_on_exit=true
     }
     tab name="Launch" focus=true
 }

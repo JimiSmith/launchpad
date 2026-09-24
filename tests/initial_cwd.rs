@@ -1,4 +1,4 @@
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::{Action, App, Focus, Tool},
     remote::RemoteRequest,
 };

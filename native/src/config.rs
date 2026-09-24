@@ -1,13 +1,13 @@
-use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, HashSet},
-    path::{Path, PathBuf},
-};
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::App,
     commands::{Command, Commands, Tool},
     shortcut::Shortcut,
     theme::Theme,
+};
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashSet},
+    path::{Path, PathBuf},
 };
 
 #[derive(Debug, Default, Deserialize)]
@@ -55,7 +55,7 @@ impl Config {
         for (index, value) in self.ignore.iter().enumerate() {
             match value
                 .as_str()
-                .and_then(zellij_launchpad_core::host_path::normalize_absolute)
+                .and_then(launchpad_core::host_path::normalize_absolute)
             {
                 Some(path) => ignore.push(path),
                 None => app.ignore_errors.push(format!(
@@ -185,7 +185,7 @@ pub fn xdg_path(variable: &str, fallback: &str, home: &Path) -> PathBuf {
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| home.join(fallback))
-        .join("zellij-launchpad")
+        .join("launchpad")
 }
 
 /// HOME remains an explicit override; Windows normally supplies USERPROFILE.

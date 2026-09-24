@@ -1,5 +1,5 @@
-use zellij_launchpad_core::app::{Action, App};
-use zellij_launchpad_core::remote::RemoteRequest;
+use launchpad_core::app::{Action, App};
+use launchpad_core::remote::RemoteRequest;
 
 #[test]
 fn segment_edits_refresh_search_but_motion_does_not() {
@@ -35,7 +35,7 @@ fn segment_edits_refresh_search_but_motion_does_not() {
 
 #[test]
 fn segment_actions_are_ignored_outside_active_path_editor() {
-    use zellij_launchpad_core::app::Focus;
+    use launchpad_core::app::Focus;
     for (focus, help, compact) in [
         (Focus::Tools, false, false),
         (Focus::History, false, false),
@@ -44,10 +44,10 @@ fn segment_actions_are_ignored_outside_active_path_editor() {
     ] {
         let mut app = App::from_remote("/home/example".into());
         app.editor.set("foo/bar");
-        app.history.push(zellij_launchpad_core::app::Launch {
+        app.history.push(launchpad_core::app::Launch {
             id: 1,
             path: "/home/example/foo/bar".into(),
-            tool: zellij_launchpad_core::app::Tool::Shell,
+            tool: launchpad_core::app::Tool::Shell,
             age: "now".into(),
         });
         app.focus = focus;
@@ -201,7 +201,7 @@ fn enter_with_stale_highlight_does_not_index_missing_result() {
 
 #[test]
 fn delayed_selection_survives_path_cursor_navigation() {
-    use zellij_launchpad_core::app::Focus;
+    use launchpad_core::app::Focus;
     for action in [
         Action::Left,
         Action::Right,
@@ -234,7 +234,7 @@ fn delayed_selection_survives_path_cursor_navigation() {
 
 #[test]
 fn cancelling_delayed_validation_clears_status_and_restores_search() {
-    use zellij_launchpad_core::app::{Focus, Tool};
+    use launchpad_core::app::{Focus, Tool};
     for start in [Action::AcceptSuggestion(0), Action::LaunchForm] {
         for action in [
             Action::Focus(Focus::Tools),
@@ -312,7 +312,7 @@ fn timeout_during_selection_discards_delayed_reply() {
 
 #[test]
 fn queued_validation_survives_cursor_motion_but_not_focus_or_tool_changes() {
-    use zellij_launchpad_core::app::{Focus, Tool};
+    use launchpad_core::app::{Focus, Tool};
     for start in [Action::AcceptSuggestion(0), Action::LaunchForm] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
@@ -409,12 +409,12 @@ fn tab_cycles_sections_without_selecting_a_suggestion() {
     app.take_remote_request();
     app.apply_remote_results(0, vec!["/home/example/a".into(), "/home/example/b".into()]);
     app.update(Action::Tab);
-    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::Tools);
+    assert_eq!(app.focus, launchpad_core::app::Focus::Tools);
     assert!(app.take_remote_request().is_none());
     app.update(Action::Tab);
-    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::History);
+    assert_eq!(app.focus, launchpad_core::app::Focus::History);
     app.update(Action::BackTab);
-    assert_eq!(app.focus, zellij_launchpad_core::app::Focus::Tools);
+    assert_eq!(app.focus, launchpad_core::app::Focus::Tools);
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn old_index_revision_cannot_replace_newer_results() {
 }
 #[test]
 fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
-    use zellij_launchpad_core::app::{Focus, Launch, Tool};
+    use launchpad_core::app::{Focus, Launch, Tool};
     for action in [Action::Reset, Action::Quit, Action::Escape] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
@@ -475,7 +475,7 @@ fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
 
 #[test]
 fn launch_from_empty_history_launches_the_form() {
-    use zellij_launchpad_core::app::Focus;
+    use launchpad_core::app::Focus;
     for action in [Action::LaunchForm, Action::Enter] {
         let mut app = App::from_remote("/home/example".into());
         app.editor.set("foo/bar");

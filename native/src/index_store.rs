@@ -1,14 +1,14 @@
 //! Disposable, versioned directory snapshots. Only complete scans are published.
+use launchpad_core::{
+    host_path::{HostPath, normalize_absolute},
+    search::{Directory, Limits},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
-};
-use zellij_launchpad_core::{
-    host_path::{HostPath, normalize_absolute},
-    search::{Directory, Limits},
 };
 
 const VERSION: u32 = 1;
@@ -35,7 +35,7 @@ fn cache_root_for(
         "windows" => absolute("LOCALAPPDATA").unwrap_or_else(|| home.join("AppData/Local")),
         _ => absolute("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache")),
     };
-    root.join("zellij-launchpad")
+    root.join("launchpad")
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,28 +261,28 @@ mod tests {
         let home = Path::new("/home/ada");
         assert_eq!(
             cache_root_for("linux", home, |_| None),
-            home.join(".cache/zellij-launchpad")
+            home.join(".cache/launchpad")
         );
         assert_eq!(
             cache_root_for("linux", home, |_| Some("relative".into())),
-            home.join(".cache/zellij-launchpad")
+            home.join(".cache/launchpad")
         );
         assert_eq!(
             cache_root_for("linux", home, |_| Some("/cache".into())),
-            Path::new("/cache/zellij-launchpad")
+            Path::new("/cache/launchpad")
         );
         assert_eq!(
             cache_root_for("macos", home, |_| Some("/ignored".into())),
-            home.join("Library/Caches/zellij-launchpad")
+            home.join("Library/Caches/launchpad")
         );
         let windows = Path::new(r"C:\Users\Ada");
         assert_eq!(
             cache_root_for("windows", windows, |_| None),
-            windows.join("AppData/Local/zellij-launchpad")
+            windows.join("AppData/Local/launchpad")
         );
         assert_eq!(
             cache_root_for("windows", windows, |_| Some(r"D:\Cache".into())),
-            Path::new(r"D:\Cache").join("zellij-launchpad")
+            Path::new(r"D:\Cache").join("launchpad")
         );
     }
     #[test]

@@ -479,6 +479,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "launchpad"
+version = "0.10.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "launchpad-core",
+ "libc",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "toml",
+ "windows-sys",
+]
+
+[[package]]
+name = "launchpad-core"
+version = "0.10.0"
+dependencies = [
+ "ignore",
+ "neo_frizbee",
+ "ratatui",
+ "shlex",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1193,35 +1222,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "zellij-launchpad"
-version = "0.10.0"
-dependencies = [
- "clap",
- "crossterm",
- "libc",
- "ratatui",
- "serde",
- "serde_json",
- "signal-hook",
- "toml",
- "windows-sys",
- "zellij-launchpad-core",
-]
-
-[[package]]
-name = "zellij-launchpad-core"
-version = "0.10.0"
-dependencies = [
- "ignore",
- "neo_frizbee",
- "ratatui",
- "shlex",
- "unicode-normalization",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]

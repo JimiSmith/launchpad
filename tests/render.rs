@@ -1,11 +1,11 @@
 mod common;
 
 use common::app;
-use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
-use zellij_launchpad_core::{
+use launchpad_core::{
     app::{Action, App, Focus},
     theme, view,
 };
+use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
 fn draw(app: &App, w: u16, h: u16) -> Buffer {
     let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -17,7 +17,7 @@ fn text(b: &Buffer) -> String {
 }
 #[test]
 fn remote_results_stay_visible_between_edit_and_latest_reply() {
-    use zellij_launchpad_core::remote::RemoteRequest;
+    use launchpad_core::remote::RemoteRequest;
     let mut app = App::from_remote("/home/example".into());
     app.take_remote_request();
     assert!(app.apply_remote_results(0, vec!["/home/example/notes".into()]));

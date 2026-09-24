@@ -113,7 +113,7 @@
           <h2 id="directory-heading"><label for="directory">Directory</label></h2>
           <div class="path-line">
             <span class="prompt" aria-hidden="true">›</span>
-            <input id="directory" value="~/Projects/zellij-launchpad" placeholder="Find a directory…" autocomplete="off" spellcheck="false" autocapitalize="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
+            <input id="directory" value="~/Projects/launchpad" placeholder="Find a directory…" autocomplete="off" spellcheck="false" autocapitalize="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
           </div>
           <div class="suggestions" id="suggestions" role="listbox" aria-label="Directory suggestions" hidden></div>
           <p class="empty" id="empty" hidden>No matching directories in this mockup.</p>
@@ -135,8 +135,8 @@
         <section class="section" id="recent-section" data-active="false" aria-labelledby="recent-heading">
           <h2 id="recent-heading">Recent</h2>
           <div class="history" role="listbox" aria-label="Recent launches">
-            <button class="recent" role="option" aria-selected="true" tabindex="0" data-tool="Claude" data-path="~/Projects/zellij-launchpad">
-              <span class="recent-path">~/Projects/zellij-launchpad</span><span class="recent-tool">Claude</span>
+            <button class="recent" role="option" aria-selected="true" tabindex="0" data-tool="Claude" data-path="~/Projects/launchpad">
+              <span class="recent-path">~/Projects/launchpad</span><span class="recent-tool">Claude</span>
             </button>
             <button class="recent" role="option" aria-selected="false" tabindex="-1" data-tool="Codex" data-path="~/Projects/website">
               <span class="recent-path">~/Projects/website</span><span class="recent-tool">Codex</span>
@@ -163,7 +163,7 @@
     const suggestions = document.querySelector('#suggestions');
     const empty = document.querySelector('#empty');
     const status = document.querySelector('#status');
-    const paths = ['~/Projects/zellij-launchpad', '~/Projects/website', '~/Projects/dotfiles', '~/notes'];
+    const paths = ['~/Projects/launchpad', '~/Projects/website', '~/Projects/dotfiles', '~/notes'];
     let active = 0, toolIndex = 0, recentIndex = 0, matches = [], suggestionIndex = -1;
 
     function setActive(index) {
