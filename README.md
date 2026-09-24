@@ -67,11 +67,17 @@ Inside a herdr pane Launchpad needs no extra setup:
 zellij-launchpad
 ```
 
-herdr cannot replace a pane in place, so Launchpad runs the chosen tool itself,
-in the same pane and the chosen directory, and closes the pane with
-`herdr pane close` when the tool exits. A small Launchpad process stays alive
-under each tool until then. The tab is renamed `directory · command label` as in
-Zellij.
+herdr cannot replace a pane in place, so Launchpad starts the chosen tool
+itself, in the same pane and the chosen directory. The tab is renamed
+`directory · command label` as in Zellij.
+
+- When Launchpad is the pane's own program, as in the setup below, on Linux and
+  macOS it replaces itself with the tool, as `exec` does. herdr then treats the
+  tool like its own shells: it follows `cd` and closes the pane when the tool
+  exits.
+- Otherwise, such as when you start Launchpad from a shell prompt or on Windows,
+  a small Launchpad process stays alive under the tool and closes the pane with
+  `herdr pane close` when it exits.
 
 Shell starts [`default_shell`](#configure-commands-and-colours) if set.
 Otherwise it starts `$SHELL`; failing that, `pwsh.exe` if it is on PATH, else
@@ -79,7 +85,8 @@ Otherwise it starts `$SHELL`; failing that, `pwsh.exe` if it is on PATH, else
 elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
 if herdr is configured to use a different shell.
 
-When a tool starts, Launchpad reports its directory to herdr, as a shell prompt
+The rest of this section is about the second case. When a tool starts, Launchpad
+reports its directory to herdr, as a shell prompt
 does, and moves into it. herdr's "new pane follows cwd", git detection and
 session restore then use the tool's directory, even if the shell you started
 Launchpad from had reported its own. On Windows that also means the directory
@@ -122,7 +129,8 @@ default_shell = "zellij-launchpad"  # or an absolute path
 ```
 
 Then run `herdr server reload-config`. New tabs, splits and workspaces open
-Launchpad in the directory herdr picks for them. Shell starts Launchpad's own
+Launchpad in the directory herdr picks for them, and on Linux and macOS the
+chosen tool takes over the pane directly. Shell starts Launchpad's own
 `default_shell` or detected shell, never herdr's setting, and skips a `$SHELL`
 that names Launchpad (herdr sets it in login-shell mode, the macOS default), so
 it does not start Launchpad again. Quit closes the pane. Panes that already

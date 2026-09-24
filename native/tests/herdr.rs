@@ -20,6 +20,7 @@ case "$1 $2" in
 "tab get") printf '{"id":"x","result":{"tab":{"label":"%s","tab_id":"w1:t3"},"type":"tab_info"}}\n' "$label";;
 "tab rename") [ -f "$dir/stuck" ] || printf '%s' "$4" > "$dir/label"
     printf '%s\n' '{"id":"x","result":{"type":"ok"}}';;
+"pane process-info") printf '{"id":"x","result":{"process_info":{"pane_id":"w1:p2","shell_pid":%s}}}\n' "$(cat "$dir/root" 2>/dev/null || echo 1)";;
 "pane close") [ -f "$dir/gone" ] && { printf '%s\n' '{"error":{"code":"pane_not_found","message":"pane w1:p2 not found"}}' >&2; exit 1; }
     printf '%s\n' '{"id":"x","result":{"type":"ok"}}';;
 *) printf '%s\n' '{"error":{"code":"nope","message":"unsupported"},"id":"x"}' >&2; exit 1;;
@@ -126,7 +127,10 @@ fn missing_executable_is_rejected_before_anything_runs() {
         .host()
         .launch(f.root.join("absent").to_str().unwrap(), &tool("true", &[]));
     assert!(matches!(result, Err(Failure::Rejected(_))));
-    assert!(f.calls().is_empty(), "no pane closed on rejection");
+    assert!(
+        !f.calls().iter().any(|c| c.starts_with("pane|close")),
+        "no pane closed on rejection"
+    );
 }
 #[test]
 fn tool_runs_in_the_directory_with_literal_arguments_then_closes_the_pane() {
@@ -159,7 +163,15 @@ fn tool_runs_in_the_directory_with_literal_arguments_then_closes_the_pane() {
         std::fs::read_to_string(dir.join("out")).unwrap(),
         format!("{}\n|a b|$HOME|;|", dir.display())
     );
-    assert_eq!(f.calls(), ["pane|current|--current|", "pane|close|w1:p2|"]);
+    assert_eq!(
+        f.calls(),
+        [
+            "pane|current|--current|",
+            "pane|process-info|--pane|w1:p2|",
+            "pane|current|--current|",
+            "pane|close|w1:p2|"
+        ]
+    );
 }
 #[test]
 fn failing_tool_still_closes_the_pane() {
@@ -252,4 +264,16 @@ fn launchpad_follows_the_tool_into_its_directory_but_not_on_failure() {
         dir.canonicalize().unwrap()
     );
     host.finish(child, &AtomicUsize::new(0)).unwrap();
+}
+#[test]
+fn only_the_panes_own_process_counts_as_its_root() {
+    let f = Fixture::new("root");
+    assert!(
+        !f.herdr().is_pane_root(),
+        "another process is the pane's shell"
+    );
+    std::fs::write(f.root.join("root"), std::process::id().to_string()).unwrap();
+    assert!(f.herdr().is_pane_root());
+    f.replace("exit 1");
+    assert!(!f.herdr().is_pane_root(), "errors mean no");
 }

@@ -87,24 +87,34 @@ inherited `HERDR_PANE_ID`, never the focused pane. It reads the tab label with
 herdr keeps a `--` separator as part of the label, so none is passed; hyphenated
 labels are accepted as-is.
 
-herdr has no in-place pane replacement, and its panes always start a shell. So
-Launchpad restores the terminal, spawns the tool itself with the chosen cwd and
-literal argument array, stops its search worker, and waits. Launchpad first
-changes its own cwd to the chosen directory, restoring it if the spawn fails,
-and after a successful spawn writes a cwd report to its terminal: OSC 7
-`file:///` with a percent-encoded path on Unix (herdr ignores other hosts) and
-OSC 9;9 with the bare path on Windows. herdr keeps one reported cwd per pane,
-replaced by each newer report, and prefers it over process cwds for session
-state, custom commands and the workspace root; the invoking shell may have
-reported its own directory before starting Launchpad. Without a report, herdr
-reads the foreground group leader's cwd on Unix (also first for new panes) and
-the pane process's on Windows, and either can be Launchpad. SIGTERM and SIGHUP
-sent to Launchpad are forwarded to the tool; SIGINT and SIGQUIT only set
-Launchpad's stop flag, since the terminal delivers them to the tool itself. On
-Windows, Launchpad installs a console handler that ignores Ctrl+C and
-Ctrl+Break, and removes it if the spawn fails; handlers are not inherited, so
-the tool keeps the default. When the tool exits, with any status, Launchpad runs
-`herdr pane close` on its own pane.
+herdr has no in-place pane replacement, and its panes always start a shell.
+On Unix, when `herdr pane process-info` names Launchpad's own PID as the pane's
+`shell_pid` (Launchpad is herdr's default shell, or was `exec`ed), Launchpad
+execs the tool instead, with the chosen cwd and literal argument array: the
+tool keeps the pane's PID, so herdr tracks its cwd as for its own shells and
+closes the pane when it exits. No directory report, Launchpad cwd change or pane
+close is needed. The search worker's thread ends with the exec; its index cache
+is written to a temporary file and renamed, so at worst a stray `.tmp` remains.
+An exec failure returns, and is handled as the spawn failure below. Any doubt
+about the pane's process, including a failed CLI call, means the path below.
+
+Otherwise, and always on Windows, Launchpad restores the terminal, spawns the
+tool itself with the chosen cwd and literal argument array, stops its search
+worker, and waits. Launchpad first changes its own cwd to the chosen directory,
+restoring it if the spawn fails, and after a successful spawn writes a cwd
+report to its terminal: OSC 7 `file:///` with a percent-encoded path on Unix
+(herdr ignores other hosts) and OSC 9;9 with the bare path on Windows. herdr
+keeps one reported cwd per pane, replaced by each newer report, and prefers it
+over process cwds for session state, custom commands and the workspace root; the
+invoking shell may have reported its own directory before starting Launchpad.
+Without a report, herdr reads the foreground group leader's cwd on Unix (also
+first for new panes) and the pane process's on Windows, and either can be
+Launchpad. SIGTERM and SIGHUP sent to Launchpad are forwarded to the tool;
+SIGINT and SIGQUIT only set Launchpad's stop flag, since the terminal delivers
+them to the tool itself. On Windows, Launchpad installs a console handler that
+ignores Ctrl+C and Ctrl+Break, and removes it if the spawn fails; handlers are
+not inherited, so the tool keeps the default. When the tool exits, with any
+status, Launchpad runs `herdr pane close` on its own pane.
 
 Shell spawns directly, with no default-shell handoff: `default_shell` from
 Launchpad's config if set, else `$SHELL` unless its file name is Launchpad's own

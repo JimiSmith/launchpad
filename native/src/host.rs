@@ -122,7 +122,7 @@ impl Host {
     pub fn launch(&self, path: &str, tool: &ToolCommand) -> Result<Launched, Failure> {
         match self {
             Self::Zellij(host) => host.launch(path, tool).map(|()| Launched::Replaced),
-            Self::Herdr(host) => host.spawn(path, tool).map(Launched::Running),
+            Self::Herdr(host) => host.launch(path, tool),
         }
     }
     /// Waits for a tool Launchpad runs itself, then closes the pane with it.

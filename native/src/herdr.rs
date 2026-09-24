@@ -1,4 +1,4 @@
-use crate::host::{self, Failure, Origin, clean};
+use crate::host::{self, Failure, Launched, Origin, clean};
 use serde::de::DeserializeOwned;
 use std::{
     path::PathBuf,
@@ -114,24 +114,42 @@ impl Herdr {
         }
         Ok(())
     }
+    /// Whether Launchpad is the pane's own process, as when it is herdr's
+    /// default shell. Any doubt means no.
+    pub fn is_pane_root(&self) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            process_info: ProcessInfo,
+        }
+        #[derive(serde::Deserialize)]
+        struct ProcessInfo {
+            shell_pid: u32,
+        }
+        self.pane()
+            .and_then(|pane| self.call::<Reply>(&["pane", "process-info", "--pane", &pane.pane_id]))
+            .is_ok_and(|reply| reply.process_info.shell_pid == std::process::id())
+    }
     /// Starts the tool in `path` on this terminal. A missing executable or
     /// directory fails here, before anything is committed.
-    pub fn spawn(&self, path: &str, tool: &ToolCommand) -> Result<Child, Failure> {
-        // `default_shell` from Launchpad's config arrives as Shell's executable.
-        let (program, arguments) = match &tool.executable {
-            Some(executable) => (executable.clone(), &tool.arguments[..]),
-            None => {
-                // herdr's login-shell mode sets $SHELL to its default shell,
-                // which may be Launchpad itself.
-                let own = std::env::current_exe().ok();
-                let env_shell = std::env::var("SHELL")
-                    .ok()
-                    .filter(|shell| !names_launchpad(shell, own.as_deref()));
-                (fallback_shell(env_shell, cfg!(windows), on_path), &[][..])
-            }
-        };
-        let mut command = Command::new(&program);
-        command.args(arguments);
+    ///
+    /// When Launchpad is the pane's own process on Unix, the tool replaces it
+    /// in place, as `exec` does: herdr then tracks the tool's cwd exactly as
+    /// for its own shells and closes the pane when it exits. Only a failure
+    /// returns.
+    pub fn launch(&self, path: &str, tool: &ToolCommand) -> Result<Launched, Failure> {
+        #[cfg(unix)]
+        if self.is_pane_root() {
+            use std::os::unix::process::CommandExt;
+            let (program, mut command) = tool_command(tool);
+            let error = command.current_dir(path).env("PWD", path).exec();
+            return Err(Failure::Rejected(format!(
+                "Cannot start {program} in {path}: {error}"
+            )));
+        }
+        self.spawn(path, tool).map(Launched::Running)
+    }
+    fn spawn(&self, path: &str, tool: &ToolCommand) -> Result<Child, Failure> {
+        let (program, mut command) = tool_command(tool);
         let fail = |e| Failure::Rejected(format!("Cannot start {program} in {path}: {e}"));
         #[cfg(windows)]
         windows::ignore_console_interrupts(true);
@@ -186,6 +204,25 @@ impl Herdr {
     }
 }
 
+/// The tool's program name and command, without a directory.
+fn tool_command(tool: &ToolCommand) -> (String, Command) {
+    // `default_shell` from Launchpad's config arrives as Shell's executable.
+    let (program, arguments) = match &tool.executable {
+        Some(executable) => (executable.clone(), &tool.arguments[..]),
+        None => {
+            // herdr's login-shell mode sets $SHELL to its default shell,
+            // which may be Launchpad itself.
+            let own = std::env::current_exe().ok();
+            let env_shell = std::env::var("SHELL")
+                .ok()
+                .filter(|shell| !names_launchpad(shell, own.as_deref()));
+            (fallback_shell(env_shell, cfg!(windows), on_path), &[][..])
+        }
+    };
+    let mut command = Command::new(&program);
+    command.args(arguments);
+    (program, command)
+}
 /// Tells herdr the tool's directory, as a shell prompt would, when stdout is
 /// the pane's terminal.
 fn report_cwd(path: &str) {
