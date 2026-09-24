@@ -63,6 +63,24 @@ fn launchpad_host_chooses_between_nested_hosts() {
     );
 }
 #[test]
+fn launchpad_host_ignores_case_and_treats_empty_as_unset() {
+    let both = [("ZELLIJ_SESSION_NAME", "outer"), ("HERDR_ENV", "1")];
+    let empty = stderr(&[both[0], both[1], ("LAUNCHPAD_HOST", " ")], &[]);
+    assert!(
+        empty.contains("Both Zellij and herdr are present"),
+        "{empty}"
+    );
+    let upper = stderr(&[both[0], both[1], ("LAUNCHPAD_HOST", "Herdr")], &[]);
+    assert!(upper.contains("HERDR_PANE_ID is missing"), "{upper}");
+    let flag = stderr(&[both[0], both[1]], &["--host", "ZELLIJ"]);
+    assert!(flag.contains("ZELLIJ_PANE_ID is missing"), "{flag}");
+    let bad = stderr(&[both[0], both[1], ("LAUNCHPAD_HOST", "tmux")], &[]);
+    assert!(
+        bad.contains("LAUNCHPAD_HOST must be zellij or herdr"),
+        "{bad}"
+    );
+}
+#[test]
 fn only_herdr_env_1_counts_as_herdr() {
     let zellij = stderr(&[("ZELLIJ_SESSION_NAME", "s"), ("HERDR_ENV", "0")], &[]);
     assert!(zellij.contains("ZELLIJ_PANE_ID is missing"), "{zellij}");

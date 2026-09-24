@@ -32,6 +32,22 @@ pub enum Kind {
     Zellij,
     Herdr,
 }
+impl Kind {
+    /// `LAUNCHPAD_HOST`, ignoring case; empty means unset.
+    pub fn from_env() -> Result<Option<Self>, String> {
+        let Some(value) = std::env::var_os("LAUNCHPAD_HOST") else {
+            return Ok(None);
+        };
+        let text = value.to_string_lossy();
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(None);
+        }
+        <Self as clap::ValueEnum>::from_str(text, true)
+            .map(Some)
+            .map_err(|_| format!("LAUNCHPAD_HOST must be zellij or herdr (found {text:?})"))
+    }
+}
 pub enum Host {
     Zellij(Zellij),
     Herdr(Herdr),

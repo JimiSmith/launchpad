@@ -33,7 +33,8 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
     /// Terminal multiplexer, when both Zellij and herdr are detected
-    #[arg(long, value_enum, env = "LAUNCHPAD_HOST")]
+    /// [env: LAUNCHPAD_HOST]
+    #[arg(long, value_enum, ignore_case = true)]
     host: Option<Kind>,
     /// Private handoff between two instances; not a user-facing launch mode.
     #[arg(long, hide = true)]
@@ -72,7 +73,10 @@ fn main() {
     }
 }
 fn run(args: Args) -> Result<(), String> {
-    let host = Host::discover(args.host)?;
+    let host = Host::discover(
+        args.host
+            .map_or_else(Kind::from_env, |kind| Ok(Some(kind)))?,
+    )?;
     let handoff: Option<ShellHandoff> = args
         .shell_handoff
         .as_deref()
@@ -148,6 +152,8 @@ fn run(args: Args) -> Result<(), String> {
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGHUP,
         signal_hook::consts::SIGINT,
+        // Ctrl+\ reaches Launchpad too while a herdr tool shares its group.
+        signal_hook::consts::SIGQUIT,
     ] {
         signal_hook::flag::register(signal, stop.clone()).map_err(|e| e.to_string())?;
     }

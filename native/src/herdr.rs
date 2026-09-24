@@ -120,32 +120,43 @@ impl Herdr {
         // `default_shell` from Launchpad's config arrives as Shell's executable.
         let (program, arguments) = match &tool.executable {
             Some(executable) => (executable.clone(), &tool.arguments[..]),
-            None => (
-                fallback_shell(std::env::var("SHELL").ok(), cfg!(windows), on_path),
-                &[][..],
-            ),
+            None => {
+                // herdr's login-shell mode sets $SHELL to its default shell,
+                // which may be Launchpad itself.
+                let own = std::env::current_exe().ok();
+                let env_shell = std::env::var("SHELL")
+                    .ok()
+                    .filter(|shell| !names_launchpad(shell, own.as_deref()));
+                (fallback_shell(env_shell, cfg!(windows), on_path), &[][..])
+            }
         };
         let mut command = Command::new(&program);
         command.args(arguments);
-        #[cfg(windows)]
-        windows::ignore_console_interrupts();
         let fail = |e| Failure::Rejected(format!("Cannot start {program} in {path}: {e}"));
-        // herdr falls back to the pane process's own cwd (Windows) or the
-        // foreground group leader's (Unix) when nothing reports one, and that
-        // is often Launchpad. Move there too, so splits and git detection
-        // follow the tool.
+        #[cfg(windows)]
+        windows::ignore_console_interrupts(true);
+        // herdr falls back to the foreground group leader's cwd (Unix) or the
+        // pane process's (Windows) when nothing reports one, and that is often
+        // Launchpad. Move there too.
         let previous = std::env::current_dir().ok();
-        std::env::set_current_dir(path).map_err(fail)?;
-        command
-            .current_dir(path)
-            .env("PWD", path)
-            .spawn()
-            .inspect_err(|_| {
+        let started = std::env::set_current_dir(path)
+            .and_then(|()| command.current_dir(path).env("PWD", path).spawn());
+        match started {
+            Ok(child) => {
+                // A report wins over process cwds, and the invoking shell may
+                // have reported its own directory before starting Launchpad.
+                report_cwd(path);
+                Ok(child)
+            }
+            Err(e) => {
                 if let Some(previous) = &previous {
                     let _ = std::env::set_current_dir(previous);
                 }
-            })
-            .map_err(fail)
+                #[cfg(windows)]
+                windows::ignore_console_interrupts(false);
+                Err(fail(e))
+            }
+        }
     }
     /// Waits for the tool, passing on termination signals Launchpad receives,
     /// then closes this pane as Zellij's close-on-exit would.
@@ -175,6 +186,48 @@ impl Herdr {
     }
 }
 
+/// Tells herdr the tool's directory, as a shell prompt would, when stdout is
+/// the pane's terminal.
+fn report_cwd(path: &str) {
+    use std::io::{IsTerminal, Write};
+    let mut stdout = std::io::stdout();
+    if stdout.is_terminal() {
+        let _ = stdout
+            .write_all(cwd_report(path, cfg!(windows)).as_bytes())
+            .and_then(|()| stdout.flush());
+    }
+}
+/// OSC 7 with an empty host on Unix (herdr ignores other hosts), and OSC 9;9
+/// with a bare path on Windows.
+pub fn cwd_report(path: &str, windows: bool) -> String {
+    if windows {
+        return format!("\x1b]9;9;{path}\x1b\\");
+    }
+    let mut uri = String::from("file://");
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                uri.push(byte as char)
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    format!("\x1b]7;{uri}\x1b\\")
+}
+/// Whether a shell names this executable, by file name without `.exe`,
+/// ignoring case.
+pub fn names_launchpad(shell: &str, own: Option<&std::path::Path>) -> bool {
+    let stem = |name: &str| {
+        let name = name.trim().rsplit(['/', '\\']).next().unwrap_or("");
+        let name = name.to_ascii_lowercase();
+        name.strip_suffix(".exe").unwrap_or(&name).to_string()
+    };
+    let own = own
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(stem);
+    own.is_some_and(|own| !own.is_empty() && own == stem(shell))
+}
 /// Shell's program when no `default_shell` is configured: `$SHELL`, else
 /// PowerShell 7, Windows PowerShell or bash, then `/bin/sh`, by what is present.
 pub fn fallback_shell(
@@ -211,19 +264,45 @@ mod windows {
     };
     /// The tool shares this console, so Ctrl+C reaches both. Launchpad must
     /// survive it to close the pane later. Handlers are not inherited, so the
-    /// tool keeps the default behaviour.
-    pub fn ignore_console_interrupts() {
+    /// tool keeps the default behaviour. `false` removes the handler again.
+    pub fn ignore_console_interrupts(ignore: bool) {
         unsafe extern "system" fn handler(event: u32) -> BOOL {
             (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT).into()
         }
-        // SAFETY: registers a static function that touches no state.
-        unsafe { SetConsoleCtrlHandler(Some(handler), 1) };
+        // SAFETY: (un)registers a static function that touches no state.
+        unsafe { SetConsoleCtrlHandler(Some(handler), ignore.into()) };
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fallback_shell;
+    use super::{cwd_report, fallback_shell, names_launchpad};
+    use std::path::Path;
+    #[test]
+    fn cwd_reports_use_forms_herdr_accepts() {
+        assert_eq!(
+            cwd_report("/home/a b/%;\x1b", false),
+            "\x1b]7;file:///home/a%20b/%25%3B%1B\x1b\\"
+        );
+        assert_eq!(
+            cwd_report("/tmp/é", false),
+            "\x1b]7;file:///tmp/%C3%A9\x1b\\"
+        );
+        assert_eq!(
+            cwd_report(r"C:\Users\Ada", true),
+            "\x1b]9;9;C:\\Users\\Ada\x1b\\"
+        );
+    }
+    #[test]
+    fn launchpad_is_recognised_as_shell_by_file_name() {
+        let own = Some(Path::new("/home/u/.local/bin/zellij-launchpad"));
+        assert!(names_launchpad("/opt/bin/zellij-launchpad", own));
+        assert!(!names_launchpad("/bin/zsh", own));
+        assert!(!names_launchpad("", own));
+        assert!(!names_launchpad("zellij-launchpad", None));
+        let own = Some(Path::new(r"C:\Tools\zellij-launchpad.exe"));
+        assert!(names_launchpad(r"C:\Tools\Zellij-Launchpad.EXE", own));
+    }
     #[test]
     fn shell_prefers_shell_env_then_what_is_installed() {
         let all = |_: &str| true;

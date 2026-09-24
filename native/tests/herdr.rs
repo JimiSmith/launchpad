@@ -33,6 +33,8 @@ impl Fixture {
             .join(format!("{}-herdr-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
+        // Shells differ on whether `pwd` keeps the `..` in this path.
+        let root = root.canonicalize().unwrap();
         let script = root.join("herdr");
         std::fs::write(&script, format!("#!/bin/sh\n{HERDR}\n")).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();

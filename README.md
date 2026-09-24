@@ -79,11 +79,16 @@ Otherwise it starts `$SHELL`; failing that, `pwsh.exe` if it is on PATH, else
 elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
 if herdr is configured to use a different shell.
 
-Launchpad moves into the chosen directory before starting a tool, so herdr's
-"new pane follows cwd" and git detection see the right folder. PowerShell's `cd`
-does not change the process directory, so herdr cannot see it in a PowerShell
-Launchpad started. To fix that for every PowerShell, add this to your `$PROFILE`;
-it reports the folder at each prompt, as herdr's own PowerShell panes do:
+When a tool starts, Launchpad reports its directory to herdr, as a shell prompt
+does, and moves into it. herdr's "new pane follows cwd", git detection and
+session restore then use the tool's directory, even if the shell you started
+Launchpad from had reported its own. On Windows that also means the directory
+cannot be renamed or deleted until the pane closes.
+
+Afterwards herdr only learns about a `cd` if the shell reports it. PowerShell
+does not, so for PowerShell add this at the **end** of your `$PROFILE`, after any
+oh-my-posh or starship setup (which replaces the prompt). It reports the folder
+at each prompt with the same OSC 9;9 sequence herdr's own PowerShell panes use:
 
 ```powershell
 if ($null -eq $global:LaunchpadOriginalPrompt) {
@@ -93,7 +98,6 @@ if ($null -eq $global:LaunchpadOriginalPrompt) {
         $out = @(& $global:LaunchpadOriginalPrompt) -join ''
         $loc = $ExecutionContext.SessionState.Path.CurrentLocation
         if ($loc.Provider.Name -eq 'FileSystem') {
-            try { [Environment]::CurrentDirectory = $loc.ProviderPath } catch {}
             $out += "$([char]27)]9;9;$($loc.ProviderPath)$([char]27)\"
         }
         $out
@@ -102,8 +106,10 @@ if ($null -eq $global:LaunchpadOriginalPrompt) {
 ```
 
 On Windows, Launchpad ignores Ctrl+C while a tool runs; the tool still gets it.
-On Unix, a tool without its own job control shares Launchpad's process group,
-so Ctrl+Z stops both and the pane stops responding; shells are unaffected.
+On Unix, Ctrl+\\ does not kill Launchpad. A tool without its own job control
+shares Launchpad's process group, so Ctrl+Z stops both: started from a shell,
+that shell shows the job as stopped (`fg` resumes it); as the pane's own
+program, Launchpad cannot be stopped this way.
 
 ### Open Launchpad in every new herdr pane
 
@@ -117,25 +123,31 @@ default_shell = "zellij-launchpad"  # or an absolute path
 
 Then run `herdr server reload-config`. New tabs, splits and workspaces open
 Launchpad in the directory herdr picks for them. Shell starts Launchpad's own
-`default_shell` or detected shell, never herdr's setting, so it does not start
-Launchpad again. Quit closes the pane. Panes that already exist keep their shell.
+`default_shell` or detected shell, never herdr's setting, and skips a `$SHELL`
+that names Launchpad (herdr sets it in login-shell mode, the macOS default), so
+it does not start Launchpad again. Quit closes the pane. Panes that already
+exist keep their shell.
 
 `herdr agent start` and `herdr pane run` need a shell prompt, so they do not
 work in a pane still showing Launchpad; choose Shell first, or split from a
 shell pane.
 
-### Zellij inside herdr
+### Zellij and herdr nested
 
-Zellij panes started from a herdr pane inherit herdr's environment, and the
-environment cannot tell which multiplexer owns Launchpad's pane. Launchpad then
-refuses to start until you choose. Set it once where you start Zellij, so
-layouts and `zellij run` commands need no changes:
+A multiplexer started inside the other inherits its environment, which then
+cannot tell which one owns Launchpad's pane. Launchpad refuses to start until
+you choose. Set `LAUNCHPAD_HOST` where the inner multiplexer starts, so layouts
+and `zellij run` commands need no changes:
 
 ```sh
-LAUNCHPAD_HOST=zellij zellij
+LAUNCHPAD_HOST=zellij zellij   # Zellij inside herdr
+LAUNCHPAD_HOST=herdr herdr     # herdr inside Zellij
 ```
 
-`--host zellij` or `--host herdr` on the command line overrides the variable.
+It only reaches sessions and servers started with it; attaching to one that is
+already running keeps that server's environment. Values ignore case, and an
+empty value counts as unset. `--host zellij` or `--host herdr` on the command
+line overrides the variable.
 
 ## Configure commands and colours
 

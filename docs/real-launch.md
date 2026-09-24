@@ -1,12 +1,12 @@
 # Native CLI launches
 
-Launchpad requires an interactive terminal in a Zellij or herdr pane.
-`--help` and `--version` work outside both. The host is `--host`, else
-`LAUNCHPAD_HOST`, else detected: `ZELLIJ_SESSION_NAME` means Zellij and
-`HERDR_ENV=1` means herdr. Both at once is an error, because one multiplexer runs
-inside the other and the environment cannot tell which pane is Launchpad's own.
-The Zellij handoff passes `--host zellij` to its second instance. herdr is
-described [below](#herdr).
+Launchpad requires an interactive terminal in a Zellij or herdr pane. `--help`
+and `--version` work outside both. The host is `--host`, else `LAUNCHPAD_HOST`
+(case-insensitive; empty means unset), else detected: `ZELLIJ_SESSION_NAME`
+means Zellij and `HERDR_ENV=1` means herdr. Both at once is an error, because
+one multiplexer runs inside the other and the environment cannot tell which pane
+is Launchpad's own. The Zellij handoff passes `--host zellij` to its second
+instance. herdr is described [below](#herdr).
 
 Under Zellij, Launchpad requires a live session, a valid `ZELLIJ_PANE_ID` and
 Zellij >= 0.45.0. Every CLI action explicitly selects `ZELLIJ_SESSION_NAME`.
@@ -90,20 +90,28 @@ labels are accepted as-is.
 herdr has no in-place pane replacement, and its panes always start a shell. So
 Launchpad restores the terminal, spawns the tool itself with the chosen cwd and
 literal argument array, stops its search worker, and waits. Launchpad first
-changes its own cwd to the chosen directory, restoring it if the spawn fails:
-without a reported cwd (OSC 7, 9;9 or 1337), herdr reads the foreground group
-leader's cwd on Unix and the pane process's on Windows, and either can be
-Launchpad. SIGTERM and SIGHUP
-sent to Launchpad are forwarded to the tool. On Windows, Launchpad installs a
-console handler that ignores Ctrl+C and Ctrl+Break; handlers are not inherited,
-so the tool keeps the default. When the tool exits, with any status, Launchpad
-runs `herdr pane close` on its own pane.
+changes its own cwd to the chosen directory, restoring it if the spawn fails,
+and after a successful spawn writes a cwd report to its terminal: OSC 7
+`file:///` with a percent-encoded path on Unix (herdr ignores other hosts) and
+OSC 9;9 with the bare path on Windows. herdr keeps one reported cwd per pane,
+replaced by each newer report, and prefers it over process cwds for session
+state, custom commands and the workspace root; the invoking shell may have
+reported its own directory before starting Launchpad. Without a report, herdr
+reads the foreground group leader's cwd on Unix (also first for new panes) and
+the pane process's on Windows, and either can be Launchpad. SIGTERM and SIGHUP
+sent to Launchpad are forwarded to the tool; SIGINT and SIGQUIT only set
+Launchpad's stop flag, since the terminal delivers them to the tool itself. On
+Windows, Launchpad installs a console handler that ignores Ctrl+C and
+Ctrl+Break, and removes it if the spawn fails; handlers are not inherited, so
+the tool keeps the default. When the tool exits, with any status, Launchpad runs
+`herdr pane close` on its own pane.
 
 Shell spawns directly, with no default-shell handoff: `default_shell` from
-Launchpad's config if set, else `$SHELL`, else the first present of `pwsh.exe`
-then `powershell.exe` on Windows, or `bash` then `/bin/sh` elsewhere. Presence
-means a file of that name in a PATH directory. Launchpad does not read herdr's
-configuration.
+Launchpad's config if set, else `$SHELL` unless its file name is Launchpad's own
+(herdr's login-shell mode sets `$SHELL` to herdr's default shell), else the
+first present of `pwsh.exe` then `powershell.exe` on Windows, or `bash` then
+`/bin/sh` elsewhere. Presence means a file of that name in a PATH directory.
+Launchpad does not read herdr's configuration.
 
 A spawn failure, such as a missing executable or directory, is a
 known rejection: the form returns, the tab name is restored and the history
