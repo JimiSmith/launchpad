@@ -1,6 +1,5 @@
 use crate::host::{self, Failure, Forward, Launched, Origin, clean};
 use launchpad_core::commands::Command as ToolCommand;
-use launchpad_core::commands::Tool;
 use serde::de::DeserializeOwned;
 use std::{
     path::PathBuf,
@@ -213,7 +212,7 @@ fn tool_command(tool: &ToolCommand) -> (String, Command) {
     // herdr's login-shell mode starts Launchpad as a login shell, so it never
     // read the login profile; the shell it hands over to must.
     #[cfg(unix)]
-    if tool.id == Tool::Shell
+    if tool.id == launchpad_core::commands::Tool::Shell
         && std::env::args_os()
             .next()
             .is_some_and(|name| is_login_name(&name))
@@ -353,9 +352,7 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        cwd_report, fallback_shell, is_login_name, login_name, login_shell, names_launchpad,
-    };
+    use super::{cwd_report, fallback_shell, is_login_name, login_name, names_launchpad};
     use std::path::Path;
     #[test]
     fn cwd_reports_use_forms_herdr_accepts() {
@@ -408,7 +405,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn login_shell_comes_from_the_user_database() {
-        assert!(login_shell().is_some_and(|shell| shell.starts_with('/')));
+        assert!(super::login_shell().is_some_and(|shell| shell.starts_with('/')));
     }
     #[test]
     fn login_shells_are_named_with_a_leading_hyphen() {
