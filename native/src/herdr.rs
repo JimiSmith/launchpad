@@ -1,5 +1,6 @@
 use crate::host::{self, Failure, Forward, Launched, Origin, clean};
 use launchpad_core::commands::Command as ToolCommand;
+use launchpad_core::commands::Tool;
 use serde::de::DeserializeOwned;
 use std::{
     path::PathBuf,
@@ -198,15 +199,38 @@ fn tool_command(tool: &ToolCommand) -> (String, Command) {
             // herdr's login-shell mode sets $SHELL to its default shell,
             // which may be Launchpad itself.
             let own = std::env::current_exe().ok();
-            let env_shell = std::env::var("SHELL")
-                .ok()
-                .filter(|shell| !names_launchpad(shell, own.as_deref()));
-            (fallback_shell(env_shell, cfg!(windows), on_path), &[][..])
+            let not_launchpad = |shell: &String| !names_launchpad(shell, own.as_deref());
+            let env_shell = std::env::var("SHELL").ok().filter(not_launchpad);
+            let login = login_shell().filter(not_launchpad);
+            (
+                fallback_shell([env_shell, login], cfg!(windows), on_path),
+                &[][..],
+            )
         }
     };
     let mut command = Command::new(&program);
     command.args(arguments);
+    // herdr's login-shell mode starts Launchpad as a login shell, so it never
+    // read the login profile; the shell it hands over to must.
+    #[cfg(unix)]
+    if tool.id == Tool::Shell
+        && std::env::args_os()
+            .next()
+            .is_some_and(|name| is_login_name(&name))
+    {
+        use std::os::unix::process::CommandExt;
+        command.arg0(login_name(&program));
+    }
     (program, command)
+}
+/// Whether a program name marks a login shell, which by convention begins
+/// with `-`.
+pub fn is_login_name(name: &std::ffi::OsStr) -> bool {
+    name.as_encoded_bytes().first() == Some(&b'-')
+}
+/// The login-shell name for a shell: its file name prefixed with `-`.
+pub fn login_name(program: &str) -> String {
+    format!("-{}", program.rsplit('/').next().unwrap_or(program))
 }
 /// Tells herdr the tool's directory, as a shell prompt would, when stdout is
 /// the pane's terminal.
@@ -250,16 +274,19 @@ pub fn names_launchpad(shell: &str, own: Option<&std::path::Path>) -> bool {
         .map(stem);
     own.is_some_and(|own| !own.is_empty() && own == stem(shell))
 }
-/// Shell's program when no `default_shell` is configured: `$SHELL`, else
-/// PowerShell 7, Windows PowerShell or bash, then `/bin/sh`, by what is present.
+/// Shell's program when no `default_shell` is configured: `$SHELL`, else the
+/// account's login shell, else PowerShell 7, Windows PowerShell or bash, then
+/// `/bin/sh`, by what is present.
 pub fn fallback_shell(
-    env_shell: Option<String>,
+    detected: [Option<String>; 2],
     windows: bool,
     present: impl Fn(&str) -> bool,
 ) -> String {
-    if let Some(shell) = env_shell
+    if let Some(shell) = detected
+        .into_iter()
+        .flatten()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .find(|s| !s.is_empty())
     {
         return shell;
     }
@@ -273,6 +300,34 @@ pub fn fallback_shell(
         .find(|c| present(c))
         .map_or(last, |c| c)
         .to_string()
+}
+/// The account's login shell from the user database, as macOS terminals use
+/// when `$SHELL` is unusable.
+#[cfg(unix)]
+fn login_shell() -> Option<String> {
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found = std::ptr::null_mut();
+    let mut buf = vec![0 as libc::c_char; 16 * 1024];
+    // SAFETY: every pointer is valid for the call; `pw_shell` points into `buf`.
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            &mut entry,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut found,
+        )
+    };
+    if status != 0 || found.is_null() || entry.pw_shell.is_null() {
+        return None;
+    }
+    // SAFETY: getpwuid_r succeeded, so `pw_shell` is a C string inside `buf`.
+    let shell = unsafe { std::ffi::CStr::from_ptr(entry.pw_shell) };
+    shell.to_str().ok().map(str::to_string)
+}
+#[cfg(not(unix))]
+fn login_shell() -> Option<String> {
+    None
 }
 fn on_path(name: &str) -> bool {
     std::env::var_os("PATH")
@@ -298,7 +353,9 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-    use super::{cwd_report, fallback_shell, names_launchpad};
+    use super::{
+        cwd_report, fallback_shell, is_login_name, login_name, login_shell, names_launchpad,
+    };
     use std::path::Path;
     #[test]
     fn cwd_reports_use_forms_herdr_accepts() {
@@ -326,20 +383,39 @@ mod tests {
         assert!(names_launchpad(r"C:\Tools\Launchpad.EXE", own));
     }
     #[test]
-    fn shell_prefers_shell_env_then_what_is_installed() {
+    fn shell_prefers_shell_env_then_login_shell_then_what_is_installed() {
         let all = |_: &str| true;
         let none = |_: &str| false;
+        let zsh = || Some("/bin/zsh".to_string());
+        assert_eq!(fallback_shell([zsh(), None], false, none), "/bin/zsh");
         assert_eq!(
-            fallback_shell(Some("/bin/zsh".into()), false, none),
+            fallback_shell([Some("/bin/fish".into()), zsh()], false, none),
+            "/bin/fish"
+        );
+        assert_eq!(
+            fallback_shell([Some(" ".into()), zsh()], false, all),
             "/bin/zsh"
         );
-        assert_eq!(fallback_shell(Some(" ".into()), false, all), "bash");
-        assert_eq!(fallback_shell(None, false, none), "/bin/sh");
-        assert_eq!(fallback_shell(None, true, all), "pwsh.exe");
-        assert_eq!(fallback_shell(None, true, none), "powershell.exe");
+        assert_eq!(fallback_shell([Some(" ".into()), None], false, all), "bash");
+        assert_eq!(fallback_shell([None, None], false, none), "/bin/sh");
+        assert_eq!(fallback_shell([None, None], true, all), "pwsh.exe");
+        assert_eq!(fallback_shell([None, None], true, none), "powershell.exe");
         assert_eq!(
-            fallback_shell(Some("C:/Git/bin/bash.exe".into()), true, all),
+            fallback_shell([Some("C:/Git/bin/bash.exe".into()), None], true, all),
             "C:/Git/bin/bash.exe"
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn login_shell_comes_from_the_user_database() {
+        assert!(login_shell().is_some_and(|shell| shell.starts_with('/')));
+    }
+    #[test]
+    fn login_shells_are_named_with_a_leading_hyphen() {
+        assert!(is_login_name("-launchpad".as_ref()));
+        assert!(!is_login_name("launchpad".as_ref()));
+        assert!(!is_login_name("/usr/local/bin/launchpad".as_ref()));
+        assert_eq!(login_name("/bin/zsh"), "-zsh");
+        assert_eq!(login_name("fish"), "-fish");
     }
 }

@@ -80,7 +80,8 @@ itself, in the same pane and the chosen directory. The tab is renamed
   `herdr pane close` when it exits.
 
 Shell starts [`default_shell`](#configure-commands-and-colours) if set.
-Otherwise it starts `$SHELL`; failing that, `pwsh.exe` if it is on PATH, else
+Otherwise it starts `$SHELL`; failing that, the account's login shell on Linux
+and macOS (zsh by default on macOS), then `pwsh.exe` if it is on PATH, else
 `powershell.exe` on Windows, and `bash` if it is on PATH, else `/bin/sh`
 elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
 if herdr is configured to use a different shell.
@@ -133,7 +134,8 @@ Launchpad in the directory herdr picks for them, and on Linux and macOS the
 chosen tool takes over the pane directly. Shell starts Launchpad's own
 `default_shell` or detected shell, never herdr's setting, and skips a `$SHELL`
 that names Launchpad (herdr sets it in login-shell mode, the macOS default), so
-it does not start Launchpad again. Quit closes the pane. Panes that already
+it does not start Launchpad again. In that mode Shell starts as a login shell
+too, so it reads your login profile (such as `~/.zprofile`). Quit closes the pane. Panes that already
 exist keep their shell.
 
 `herdr agent start` and `herdr pane run` need a shell prompt, so they do not
