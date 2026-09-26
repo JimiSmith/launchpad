@@ -420,14 +420,23 @@ mod tests {
     use std::path::Path;
     #[test]
     fn plugin_tabs_open_in_the_focused_panes_directory() {
-        let context = r#"{"workspace_id":"w1","focused_pane_id":"w1:p2","focused_pane_cwd":"/usr","invocation_source":"keybinding"}"#;
-        assert_eq!(plugin_context_dir(context), Some("/usr".into()));
+        // Absolute paths need a drive on Windows.
+        let (usr, srv) = if cfg!(windows) {
+            (r"C:\usr", r"C:\srv")
+        } else {
+            ("/usr", "/srv")
+        };
+        let context = serde_json::json!({
+            "workspace_id": "w1",
+            "focused_pane_id": "w1:p2",
+            "focused_pane_cwd": usr,
+            "invocation_source": "keybinding",
+        });
+        assert_eq!(plugin_context_dir(&context.to_string()), Some(usr.into()));
         assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":null}"#), None);
         assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":"usr"}"#), None);
-        assert_eq!(
-            plugin_context_dir(r#"{"focused_pane_cwd":null,"workspace_cwd":"/srv"}"#),
-            Some("/srv".into())
-        );
+        let context = serde_json::json!({"focused_pane_cwd": null, "workspace_cwd": srv});
+        assert_eq!(plugin_context_dir(&context.to_string()), Some(srv.into()));
         assert_eq!(plugin_context_dir(r#"{"workspace_id":"w1"}"#), None);
         assert_eq!(plugin_context_dir("not json"), None);
     }
