@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "launchpad"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "clap",
  "crossterm",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "launchpad-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "ignore",
  "neo_frizbee",
