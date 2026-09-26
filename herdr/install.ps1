@@ -23,7 +23,17 @@ if ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64') {
         Invoke-WebRequest -UseBasicParsing -Uri "$release/$archive" -OutFile "$tmp\$archive"
         Invoke-WebRequest -UseBasicParsing -Uri "$release/$archive.sha256" -OutFile "$tmp\$archive.sha256"
         $expected = ((Get-Content "$tmp\$archive.sha256" -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-        $actual = (Get-FileHash "$tmp\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Do not use Get-FileHash. Windows PowerShell 5.1 started by herdr from
+        # PowerShell 7 gets the PSModulePath of PowerShell 7. Then 5.1 loads the
+        # Utility module of PowerShell 7, which has no Get-FileHash for 5.1.
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        $stream = [IO.File]::OpenRead("$tmp\$archive")
+        try {
+            $actual = -join ($sha256.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $stream.Dispose()
+            $sha256.Dispose()
+        }
         if ($expected -ne $actual) {
             throw "Checksum mismatch for $archive (expected $expected, got $actual)"
         }
