@@ -2,7 +2,7 @@ use crate::host::{self, Failure, Forward, Launched, Origin, clean};
 use launchpad_core::commands::Command as ToolCommand;
 use serde::de::DeserializeOwned;
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command},
     time::{Duration, Instant},
 };
@@ -174,6 +174,35 @@ impl Herdr {
             }
         }
     }
+    /// Opens the plugin's Launchpad pane in a new, focused tab in `dir`.
+    /// Without a directory herdr starts it in the plugin's own.
+    pub fn open_plugin_tab(&self, plugin: &str, dir: Option<&Path>) -> Result<(), Failure> {
+        #[derive(serde::Deserialize)]
+        struct Opened {
+            plugin_pane: PaneReply,
+        }
+        let mut args = vec![
+            "plugin",
+            "pane",
+            "open",
+            "--plugin",
+            plugin,
+            "--entrypoint",
+            "launchpad",
+            "--placement",
+            "tab",
+            "--focus",
+        ];
+        if let Some(dir) = dir.and_then(Path::to_str) {
+            args.extend(["--cwd", dir]);
+        }
+        let opened: Opened = self.call(&args)?;
+        // herdr 0.9 focuses the tab on the server but leaves attached
+        // clients showing the previous one until a tab is focused.
+        let tab = opened.plugin_pane.pane.tab_id;
+        self.call::<serde_json::Value>(&["tab", "focus", &tab])
+            .map(|_| ())
+    }
     /// Waits for the tool, passing on termination signals Launchpad receives,
     /// then closes this pane as Zellij's close-on-exit would.
     pub fn finish(&self, mut child: Child, forward: Forward) -> Result<(), String> {
@@ -189,6 +218,39 @@ impl Herdr {
     }
 }
 
+/// The herdr plugin's `open` action, run by herdr detached in the plugin's
+/// directory with the plugin's environment.
+pub fn plugin_open_action() -> Result<(), String> {
+    let plugin = std::env::var("HERDR_PLUGIN_ID")
+        .ok()
+        .filter(|id| !id.is_empty())
+        .ok_or("HERDR_PLUGIN_ID is missing; herdr runs this as a plugin action.")?;
+    let host = Herdr {
+        executable: std::env::var_os("HERDR_BIN_PATH")
+            .filter(|p| !p.is_empty())
+            .map_or_else(|| "herdr".into(), PathBuf::from),
+        timeout: Duration::from_secs(5),
+    };
+    let dir = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
+        .ok()
+        .and_then(|json| plugin_context_dir(&json));
+    host.open_plugin_tab(&plugin, dir.as_deref())
+        .map_err(|e| e.to_string())
+}
+/// The focused pane's directory from herdr's plugin invocation context,
+/// else the workspace's, if absolute.
+pub fn plugin_context_dir(json: &str) -> Option<PathBuf> {
+    #[derive(serde::Deserialize)]
+    struct Context {
+        focused_pane_cwd: Option<PathBuf>,
+        workspace_cwd: Option<PathBuf>,
+    }
+    let context = serde_json::from_str::<Context>(json).ok()?;
+    [context.focused_pane_cwd, context.workspace_cwd]
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_absolute())
+}
 /// The tool's program name and command, without a directory.
 fn tool_command(tool: &ToolCommand) -> (String, Command) {
     // `default_shell` from Launchpad's config arrives as Shell's executable.
@@ -352,8 +414,23 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-    use super::{cwd_report, fallback_shell, is_login_name, login_name, names_launchpad};
+    use super::{
+        cwd_report, fallback_shell, is_login_name, login_name, names_launchpad, plugin_context_dir,
+    };
     use std::path::Path;
+    #[test]
+    fn plugin_tabs_open_in_the_focused_panes_directory() {
+        let context = r#"{"workspace_id":"w1","focused_pane_id":"w1:p2","focused_pane_cwd":"/usr","invocation_source":"keybinding"}"#;
+        assert_eq!(plugin_context_dir(context), Some("/usr".into()));
+        assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":null}"#), None);
+        assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":"usr"}"#), None);
+        assert_eq!(
+            plugin_context_dir(r#"{"focused_pane_cwd":null,"workspace_cwd":"/srv"}"#),
+            Some("/srv".into())
+        );
+        assert_eq!(plugin_context_dir(r#"{"workspace_id":"w1"}"#), None);
+        assert_eq!(plugin_context_dir("not json"), None);
+    }
     #[test]
     fn cwd_reports_use_forms_herdr_accepts() {
         assert_eq!(

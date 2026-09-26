@@ -23,8 +23,10 @@ drafts until all eight assets upload. Hyphenated tags are marked prereleases.
 Reruns replace matching assets; publication is not atomic for an already published
 release. No WASM artifact is built or distributed.
 
-Before tagging, run `bash tools/verify_native.sh`. Keep both Cargo package versions
-and the release tag aligned. Commit and push the reviewed source before tagging;
+Before tagging, run `bash tools/verify_native.sh`. Keep both Cargo package versions,
+the `version` in `herdr-plugin.toml` and the release tag aligned: the herdr
+plugin's install script downloads the release named by that version, and a test
+fails when it differs from the package version. Commit and push the reviewed source before tagging;
 do not move published tags. Implementation of this migration does not itself tag,
 push, or publish a release.
 

@@ -39,6 +39,9 @@ struct Args {
     /// Private handoff between two instances; not a user-facing launch mode.
     #[arg(long, hide = true)]
     shell_handoff: Option<String>,
+    /// The herdr plugin's `open` action; not a user-facing launch mode.
+    #[arg(long, hide = true)]
+    herdr_plugin_open: bool,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ShellHandoff {
@@ -80,6 +83,9 @@ fn run(args: Args) -> Result<(), String> {
     unsafe {
         libc::signal(libc::SIGCHLD, libc::SIG_DFL)
     };
+    if args.herdr_plugin_open {
+        return launchpad::herdr::plugin_open_action();
+    }
     let host = Host::discover(
         args.host
             .map_or_else(Kind::from_env, |kind| Ok(Some(kind)))?,

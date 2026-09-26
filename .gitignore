@@ -1,5 +1,7 @@
 # Rust build artifacts
 **/target/
+# The herdr plugin's installed binary
+/bin/
 
 # Local environment and editor files
 .env

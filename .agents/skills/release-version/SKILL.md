@@ -19,8 +19,9 @@ releases distribute native archives through GitHub, not crates.io or WASM.
    context does not establish one, ask for it while continuing independent
    inspection. Keep the two package versions and the `v<version>` tag aligned.
    Hyphenated tags are published as prereleases by this workflow.
-3. Update `[package].version` in both `Cargo.toml` and `native/Cargo.toml`.
-   Refresh the workspace package entries in `Cargo.lock`, for example with
+3. Update `[package].version` in both `Cargo.toml` and `native/Cargo.toml`,
+   and the top-level `version` in `herdr-plugin.toml` (the herdr plugin
+   downloads the release it names; a test checks it matches). Refresh the workspace package entries in `Cargo.lock`, for example with
    `cargo check --workspace --offline` after editing the manifests. Inspect the
    lockfile diff and preserve unrelated dependency versions; do not run a broad
    dependency upgrade as part of a release.

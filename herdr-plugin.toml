@@ -1,0 +1,30 @@
+# herdr plugin: `herdr plugin install JimiSmith/launchpad` installs Launchpad
+# into this checkout's bin/ and adds an action that opens it in a new tab.
+id = "launchpad"
+name = "Launchpad"
+# Keep aligned with the Cargo package versions: install downloads this release.
+version = "0.11.1"
+min_herdr_version = "0.9.0"
+description = "Fuzzy-find a directory and launch a tool in it"
+platforms = ["linux", "macos", "windows"]
+
+[[build]]
+platforms = ["linux", "macos"]
+command = ["sh", "herdr/install.sh"]
+
+[[build]]
+platforms = ["windows"]
+command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "herdr/install.ps1"]
+
+# herdr resolves a relative program against the plugin directory, adding
+# .exe on Windows.
+[[actions]]
+id = "open"
+title = "Open Launchpad in a new tab"
+command = ["bin/launchpad", "--herdr-plugin-open"]
+
+[[panes]]
+id = "launchpad"
+title = "Launchpad"
+placement = "tab"
+command = ["bin/launchpad"]

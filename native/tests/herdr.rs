@@ -102,6 +102,35 @@ fn rename_passes_hyphenated_labels_verbatim_and_reads_them_back() {
     );
 }
 #[test]
+fn plugin_action_opens_a_focused_tab_in_the_given_directory() {
+    let f = Fixture::new("plugin-open");
+    f.replace(
+        r#"printf '%s|' "$@" >> "${0%/*}/calls"; echo >> "${0%/*}/calls"
+case "$1" in
+plugin) printf '%s\n' '{"id":"x","result":{"plugin_pane":{"pane":{"pane_id":"w1:p9","tab_id":"w1:t4"}},"type":"plugin_pane_opened"}}';;
+*) printf '%s\n' '{"id":"x","result":{"type":"tab_info"}}';;
+esac"#,
+    );
+    let herdr = f.herdr();
+    herdr
+        .open_plugin_tab("launchpad", Some("/srv/a b".as_ref()))
+        .unwrap();
+    herdr.open_plugin_tab("launchpad", None).unwrap();
+    let open =
+        "plugin|pane|open|--plugin|launchpad|--entrypoint|launchpad|--placement|tab|--focus|";
+    // Attached herdr 0.9 clients only follow an explicit tab focus.
+    let focus = "tab|focus|w1:t4|";
+    assert_eq!(
+        f.calls(),
+        [
+            format!("{open}--cwd|/srv/a b|"),
+            focus.into(),
+            open.into(),
+            focus.into()
+        ]
+    );
+}
+#[test]
 fn rename_that_does_not_stick_is_rejected() {
     let f = Fixture::new("stuck");
     std::fs::write(f.root.join("stuck"), "").unwrap();

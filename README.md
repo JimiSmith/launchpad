@@ -9,13 +9,16 @@ dashboard.
 
 Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**, or inside
 herdr (tested with 0.9.0; see [herdr](#herdr)). Launchpad must run inside a Zellij
-or herdr terminal pane. No plugin, WASM runtime, or plugin permissions are needed.
+or herdr terminal pane. No Zellij plugin, WASM runtime, or plugin permissions are
+needed.
 
 ## Install and run
 
 Tagged releases provide archives for Linux x64, Windows x64, macOS Intel x64 and
 macOS Apple Silicon ARM64, each with a SHA-256 checksum. See
 [release packaging](docs/releases.md) for archive names and platform details.
+herdr users can instead
+[install Launchpad as a herdr plugin](#install-as-a-herdr-plugin).
 
 Or build from this checkout with the pinned Rust toolchain. On Linux and macOS:
 
@@ -71,7 +74,7 @@ herdr cannot replace a pane in place, so Launchpad starts the chosen tool
 itself, in the same pane and the chosen directory. The tab is renamed
 `directory · command label` as in Zellij.
 
-- When Launchpad is the pane's own program, as in the setup below, on Linux and
+- When Launchpad is the pane's own program, as in the setups below, on Linux and
   macOS it replaces itself with the tool, as `exec` does. herdr then treats the
   tool like its own shells: it follows `cd` and closes the pane when the tool
   exits.
@@ -118,6 +121,61 @@ On Unix, Ctrl+\\ does not kill Launchpad. A tool without its own job control
 shares Launchpad's process group, so Ctrl+Z stops both: started from a shell,
 that shell shows the job as stopped (`fg` resumes it); as the pane's own
 program, Launchpad cannot be stopped this way.
+
+### Install as a herdr plugin
+
+```sh
+herdr plugin install JimiSmith/launchpad
+```
+
+herdr clones this repository, shows what it will run, and runs the install
+script. The script puts Launchpad in the plugin's own directory: the release
+archive for the plugin's version on Linux x64, macOS and Windows x64, after
+checking its SHA-256; elsewhere, such as Linux on ARM, a Cargo build, which
+needs [Rust](https://rustup.rs) installed. Add `--ref` with a release tag to
+install that release. The plugin does not put `launchpad` on your PATH, so use the
+[other install methods](#install-and-run) to run it from a prompt or as herdr's
+default shell.
+
+A plugin cannot add keys itself. Bind its action in herdr's `config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+l"
+type = "plugin_action"
+command = "launchpad.open"
+description = "launchpad"
+```
+
+Then run `herdr server reload-config`. The key opens Launchpad in a new tab, in
+the focused pane's directory, and the chosen tool takes over that tab's pane
+(on Windows, Launchpad stays alive under it). Quit closes the tab. Without a
+key, run `herdr plugin action invoke launchpad.open`.
+
+herdr has no plugin updates: run the install command again for a new version.
+`herdr plugin uninstall launchpad` removes the plugin and its copy of Launchpad.
+
+### Open Launchpad from a herdr key without the plugin
+
+With `launchpad` on your PATH, bind a key in herdr's `config.toml` to open it
+in a new pane, while herdr's default shell stays a normal shell:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+l"
+type = "pane"
+command = "exec launchpad"  # or an absolute path
+description = "launchpad"
+```
+
+Then run `herdr server reload-config`. The pane opens zoomed, beside the
+focused pane and in its directory. herdr runs the command through `sh -c`, and
+`exec` makes Launchpad the pane's own program, so on Linux and macOS the chosen
+tool takes over the pane; herdr closes it when the tool exits. The pane stays
+zoomed until you unzoom it (`prefix+z`). On Windows herdr uses `cmd.exe`, so
+write `command = "launchpad"`; Launchpad then stays alive under the tool.
+Quit closes the pane. `type = "popup"` does not work: a popup is not a herdr
+pane, so Launchpad cannot find its tab.
 
 ### Open Launchpad in every new herdr pane
 
