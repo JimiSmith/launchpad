@@ -271,6 +271,14 @@ fn tool_command(tool: &ToolCommand) -> (String, Command) {
     };
     let mut command = Command::new(&program);
     command.args(arguments);
+    // herdr installs this integration only when it starts PowerShell itself.
+    // Our child shell needs its own hook: PowerShell's Set-Location neither
+    // updates the OS cwd nor reports it to the terminal by default. -Command
+    // runs after the profile, so prompt customizations are already installed.
+    #[cfg(windows)]
+    if tool.id == launchpad_core::commands::Tool::Shell && windows::is_powershell(&program) {
+        command.args(["-NoExit", "-Command", windows::POWERSHELL_PROMPT]);
+    }
     // herdr's login-shell mode starts Launchpad as a login shell, so it never
     // read the login profile; the shell it hands over to must.
     #[cfg(unix)]
@@ -400,6 +408,15 @@ mod windows {
         Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler},
         core::BOOL,
     };
+    pub const POWERSHELL_PROMPT: &str = include_str!("powershell_prompt.ps1");
+
+    pub fn is_powershell(program: &str) -> bool {
+        let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+        ["pwsh", "pwsh.exe", "powershell", "powershell.exe"]
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    }
+
     /// The tool shares this console, so Ctrl+C reaches both. Launchpad must
     /// survive it to close the pane later. Handlers are not inherited, so the
     /// tool keeps the default behaviour. `false` removes the handler again.
@@ -500,5 +517,122 @@ mod tests {
         assert!(!is_login_name("/usr/local/bin/launchpad".as_ref()));
         assert_eq!(login_name("/bin/zsh"), "-zsh");
         assert_eq!(login_name("fish"), "-fish");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_powershell_shell_launches_get_the_prompt_hook() {
+        use launchpad_core::commands::{Commands, Tool};
+        let mut tool = Commands::default().entries.remove(0);
+        for program in [
+            "pwsh",
+            "powershell.exe",
+            r"C:\Program Files\PowerShell\7\PWSH.EXE",
+            "C:/Windows/System32/WindowsPowerShell/v1.0/PowerShell.EXE",
+        ] {
+            tool.executable = Some(program.into());
+            let (_, command) = super::tool_command(&tool);
+            let args: Vec<_> = command.get_args().collect();
+            assert_eq!(
+                args,
+                ["-NoExit", "-Command", super::windows::POWERSHELL_PROMPT]
+            );
+        }
+        for program in ["cmd.exe", "bash.exe", "pwsh-wrapper.exe"] {
+            tool.executable = Some(program.into());
+            assert_eq!(super::tool_command(&tool).1.get_args().count(), 0);
+        }
+        // A configured command may run a script and exit; do not turn it into
+        // an interactive shell or reinterpret its arguments.
+        tool.id = Tool::new("script").unwrap();
+        tool.executable = Some("pwsh.exe".into());
+        tool.arguments = vec!["-File".into(), "tool.ps1".into()];
+        let (_, command) = super::tool_command(&tool);
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-File", "tool.ps1"]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_prompt_reports_directory_changes_and_preserves_the_prompt() {
+        // Windows PowerShell is present on Windows; also exercise PowerShell 7
+        // when installed. Profiles stay disabled in these isolated processes.
+        for program in ["powershell.exe", "pwsh.exe"] {
+            if program == "pwsh.exe" && !super::on_path(program) {
+                continue;
+            }
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/native-powershell-cwd")
+                .join(program);
+            let changed = root.join("space \u{e9} ' directory");
+            std::fs::create_dir_all(&changed).unwrap();
+            // Install twice to exercise the old profile workaround's guard.
+            let script = format!(
+                r#"
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
+function global:prompt {{ "status=$?;exit=$global:LASTEXITCODE>" }}
+{hook}
+{hook}
+$initial = prompt
+Set-Location -LiteralPath $env:LAUNCHPAD_TEST_CHANGED
+$changed = prompt
+$processCwd = [Environment]::CurrentDirectory
+cmd.exe /d /c exit 23
+$failed = prompt
+$exitCode = $LASTEXITCODE
+Set-Location HKCU:\
+$registry = prompt
+@{{ initial = $initial; changed = $changed; processCwd = $processCwd;
+   failed = $failed; exitCode = $exitCode; registry = $registry }} | ConvertTo-Json -Compress
+exit 0
+"#,
+                hook = super::windows::POWERSHELL_PROMPT,
+            );
+            let output = std::process::Command::new(program)
+                .args(["-NoLogo", "-NoProfile", "-NoExit", "-Command", &script])
+                .current_dir(&root)
+                .env("LAUNCHPAD_TEST_CHANGED", &changed)
+                .output()
+                .unwrap_or_else(|e| panic!("start {program}: {e}"));
+            assert!(output.status.success(), "{program}: {output:?}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let result: serde_json::Value = serde_json::from_str(stdout.trim())
+                .unwrap_or_else(|e| panic!("{program}: {e}: {stdout:?}"));
+            let initial = result["initial"].as_str().unwrap();
+            let changed_prompt = result["changed"].as_str().unwrap();
+            let reported = result["processCwd"].as_str().unwrap();
+            assert!(
+                initial.starts_with("status=True;exit="),
+                "{program}: {result}"
+            );
+            assert_eq!(
+                initial.matches("\x1b]9;9;").count(),
+                1,
+                "{program}: {result}"
+            );
+            assert_ne!(initial, changed_prompt, "{program}: {result}");
+            assert!(
+                changed_prompt.ends_with(&cwd_report(reported, true)),
+                "{program}: {result}"
+            );
+            assert_eq!(
+                Path::new(reported).canonicalize().unwrap(),
+                changed.canonicalize().unwrap()
+            );
+            assert!(
+                result["failed"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("status=False;exit=23>"),
+                "{program}: {result}"
+            );
+            assert_eq!(result["exitCode"], 23, "{program}: {result}");
+            assert!(
+                !result["registry"].as_str().unwrap().contains("\x1b]9;9;"),
+                "{program}: {result}"
+            );
+        }
     }
 }

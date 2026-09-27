@@ -96,25 +96,14 @@ session restore then use the tool's directory, even if the shell you started
 Launchpad from had reported its own. On Windows that also means the directory
 cannot be renamed or deleted until the pane closes.
 
-Afterwards herdr only learns about a `cd` if the shell reports it. PowerShell
-does not, so for PowerShell add this at the **end** of your `$PROFILE`, after any
-oh-my-posh or starship setup (which replaces the prompt). It reports the folder
-at each prompt with the same OSC 9;9 sequence herdr's own PowerShell panes use:
-
-```powershell
-if ($null -eq $global:LaunchpadOriginalPrompt) {
-    $global:LaunchpadOriginalPrompt = $function:prompt
-    function global:prompt {
-        # Run the original prompt first, so it still sees the last command's $?.
-        $out = @(& $global:LaunchpadOriginalPrompt) -join ''
-        $loc = $ExecutionContext.SessionState.Path.CurrentLocation
-        if ($loc.Provider.Name -eq 'FileSystem') {
-            $out += "$([char]27)]9;9;$($loc.ProviderPath)$([char]27)\"
-        }
-        $out
-    }
-}
-```
+Afterwards herdr learns about a `cd` when the shell reports it. On Windows,
+Shell automatically adds cwd reporting for PowerShell (`pwsh` or `powershell`,
+including `.exe` names and full paths). The hook runs after your profile loads,
+preserves your existing prompt, and reports the folder at every prompt with
+the same OSC 9;9 sequence herdr's own PowerShell panes use. No profile changes
+are needed; the older `LaunchpadOriginalPrompt` profile workaround is also
+recognized. Other shells and configured tool commands need their own cwd
+reporting.
 
 On Windows, Launchpad ignores Ctrl+C while a tool runs; the tool still gets it.
 On Unix, Ctrl+\\ does not kill Launchpad. A tool without its own job control
