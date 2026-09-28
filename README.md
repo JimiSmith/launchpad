@@ -141,6 +141,21 @@ the focused pane's directory, and the chosen tool takes over that tab's pane
 (on Windows, Launchpad stays alive under it). Quit closes the tab. Without a
 key, run `herdr plugin action invoke launchpad.open`.
 
+To open a new workspace with Launchpad in its first and only tab, use
+`launchpad.open-workspace` instead. It focuses the new workspace and uses the
+same directory as the new-tab action. For example:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+w"
+type = "plugin_action"
+command = "launchpad.open-workspace"
+description = "launchpad in a new workspace"
+```
+
+After reloading the config, use the key or run
+`herdr plugin action invoke launchpad.open-workspace`.
+
 herdr has no plugin updates: run the install command again for a new version.
 `herdr plugin uninstall launchpad` removes the plugin and its copy of Launchpad.
 

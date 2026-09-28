@@ -58,7 +58,10 @@ impl Herdr {
                 .map_or_else(|| "herdr".into(), PathBuf::from),
             timeout: Duration::from_secs(5),
         };
-        host.origin().map_err(|e| e.to_string())?;
+        // The workspace action can move this pane during startup. Validate
+        // the caller context without reading a tab that the move may remove.
+        // Launching a tool reads its current tab through origin() later.
+        host.pane().map_err(|e| e.to_string())?;
         Ok(host)
     }
     fn call<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Failure> {
@@ -177,6 +180,33 @@ impl Herdr {
     /// Opens the plugin's Launchpad pane in a new, focused tab in `dir`.
     /// Without a directory herdr starts it in the plugin's own.
     pub fn open_plugin_tab(&self, plugin: &str, dir: Option<&Path>) -> Result<(), Failure> {
+        let pane = self.open_plugin_pane(plugin, dir, true)?;
+        // herdr 0.9 focuses the tab on the server but leaves attached
+        // clients showing the previous one until a tab is focused.
+        self.call::<serde_json::Value>(&["tab", "focus", &pane.tab_id])
+            .map(|_| ())
+    }
+    /// Moves a new plugin pane into the first and only tab of a new workspace.
+    pub fn open_plugin_workspace(&self, plugin: &str, dir: Option<&Path>) -> Result<(), Failure> {
+        #[derive(serde::Deserialize)]
+        struct Moved {
+            move_result: PaneReply,
+        }
+        // Moving the pane creates the workspace without a spare shell tab
+        // and removes the temporary tab. Keep it unfocused until it moves.
+        let pane = self.open_plugin_pane(plugin, dir, false)?;
+        let moved: Moved =
+            self.call(&["pane", "move", &pane.pane_id, "--new-workspace", "--focus"])?;
+        // Moving across workspaces changes both IDs; use the returned tab.
+        self.call::<serde_json::Value>(&["tab", "focus", &moved.move_result.pane.tab_id])
+            .map(|_| ())
+    }
+    fn open_plugin_pane(
+        &self,
+        plugin: &str,
+        dir: Option<&Path>,
+        focus: bool,
+    ) -> Result<Pane, Failure> {
         #[derive(serde::Deserialize)]
         struct Opened {
             plugin_pane: PaneReply,
@@ -191,17 +221,13 @@ impl Herdr {
             "launchpad",
             "--placement",
             "tab",
-            "--focus",
+            if focus { "--focus" } else { "--no-focus" },
         ];
         if let Some(dir) = dir.and_then(Path::to_str) {
             args.extend(["--cwd", dir]);
         }
         let opened: Opened = self.call(&args)?;
-        // herdr 0.9 focuses the tab on the server but leaves attached
-        // clients showing the previous one until a tab is focused.
-        let tab = opened.plugin_pane.pane.tab_id;
-        self.call::<serde_json::Value>(&["tab", "focus", &tab])
-            .map(|_| ())
+        Ok(opened.plugin_pane.pane)
     }
     /// Waits for the tool, passing on termination signals Launchpad receives,
     /// then closes this pane as Zellij's close-on-exit would.
@@ -218,9 +244,9 @@ impl Herdr {
     }
 }
 
-/// The herdr plugin's `open` action, run by herdr detached in the plugin's
+/// The herdr plugin's open actions, run by herdr detached in the plugin's
 /// directory with the plugin's environment.
-pub fn plugin_open_action() -> Result<(), String> {
+pub fn plugin_open_action(workspace: bool) -> Result<(), String> {
     let plugin = std::env::var("HERDR_PLUGIN_ID")
         .ok()
         .filter(|id| !id.is_empty())
@@ -234,8 +260,12 @@ pub fn plugin_open_action() -> Result<(), String> {
     let dir = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
         .ok()
         .and_then(|json| plugin_context_dir(&json));
-    host.open_plugin_tab(&plugin, dir.as_deref())
-        .map_err(|e| e.to_string())
+    if workspace {
+        host.open_plugin_workspace(&plugin, dir.as_deref())
+    } else {
+        host.open_plugin_tab(&plugin, dir.as_deref())
+    }
+    .map_err(|e| e.to_string())
 }
 /// The focused pane's directory from herdr's plugin invocation context,
 /// else the workspace's, if absolute.

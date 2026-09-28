@@ -1,5 +1,5 @@
 # herdr plugin: `herdr plugin install JimiSmith/launchpad` installs Launchpad
-# into this checkout's bin/ and adds an action that opens it in a new tab.
+# into this checkout's bin/ and adds actions for new tabs and workspaces.
 id = "launchpad"
 name = "Launchpad"
 # Keep aligned with the Cargo package versions: install downloads this release.
@@ -22,6 +22,11 @@ command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"
 id = "open"
 title = "Open Launchpad in a new tab"
 command = ["bin/launchpad", "--herdr-plugin-open"]
+
+[[actions]]
+id = "open-workspace"
+title = "Open Launchpad in a new workspace"
+command = ["bin/launchpad", "--herdr-plugin-open-workspace"]
 
 [[panes]]
 id = "launchpad"

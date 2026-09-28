@@ -27,6 +27,12 @@ fn plugin_action_opens_the_manifest_pane_with_launchpad() {
         entry("actions", "open")["command"].as_array().unwrap(),
         &["bin/launchpad", "--herdr-plugin-open"].map(toml::Value::from)
     );
+    assert_eq!(
+        entry("actions", "open-workspace")["command"]
+            .as_array()
+            .unwrap(),
+        &["bin/launchpad", "--herdr-plugin-open-workspace"].map(toml::Value::from)
+    );
     // Launchpad opens this entrypoint id.
     assert_eq!(
         entry("panes", "launchpad")["command"].as_array().unwrap(),
@@ -35,11 +41,13 @@ fn plugin_action_opens_the_manifest_pane_with_launchpad() {
 }
 #[test]
 fn plugin_action_needs_herdrs_plugin_environment() {
-    let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
-        .env_clear()
-        .arg("--herdr-plugin-open")
-        .output()
-        .unwrap();
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("HERDR_PLUGIN_ID is missing"));
+    for action in ["--herdr-plugin-open", "--herdr-plugin-open-workspace"] {
+        let result = Command::new(env!("CARGO_BIN_EXE_launchpad"))
+            .env_clear()
+            .arg(action)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("HERDR_PLUGIN_ID is missing"));
+    }
 }

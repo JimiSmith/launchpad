@@ -211,6 +211,96 @@ esac"#,
     );
 }
 #[test]
+fn workspace_action_moves_the_plugin_pane_and_focuses_its_new_tab() {
+    let f = Fixture::new("plugin-workspace");
+    f.replace(
+        r#"printf '%s|' "$@" >> "${0%/*}/calls"; echo >> "${0%/*}/calls"
+case "$1 $2" in
+"plugin pane") printf '%s\n' '{"result":{"plugin_pane":{"pane":{"pane_id":"w1:p9","tab_id":"w1:t4"}}}}';;
+"pane move") printf '%s\n' '{"result":{"move_result":{"pane":{"pane_id":"w8:p1","tab_id":"w8:t1"}}}}';;
+"tab focus") printf '%s\n' '{"result":{}}';;
+*) exit 1;;
+esac"#,
+    );
+    // Exercise the real action entrypoint and directory fallback, including
+    // characters that must remain literal CLI arguments.
+    let cwd = "/srv/a b;$HOME";
+    let context = serde_json::json!({"focused_pane_cwd": cwd, "workspace_cwd": "/srv"});
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_launchpad"))
+        .env_clear()
+        .env("HERDR_PLUGIN_ID", "launchpad")
+        .env("HERDR_BIN_PATH", f.root.join("herdr"))
+        .env("HERDR_PLUGIN_CONTEXT_JSON", context.to_string())
+        .arg("--herdr-plugin-open-workspace")
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    let open =
+        "plugin|pane|open|--plugin|launchpad|--entrypoint|launchpad|--placement|tab|--no-focus|";
+    // Like the new-tab action, leave the initial tab name to Herdr.
+    let moved = "pane|move|w1:p9|--new-workspace|--focus|";
+    let focus = "tab|focus|w8:t1|";
+    assert_eq!(
+        f.calls(),
+        [format!("{open}--cwd|{cwd}|"), moved.into(), focus.into()]
+    );
+    std::fs::remove_file(f.root.join("calls")).unwrap();
+    f.herdr().open_plugin_workspace("launchpad", None).unwrap();
+    assert_eq!(f.calls(), [open, moved, focus]);
+}
+#[test]
+fn workspace_action_stops_on_failure_without_retrying_or_closing_panes() {
+    for stage in ["plugin", "pane", "tab"] {
+        let f = Fixture::new(&format!("plugin-workspace-fail-{stage}"));
+        f.replace(&format!(
+            r#"printf '%s|' "$@" >> "${{0%/*}}/calls"; echo >> "${{0%/*}}/calls"
+if [ "$1" = "{stage}" ]; then
+    printf '%s\n' '{{"error":{{"message":"fixture rejection"}}}}' >&2; exit 1
+fi
+case "$1" in
+plugin) printf '%s\n' '{{"result":{{"plugin_pane":{{"pane":{{"pane_id":"w1:p9","tab_id":"w1:t4"}}}}}}}}';;
+pane) printf '%s\n' '{{"result":{{"move_result":{{"pane":{{"pane_id":"w8:p1","tab_id":"w8:t1"}}}}}}}}';;
+esac"#
+        ));
+        let error = f
+            .herdr()
+            .open_plugin_workspace("launchpad", None)
+            .unwrap_err();
+        assert!(matches!(error, Failure::Rejected(_)), "{error:?}");
+        assert!(error.to_string().contains("fixture rejection"));
+        let expected = match stage {
+            "plugin" => 1,
+            "pane" => 2,
+            _ => 3,
+        };
+        assert_eq!(f.calls().len(), expected);
+        assert!(f.calls().iter().all(|call| !call.contains("|close|")));
+    }
+}
+#[test]
+fn startup_does_not_read_a_temporary_tab_that_may_be_removed_by_a_move() {
+    let f = Fixture::new("plugin-workspace-startup");
+    f.replace(
+        r#"printf '%s|' "$@" >> "${0%/*}/calls"; echo >> "${0%/*}/calls"
+if [ "$1 $2" = "pane current" ]; then
+    printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p9","tab_id":"w1:t4"}}}'
+else
+    printf '%s\n' '{"error":{"message":"temporary tab removed"}}' >&2; exit 1
+fi"#,
+    );
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_launchpad"))
+        .env_clear()
+        .env("HERDR_ENV", "1")
+        .env("HERDR_PANE_ID", "w1:p9")
+        .env("HERDR_BIN_PATH", f.root.join("herdr"))
+        .output()
+        .unwrap();
+    // Host discovery succeeds; this noninteractive subprocess stops at the
+    // terminal check instead of looking up the now-removed temporary tab.
+    assert!(String::from_utf8_lossy(&result.stderr).contains("interactive terminal"));
+    assert_eq!(f.calls(), ["pane|current|--current|"]);
+}
+#[test]
 fn rename_that_does_not_stick_is_rejected() {
     let f = Fixture::new("stuck");
     std::fs::write(f.root.join("stuck"), "").unwrap();

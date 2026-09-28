@@ -42,6 +42,9 @@ struct Args {
     /// The herdr plugin's `open` action; not a user-facing launch mode.
     #[arg(long, hide = true)]
     herdr_plugin_open: bool,
+    /// The herdr plugin's `open-workspace` action.
+    #[arg(long, hide = true, conflicts_with = "herdr_plugin_open")]
+    herdr_plugin_open_workspace: bool,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ShellHandoff {
@@ -83,8 +86,8 @@ fn run(args: Args) -> Result<(), String> {
     unsafe {
         libc::signal(libc::SIGCHLD, libc::SIG_DFL)
     };
-    if args.herdr_plugin_open {
-        return launchpad::herdr::plugin_open_action();
+    if args.herdr_plugin_open || args.herdr_plugin_open_workspace {
+        return launchpad::herdr::plugin_open_action(args.herdr_plugin_open_workspace);
     }
     let host = Host::discover(
         args.host
