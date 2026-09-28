@@ -110,7 +110,29 @@ impl Host {
             Self::Herdr(host) => host.rename(tab_id, name),
         }
     }
+    /// Names the tab after a launch, or keeps its name when `enabled` is
+    /// off, and returns the attempted name for `restore_name`.
+    pub fn name_tab(
+        &self,
+        original: &Origin,
+        path: &str,
+        label: &str,
+        enabled: bool,
+    ) -> Result<String, Failure> {
+        if !enabled {
+            return Ok(original.tab_name.clone());
+        }
+        let name = tab_name(path, label);
+        if let Err(error) = self.rename(&original.tab_id, &name) {
+            let _ = self.restore_name(original, &name);
+            return Err(error);
+        }
+        Ok(name)
+    }
     pub fn restore_name(&self, original: &Origin, attempted: &str) -> Result<(), Failure> {
+        if attempted == original.tab_name {
+            return Ok(());
+        }
         let now = self.origin()?;
         if now.tab_id == original.tab_id && now.tab_name == attempted {
             self.rename(&original.tab_id, &original.tab_name)?;

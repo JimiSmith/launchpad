@@ -4,7 +4,7 @@ A native directory-and-tool dashboard for Zellij and [herdr](https://herdr.dev).
 Fuzzy-find a directory, choose Shell or a configured command, and run that tool
 in the dashboard's pane: Zellij replaces the pane; under herdr Launchpad runs the
 tool itself (see [herdr](#herdr)). Launchpad names the originating tab
-`directory · command label`; tool panes close on exit without returning to the
+`directory · command label` (see `auto_name_tabs`); tool panes close on exit without returning to the
 dashboard.
 
 Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**, or inside
@@ -72,7 +72,7 @@ launchpad
 
 herdr cannot replace a pane in place, so Launchpad starts the chosen tool
 itself, in the same pane and the chosen directory. The tab is renamed
-`directory · command label` as in Zellij.
+`directory · command label` as in Zellij, unless `auto_name_tabs = false`.
 
 - When Launchpad is the pane's own program, as in the setups below, on Linux and
   macOS it replaces itself with the tool, as `exec` does. herdr then treats the
@@ -217,6 +217,7 @@ An explicit missing file, unreadable file, or malformed TOML is a startup error.
 ```toml
 ignore = ["/home/james/cache", "/home/james/old-projects"]
 default_shell = "/usr/bin/fish"  # optional; see below
+auto_name_tabs = true  # optional; see below
 
 [[commands]]
 id = "claude"
@@ -250,6 +251,8 @@ Shell stays first. `default_shell` is the executable Shell runs, a name or
 path without arguments. Unset, Shell uses Zellij's configured default shell, or
 under herdr the detected shell (see [herdr](#herdr)). Commands follow file
 order; the first duplicate ID wins.
+`auto_name_tabs` (default `true`) renames the tab to `directory · tool` on
+launch; `false` leaves the tab's name alone.
 Labels default to IDs. Invalid individual definitions are skipped with a visible
 error, while valid commands stay usable. F1 lists all configuration errors.
 The interface uses open sections with dimmed inactive content and a compact

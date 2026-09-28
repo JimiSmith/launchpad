@@ -18,6 +18,8 @@ pub struct Config {
     ignore: Vec<toml::Value>,
     /// Shell's executable; unset means the host's default shell.
     default_shell: Option<toml::Value>,
+    /// Rename the tab after the launched directory and tool; unset means true.
+    auto_name_tabs: Option<toml::Value>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +50,13 @@ impl Config {
         }
         toml::from_str(&text).map_err(|e| format!("Invalid config {}: {e}", path.display()))
     }
+    /// Whether launches rename their tab; an invalid value keeps the default.
+    pub fn auto_name_tabs(&self) -> bool {
+        self.auto_name_tabs
+            .as_ref()
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true)
+    }
     /// Apply UI settings and return validated exclusions for the search worker.
     pub fn apply(self, app: &mut App) -> Vec<String> {
         let mut ignore = Vec::new();
@@ -72,6 +81,15 @@ impl Config {
                     "default_shell: require an executable of at most 4096 bytes without controls; using the default shell".into(),
                 ),
             }
+        }
+        if self
+            .auto_name_tabs
+            .as_ref()
+            .is_some_and(|v| v.as_bool().is_none())
+        {
+            commands
+                .errors
+                .push("auto_name_tabs: require true or false; naming tabs".into());
         }
         let mut seen = HashSet::new();
         for value in self.commands {

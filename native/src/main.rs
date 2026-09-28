@@ -3,7 +3,7 @@ use crossterm::event::{self, Event, MouseButton, MouseEventKind};
 use launchpad::{
     config::{Config, xdg_path},
     history::{self, Entry, Store},
-    host::{Failure, Forward, Host, Kind, Launched, Origin, tab_name},
+    host::{Failure, Forward, Host, Kind, Launched, Origin},
     input,
     search::SearchScheduler,
     terminal::Screen,
@@ -125,6 +125,7 @@ fn run(args: Args) -> Result<(), String> {
         .map_or(args.config.is_some(), |h| h.explicit_config);
     let config = Config::load(&config_path, explicit_config)?;
     let mut app = App::from_remote(home.clone());
+    let auto_name_tabs = config.auto_name_tabs();
     let ignore = config.apply(&mut app);
     app.set_initial_cwd(cwd.clone());
     let root = xdg_path("XDG_STATE_HOME", ".local/state", &home);
@@ -246,14 +247,16 @@ fn run(args: Args) -> Result<(), String> {
                     continue;
                 }
             };
-            let name = tab_name(&launch.path, &command.label);
-            if let Err(error) = host.rename(&original.tab_id, &name) {
-                let _ = host.restore_name(&original, &name);
-                app.launch_rejected();
-                app.message = Some(error.to_string());
-                dirty = true;
-                continue;
-            }
+            let name = match host.name_tab(&original, &launch.path, &command.label, auto_name_tabs)
+            {
+                Ok(name) => name,
+                Err(error) => {
+                    app.launch_rejected();
+                    app.message = Some(error.to_string());
+                    dirty = true;
+                    continue;
+                }
+            };
             let attempt = history.record(&launch);
             // herdr runs its default shell directly; see Host::launch.
             if command.executable.is_none() && host.kind() == Kind::Zellij {

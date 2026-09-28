@@ -35,7 +35,7 @@ class Screen(pyte.Screen):
 
 class Session:
     def __init__(self, floating=False, probe=False, only=False, outside=False, interactive=False,
-                 shortcuts=False):
+                 shortcuts=False, auto_name_tabs=True):
         self.name = 'native-' + uuid.uuid4().hex[:8]
         self.out = ROOT / 'target' / self.name
         for name in ['home', 'bin', 'cache', 'config', 'data', 'state', 'runtime', 'sock']:
@@ -77,6 +77,8 @@ arguments = ["a b", "", "$HOME", ";", "$(touch NO_EXPANSION)"]
 id = "missing"
 executable = "missing"
 ''')
+        if not auto_name_tabs:
+            native_config.write_text('auto_name_tabs = false\n' + native_config.read_text())
         if shortcuts:
             self.keyboard_fixture('keys')
             with native_config.open('a') as f:
@@ -277,10 +279,11 @@ def probe():
             s.close()
 
 
-def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True), ('Fixture', True), ('missing', False))):
+def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True), ('Fixture', True), ('missing', False)),
+           auto_name_tabs=True):
     for floating in floating_modes:
         for selected, changed in cases:
-            s = Session(floating=floating)
+            s = Session(floating=floating, auto_name_tabs=auto_name_tabs)
             try:
                 s.wait_indexed()
                 origin = next(p for p in s.panes() if p['title'] == 'launchpad')
@@ -298,7 +301,7 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                 if selected == 'missing':
                     s.cli('action', 'focus-pane-id', str(origin['id']))
                     s.expect('Zellij did not create')
-                    assert any(p['id'] == origin['id'] for p in s.panes())
+                    assert any(p['id'] == origin['id'] and p['tab_name'] == origin['tab_name'] for p in s.panes())
                     assert not list((s.out / 'state/launchpad/history.d').glob('*.json'))
                     s.fixture('missing')
                     s.send('\r')
@@ -310,7 +313,8 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                 assert any(p['id'] == neighbor['id'] for p in after)
                 launched = next(p for p in after if p['id'] != neighbor['id'] and not p['is_plugin'])
                 assert launched['is_floating'] == floating
-                assert launched['tab_name'] == target.name + ' · ' + selected, launched
+                named = target.name + ' · ' + selected if auto_name_tabs else origin['tab_name']
+                assert launched['tab_name'] == named, launched
                 record = next(r for r in s.records() if r['exe'] == executable)
                 assert record['cwd'] == str(target), record
                 if selected == 'Fixture':
@@ -321,7 +325,8 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                 s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit ' + ('17' if floating else '0') + '\n')
                 s.pump(.4)
                 assert [p['id'] for p in s.panes() if not p['is_plugin']] == [neighbor['id']]
-                print('PASS native', selected, 'changed-cwd' if changed else 'initial-cwd', 'floating' if floating else 'tiled', s.out, flush=True)
+                print('PASS native', selected, 'changed-cwd' if changed else 'initial-cwd', 'floating' if floating else 'tiled',
+                      '' if auto_name_tabs else 'unnamed', s.out, flush=True)
             finally:
                 s.close()
 
@@ -361,8 +366,8 @@ def interactive_shell_history_cases():
                 s.close()
 
 
-def recovery_cases():
-    s = Session()
+def default_shell_rejection_case(auto_name_tabs):
+    s = Session(auto_name_tabs=auto_name_tabs)
     try:
         s.wait_indexed()
         (s.out / 'bin/default-shell').unlink()
@@ -375,9 +380,17 @@ def recovery_cases():
         s.send('\r')
         s.wait_record('default-shell', str(s.cwd))
         s.expect('FIXTURE_READY')
-        print('PASS default-shell rejection rollback and explicit retry', flush=True)
+        if not auto_name_tabs:
+            assert all(p['tab_name'] == 'Tab #1' for p in s.panes() if not p['is_plugin'])
+        print('PASS default-shell rejection rollback and explicit retry',
+              '' if auto_name_tabs else 'unnamed', flush=True)
     finally:
         s.close()
+
+
+def recovery_cases():
+    for auto_name_tabs in [True, False]:
+        default_shell_rejection_case(auto_name_tabs)
     s = Session()
     try:
         s.wait_indexed()
@@ -728,6 +741,8 @@ if __name__ == '__main__':
         focus_colours_case()
         live_path_editing_case()
         native()
+        native(floating_modes=(False,), cases=(('Shell', False), ('Fixture', True), ('missing', False)),
+               auto_name_tabs=False)
         interactive_shell_history_cases()
         recovery_cases()
         history_and_layout_cases()

@@ -13,7 +13,8 @@ Zellij >= 0.45.0. Every CLI action explicitly selects `ZELLIJ_SESSION_NAME`.
 
 The adapter reads `zellij action list-panes --json` and selects its own terminal
 ID, never a focused pane. Before launching it resolves the current stable tab ID,
-renames that tab `basename · label`, and reads the name back. Missing identity or
+renames that tab `basename · label` (unless `auto_name_tabs = false`), and
+reads the name back. Missing identity or
 failed rename leaves the form with an error.
 
 Configured tools use separate process arguments:
@@ -83,7 +84,8 @@ falling back to `herdr` on PATH. On Unix each call runs in its own process
 group, so hanging up this pane cannot kill a call before herdr replies. It
 resolves its own pane with `herdr pane current --current`, which reads the
 inherited `HERDR_PANE_ID`, never the focused pane. It reads the tab label with
-`herdr tab get`, renames it with `herdr tab rename TAB LABEL` and reads it back.
+`herdr tab get` and, unless `auto_name_tabs = false`, renames it with
+`herdr tab rename TAB LABEL` and reads it back.
 herdr keeps a `--` separator as part of the label, so none is passed; hyphenated
 labels are accepted as-is.
 

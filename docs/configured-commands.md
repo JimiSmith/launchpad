@@ -32,6 +32,9 @@ optional `arguments` (a string array). Shell is always first; `shell` is reserve
 The top-level `default_shell` string sets Shell's executable, with the same
 rules as a command's `executable` and no arguments. An invalid value is a visible
 configuration error and leaves the host default in place.
+The top-level `auto_name_tabs` boolean (default `true`) controls whether a
+launch renames its tab to `directory · tool`. A non-boolean value is a visible
+configuration error and keeps naming on.
 Labels default to IDs and arguments default to an empty array. First duplicate
 ID wins; at most 64 unique configured IDs are accepted.
 

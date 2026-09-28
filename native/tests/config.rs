@@ -193,3 +193,26 @@ fn default_shell_becomes_shells_executable_and_bad_values_are_reported() {
         assert!(errors[0].starts_with("default_shell:"), "{bad}: {errors:?}");
     }
 }
+
+#[test]
+fn auto_name_tabs_defaults_to_true_and_bad_values_are_reported() {
+    let names = |text: &str| {
+        let config = toml::from_str::<Config>(text).unwrap();
+        let enabled = config.auto_name_tabs();
+        let mut app = App::default();
+        config.apply(&mut app);
+        (enabled, app.commands.errors)
+    };
+    assert_eq!(names(""), (true, vec![]));
+    assert_eq!(names("auto_name_tabs = true"), (true, vec![]));
+    assert_eq!(names("auto_name_tabs = false"), (false, vec![]));
+    for bad in ["auto_name_tabs = 'no'", "auto_name_tabs = 0"] {
+        let (enabled, errors) = names(bad);
+        assert!(enabled, "{bad}");
+        assert!(
+            errors[0].starts_with("auto_name_tabs:"),
+            "{bad}: {errors:?}"
+        );
+    }
+    assert!(Config::default().auto_name_tabs());
+}

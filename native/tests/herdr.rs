@@ -1,7 +1,7 @@
 #![cfg(unix)]
 use launchpad::{
     herdr::Herdr,
-    host::{Failure, Forward, Host, Launched},
+    host::{Failure, Forward, Host, Launched, Origin},
 };
 use launchpad_core::commands::{Command, Tool};
 use std::{path::PathBuf, time::Duration};
@@ -19,6 +19,7 @@ case "$1 $2" in
 "pane current") printf '%s\n' '{"id":"x","result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t3"},"type":"pane_current"}}';;
 "tab get") printf '{"id":"x","result":{"tab":{"label":"%s","tab_id":"w1:t3"},"type":"tab_info"}}\n' "$label";;
 "tab rename") [ -f "$dir/stuck" ] || printf '%s' "$4" > "$dir/label"
+    [ -f "$dir/fail-once" ] && { rm "$dir/fail-once"; printf '%s\n' '{"error":{"code":"lost","message":"reply lost"}}' >&2; exit 1; }
     printf '%s\n' '{"id":"x","result":{"type":"ok"}}';;
 "pane process-info") printf '{"id":"x","result":{"process_info":{"pane_id":"w1:p2","shell_pid":%s}}}\n' "$(cat "$dir/root" 2>/dev/null || echo 1)";;
 "pane close") [ -f "$dir/gone" ] && { printf '%s\n' '{"error":{"code":"pane_not_found","message":"pane w1:p2 not found"}}' >&2; exit 1; }
@@ -100,6 +101,85 @@ fn rename_passes_hyphenated_labels_verbatim_and_reads_them_back() {
         f.calls()
             .contains(&"tab|rename|w1:t3|-x · Shell|".to_string())
     );
+}
+fn renames(f: &Fixture) -> Vec<String> {
+    f.calls()
+        .into_iter()
+        .filter(|c| c.starts_with("tab|rename|"))
+        .collect()
+}
+#[test]
+fn name_tab_renames_only_when_enabled() {
+    let f = Fixture::new("name-tab");
+    let host = f.host();
+    let original = host.origin().unwrap();
+    let kept = host
+        .name_tab(&original, "/home/ada/notes", "Fixture", false)
+        .unwrap();
+    assert_eq!(kept, "Own");
+    assert!(renames(&f).is_empty());
+    // Restoring an unchanged name makes no host calls at all.
+    let before = f.calls().len();
+    host.restore_name(&original, &kept).unwrap();
+    assert_eq!(f.calls().len(), before);
+    let named = host
+        .name_tab(&original, "/home/ada/notes", "Fixture", true)
+        .unwrap();
+    assert_eq!(named, "notes · Fixture");
+    assert_eq!(renames(&f), ["tab|rename|w1:t3|notes · Fixture|"]);
+}
+#[test]
+fn a_rename_that_does_not_stick_rejects_the_launch_name() {
+    let f = Fixture::new("name-tab-stuck");
+    std::fs::write(f.root.join("stuck"), "").unwrap();
+    let host = f.host();
+    let original = host.origin().unwrap();
+    let result = host.name_tab(&original, "/home/ada/notes", "Fixture", true);
+    assert!(matches!(result, Err(Failure::Rejected(_))), "{result:?}");
+    // The tab still shows its own name, so nothing is renamed back.
+    assert_eq!(renames(&f), ["tab|rename|w1:t3|notes · Fixture|"]);
+}
+#[test]
+fn a_rename_that_applies_but_fails_is_rolled_back() {
+    let f = Fixture::new("name-tab-rollback");
+    std::fs::write(f.root.join("fail-once"), "").unwrap();
+    let host = f.host();
+    let original = host.origin().unwrap();
+    let result = host.name_tab(&original, "/home/ada/notes", "Fixture", true);
+    assert!(
+        matches!(&result, Err(Failure::Rejected(m)) if m.contains("reply lost")),
+        "{result:?}"
+    );
+    assert_eq!(
+        renames(&f),
+        ["tab|rename|w1:t3|notes · Fixture|", "tab|rename|w1:t3|Own|"]
+    );
+    assert_eq!(host.origin().unwrap().tab_name, "Own");
+}
+#[test]
+fn restore_name_undoes_only_the_attempted_name() {
+    let f = Fixture::new("restore");
+    let host = f.host();
+    let original = Origin {
+        tab_id: "w1:t3".into(),
+        tab_name: "Own".into(),
+    };
+    // A different tab now shows the attempted name: not ours to restore.
+    std::fs::write(f.root.join("label"), "notes · Fixture").unwrap();
+    let moved = Origin {
+        tab_id: "w1:t9".into(),
+        ..original.clone()
+    };
+    host.restore_name(&moved, "notes · Fixture").unwrap();
+    assert!(renames(&f).is_empty());
+    // Someone renamed the tab since: leave their name alone.
+    std::fs::write(f.root.join("label"), "Theirs").unwrap();
+    host.restore_name(&original, "notes · Fixture").unwrap();
+    assert!(renames(&f).is_empty());
+    std::fs::write(f.root.join("label"), "notes · Fixture").unwrap();
+    host.restore_name(&original, "notes · Fixture").unwrap();
+    assert_eq!(renames(&f), ["tab|rename|w1:t3|Own|"]);
+    assert_eq!(host.origin().unwrap().tab_name, "Own");
 }
 #[test]
 fn plugin_action_opens_a_focused_tab_in_the_given_directory() {
