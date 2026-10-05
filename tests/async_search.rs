@@ -238,6 +238,7 @@ fn cancelling_delayed_validation_clears_status_and_restores_search() {
         for action in [
             Action::Focus(Focus::Tools),
             Action::Focus(Focus::History),
+            Action::Up,
             Action::Down,
             Action::SelectTool(Tool::new("codex").unwrap()),
             Action::Text("x".into()),
@@ -408,12 +409,12 @@ fn tab_cycles_sections_without_selecting_a_suggestion() {
     app.take_remote_request();
     app.apply_remote_results(0, vec!["/home/example/a".into(), "/home/example/b".into()]);
     app.update(Action::Tab);
-    assert_eq!(app.focus, launchpad_core::app::Focus::Tools);
+    assert_eq!(app.focus, launchpad_core::app::Focus::History);
     assert!(app.take_remote_request().is_none());
     app.update(Action::Tab);
-    assert_eq!(app.focus, launchpad_core::app::Focus::History);
-    app.update(Action::BackTab);
     assert_eq!(app.focus, launchpad_core::app::Focus::Tools);
+    app.update(Action::BackTab);
+    assert_eq!(app.focus, launchpad_core::app::Focus::History);
 }
 
 #[test]
@@ -456,7 +457,7 @@ fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
     });
     app.take_remote_request();
     app.update(Action::Focus(Focus::History));
-    app.update(Action::Tab);
+    app.update(Action::BackTab);
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(app.editor.text, "~/saved");
     assert!(!app.apply_remote_results(0, vec!["/home/example/late".into()]));

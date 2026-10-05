@@ -270,7 +270,9 @@ order; the first duplicate ID wins.
 launch; `false` leaves the tab's name alone.
 Labels default to IDs. Invalid individual definitions are skipped with a visible
 error, while valid commands stay usable. F1 lists all configuration errors.
-The interface uses open sections with dimmed inactive content and a compact
+The interface places Tool first in its own bordered group, above a Directory
+group containing the input and Saved / Recent. The focused group has an accent
+border; inactive content is dimmed. Selections use an underline, with a compact
 contextual footer. F1 opens the keys screen: every control, configured
 shortcuts, search status and configuration errors.
 Colours default to Catppuccin Macchiato over the terminal background; invalid
@@ -303,7 +305,7 @@ fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
   Separators are `/` on Unix and both `/` and `\` for Windows home paths.
   Spaces and punctuation within a segment stay together; edits do not normalize
   paths. No text selection is performed.
-- Tab / Shift+Tab cycles forward / backward through path, tools, and Saved / Recent.
+- Tab / Shift+Tab cycles forward / backward through tools, path, and Saved / Recent.
   Type a fuzzy query; arrows select suggestions and Enter accepts.
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.

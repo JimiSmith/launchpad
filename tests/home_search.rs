@@ -621,7 +621,7 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
     app.update(Action::Enter); // ~ validates without needing an indexed candidate
     assert_eq!(app.history.len(), 1);
     app.update(Action::Focus(Focus::History));
-    app.update(Action::Tab);
+    app.update(Action::BackTab);
     assert_eq!(app.focus, Focus::Path);
     app.index_tick();
     assert!(

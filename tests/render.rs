@@ -78,12 +78,12 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     a.update(Action::Clear);
     a.update(Action::Text("~/Projects/修理".into()));
     let b = draw(&a, 80, 24);
-    // Path begins at x=4, y=4; ASCII prefix takes eleven cells.
-    assert_eq!(b[(15, 4)].symbol(), "修");
-    assert_eq!(b[(16, 4)].symbol(), " ");
-    assert_eq!(b[(17, 4)].symbol(), "理");
-    assert_eq!(b[(77, 5)].symbol(), "─");
-    assert_eq!(b[(77, 5)].fg, theme::Theme::default().accent);
+    let (x, y) = label_position(&b, "› ~/Projects/");
+    assert_eq!(b[(x + 13, y)].symbol(), "修");
+    assert_eq!(b[(x + 14, y)].symbol(), " ");
+    assert_eq!(b[(x + 15, y)].symbol(), "理");
+    assert_eq!(b[(77, y)].symbol(), "│");
+    assert_eq!(b[(77, y)].fg, theme::Theme::default().accent);
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
         a.update(Action::Clear);
         a.update(Action::Text("👩🏽‍💻e\u{301}修理/".repeat(50)));
@@ -174,7 +174,7 @@ fn recent_rows_show_only_the_directory() {
             })
             .unwrap();
         let row: String = (0..w).map(|x| b[(x, y)].symbol()).collect();
-        assert_eq!(row.trim(), "~/recent");
+        assert_eq!(row.trim().trim_matches('│').trim(), "~/recent");
     }
 }
 
@@ -188,101 +188,54 @@ fn minimum_usable_view_keeps_selected_history_visible() {
     assert!(s.contains("literal"), "{s}");
 }
 #[test]
-fn minimal_dashboard_separates_sections_and_dims_inactive_content() {
+fn dashboard_groups_tool_above_directories_and_dims_inactive_content() {
     use ratatui::style::Modifier;
+    let theme = theme::Theme::default();
     for focus in [Focus::Path, Focus::Tools, Focus::History] {
         let mut a = app();
         a.focus = focus;
-        for (w, h) in [(80, 24), (120, 36)] {
+        for (w, h) in [(40, 10), (40, 12), (80, 24), (120, 36)] {
             let b = draw(&a, w, h);
-            let rendered = text(&b);
-            for label in [
-                "Launchpad",
-                "Directory",
-                "Tool",
-                "Recent",
-                "Launch ↵",
-                "F1 help",
+            let (tool_x, tool_y) = label_position(&b, "Tool");
+            let (dir_x, dir_y) = label_position(&b, "Directory");
+            let (list_x, list_y) = label_position(&b, "Saved / Recent");
+            assert!(tool_y < dir_y && dir_y < list_y);
+            assert_eq!(tool_x, dir_x);
+            for (x, y, active) in [
+                (tool_x, tool_y, focus == Focus::Tools),
+                (dir_x, dir_y, focus != Focus::Tools),
             ] {
-                assert!(rendered.contains(label), "{w}x{h}: {label}");
-            }
-            for removed in [
-                "01 Directory",
-                "Launch with",
-                " events",
-                "2d ago",
-                "WHEN",
-                "HOME /",
-            ] {
-                assert!(!rendered.contains(removed), "{removed}");
-            }
-            let heading = |label: &str| {
-                (0..h)
-                    .find_map(|y| {
-                        (0..w)
-                            .find(|&x| {
-                                (x..w)
-                                    .map(|c| b[(c, y)].symbol())
-                                    .collect::<String>()
-                                    .starts_with(label)
-                            })
-                            .map(|x| (x, y))
-                    })
-                    .unwrap()
-            };
-            for (label, active) in [("Directory", Focus::Path), ("Tool", Focus::Tools)] {
-                let (x, y) = heading(label);
-                let theme = theme::Theme::default();
+                assert_eq!(b[(x - 2, y)].symbol(), "╭");
                 assert_eq!(
-                    b[(x, y)].fg,
-                    if focus == active {
-                        theme.accent
-                    } else {
-                        theme.inactive(theme.muted)
-                    }
+                    b[(x - 2, y)].fg,
+                    if active { theme.accent } else { theme.border }
                 );
-                assert!(!b[(x, y + 1)].modifier.contains(Modifier::DIM));
-                assert!(
-                    (0..w).all(|x| b[(x, y - 1)].symbol() == " "),
-                    "blank row above {label}"
-                );
+                assert_eq!(b[(x - 2, y + 1)].symbol(), "│");
             }
-            let selected = b
-                .content
-                .iter()
-                .find(|c| c.symbol() == "S" && c.modifier.contains(Modifier::UNDERLINED))
-                .unwrap();
-            let theme = theme::Theme::default();
+            let (x, y) = label_position(&b, "Shell");
+            assert!(b[(x, y)].modifier.contains(Modifier::UNDERLINED));
             assert_eq!(
-                selected.fg,
+                b[(x, y)].fg,
                 if focus == Focus::Tools {
                     theme.accent
                 } else {
                     theme.inactive(theme.accent)
                 }
             );
-            // Check actual text colours, not just the section labels or SGR flags.
-            let (x, y) = heading("Directory");
+            assert_eq!(b[(list_x, list_y + 1)].symbol(), "~");
             assert_eq!(
-                b[(x + 2, y + 1)].fg,
+                b[(list_x, list_y + 1)]
+                    .modifier
+                    .contains(Modifier::UNDERLINED),
+                focus == Focus::History
+            );
+            let (x, y) = label_position(&b, "› notes");
+            assert_eq!(
+                b[(x + 2, y)].fg,
                 if focus == Focus::Path {
                     theme.text
                 } else {
-                    ratatui::style::Color::Rgb(131, 137, 159)
-                }
-            );
-            let (x, y) = heading("Saved / Recent");
-            assert_eq!(b[(x, y + 1)].symbol(), "~");
-            assert_eq!(
-                b[(x, y + 1)].modifier.contains(Modifier::UNDERLINED),
-                focus == Focus::History
-            );
-            assert_eq!(
-                b[(x, y + 1)].fg,
-                if focus == Focus::History {
-                    theme.accent
-                } else {
-                    ratatui::style::Color::Rgb(131, 137, 159)
+                    theme.inactive(theme.text)
                 }
             );
             assert!(
@@ -293,6 +246,21 @@ fn minimal_dashboard_separates_sections_and_dims_inactive_content() {
         }
     }
 }
+fn label_position(buffer: &Buffer, label: &str) -> (u16, u16) {
+    (0..buffer.area.height)
+        .find_map(|y| {
+            (0..buffer.area.width)
+                .find(|&x| {
+                    (x..buffer.area.width)
+                        .map(|c| buffer[(c, y)].symbol())
+                        .collect::<String>()
+                        .starts_with(label)
+                })
+                .map(|x| (x, y))
+        })
+        .unwrap_or_else(|| panic!("missing {label}"))
+}
+
 #[test]
 fn narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls() {
     let mut a = app();
@@ -390,15 +358,7 @@ fn saved_rows_use_full_width_and_scroll_at_small_sizes() {
 
 fn assert_list_selection(buffer: &Buffer, saved: bool) {
     use ratatui::style::Modifier;
-    let area = buffer.area;
-    let (x, y) = (area.y..area.bottom())
-        .find_map(|y| {
-            let line: String = (area.x..area.right())
-                .map(|x| buffer[(x, y)].symbol())
-                .collect();
-            line.find("Saved / Recent").map(|x| (x as u16, y))
-        })
-        .expect("Saved / Recent heading");
+    let (x, y) = label_position(buffer, "Saved / Recent");
     for offset in 0..14 {
         let selected = if offset < 5 {
             saved

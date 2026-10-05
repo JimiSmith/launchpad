@@ -491,7 +491,7 @@ impl App {
             Action::Focus(focus) => *focus != self.focus,
             Action::PathCursor(_) => self.focus != Focus::Path,
             Action::Left | Action::Right => self.focus != Focus::Path,
-            Action::Up => self.focus != Focus::Path,
+            Action::Up => self.focus != Focus::Path || self.suggestions.is_empty(),
             Action::Down => self.focus != Focus::Path || self.suggestions.is_empty(),
             Action::Home | Action::End => self.focus == Focus::History,
             Action::SelectTool(_)
@@ -655,12 +655,12 @@ impl App {
         }
         if matches!(action, Action::Tab | Action::BackTab) {
             self.focus = match (self.focus, action) {
-                (Focus::Path, Action::Tab) => Focus::Tools,
-                (Focus::Tools, Action::Tab) => Focus::History,
-                (Focus::History, Action::Tab) => Focus::Path,
-                (Focus::Path, Action::BackTab) => Focus::History,
-                (Focus::Tools, Action::BackTab) => Focus::Path,
-                (Focus::History, Action::BackTab) => Focus::Tools,
+                (Focus::Tools, Action::Tab) => Focus::Path,
+                (Focus::Path, Action::Tab) => Focus::History,
+                (Focus::History, Action::Tab) => Focus::Tools,
+                (Focus::Tools, Action::BackTab) => Focus::History,
+                (Focus::Path, Action::BackTab) => Focus::Tools,
+                (Focus::History, Action::BackTab) => Focus::Path,
                 _ => unreachable!("only Tab actions reach this branch"),
             };
             self.sync_recent();
@@ -826,7 +826,11 @@ impl App {
                             (i + if down { 1 } else { n - 1 }) % n
                         }));
                 }
-                Action::Down => self.focus = Focus::Tools,
+                Action::Up => self.focus = Focus::Tools,
+                Action::Down => {
+                    self.focus = Focus::History;
+                    self.sync_recent();
+                }
                 Action::Enter => {
                     if let Some(&index) = self.highlighted.and_then(|i| self.suggestions.get(i)) {
                         self.accept(index);
@@ -848,11 +852,7 @@ impl App {
                     self.touched = true;
                     self.message = None;
                 }
-                Action::Up => self.focus = Focus::Path,
-                Action::Down => {
-                    self.focus = Focus::History;
-                    self.sync_recent();
-                }
+                Action::Down => self.focus = Focus::Path,
                 Action::Enter => self.launch(self.editor.text.clone(), self.tool),
                 _ => {}
             },
@@ -1431,7 +1431,7 @@ mod tests {
                 .as_ref()
                 .is_some_and(|m| m.contains("retired is unavailable"))
         );
-        a.update(Action::Tab);
+        a.update(Action::BackTab);
         assert_eq!(a.focus, Focus::Path);
         assert_eq!(a.editor.text, "~/Projects/notes");
         assert_eq!(
@@ -1476,24 +1476,26 @@ mod tests {
             &mut a,
             &["/home/example/Projects/notes", "/home/example/notes"],
         );
-        a.update(Action::Tab);
-        assert_eq!(a.focus, Focus::Tools);
-        a.update(Action::Tab);
-        assert_eq!(a.focus, Focus::History);
-        a.update(Action::BackTab);
-        assert_eq!(a.focus, Focus::Tools);
-        a.update(Action::BackTab);
-        assert_eq!(a.focus, Focus::Path);
+        for expected in [Focus::History, Focus::Tools, Focus::Path] {
+            a.update(Action::Tab);
+            assert_eq!(a.focus, expected);
+        }
+        for expected in [Focus::Tools, Focus::History, Focus::Path] {
+            a.update(Action::BackTab);
+            assert_eq!(a.focus, expected);
+        }
         assert_eq!(a.editor.text, "notes", "Tab does not alter the path");
 
         a.update(Action::Down);
         a.update(Action::Down);
         assert_eq!(a.focus, Focus::Path, "Down cycles suggestions, not focus");
         a.update(Action::Escape);
-        a.update(Action::Down);
+        a.update(Action::Up);
         assert_eq!(a.focus, Focus::Tools);
         a.update(Action::Right);
         assert_eq!(a.tool, tool("claude"));
+        a.update(Action::Down);
+        assert_eq!(a.focus, Focus::Path);
         a.update(Action::Down);
         assert_eq!(a.focus, Focus::History);
         let text = a.editor.text.clone();

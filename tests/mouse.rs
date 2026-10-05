@@ -2,7 +2,7 @@ mod common;
 
 use common::app;
 use launchpad_core::{
-    app::{Action, App, Focus, Tool},
+    app::{Action, App, Focus, ScrollTarget, Tool},
     remote::RemoteRequest,
     view::{self, HitMap, Pointer},
 };
@@ -55,6 +55,48 @@ fn click_label(app: &mut App, w: u16, h: u16, label: &str) {
     }
     panic!("missing visible control: {label} at {w}x{h}");
 }
+fn point(
+    app: &App,
+    w: u16,
+    h: u16,
+    pointer: Pointer,
+    predicate: impl Fn(&Action) -> bool,
+) -> (u16, u16) {
+    let map = draw(app, w, h);
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .find(|&(x, y)| {
+            map.action(pointer, x, y, Rect::new(0, 0, w, h))
+                .is_some_and(|a| predicate(&a))
+        })
+        .expect("visible action")
+}
+fn input_geometry(app: &App, w: u16, h: u16) -> (u16, u16, usize) {
+    let map = draw(app, w, h);
+    let (x, y) = point(app, w, h, Pointer::Click, |a| {
+        matches!(a, Action::PathCursor(_))
+    });
+    let end = (x..w)
+        .take_while(|&x| {
+            matches!(
+                map.action(Pointer::Click, x, y, Rect::new(0, 0, w, h)),
+                Some(Action::PathCursor(_))
+            )
+        })
+        .last()
+        .unwrap();
+    (x + 2, y, (end - x - 1) as usize)
+}
+fn wheel_section(app: &mut App, w: u16, h: u16, target: ScrollTarget, down: bool) {
+    let pointer = if down {
+        Pointer::ScrollDown
+    } else {
+        Pointer::ScrollUp
+    };
+    let (x, y) = point(app, w, h, pointer, |a| *a == Action::Scroll(target, down));
+    wheel(app, w, h, x, y, down);
+}
+
 #[test]
 fn history_click_selects_only_then_replay_is_explicit() {
     for (w, h) in [(80, 24), (120, 36), (40, 12), (40, 10)] {
@@ -67,7 +109,7 @@ fn history_click_selects_only_then_replay_is_explicit() {
         assert_eq!(app.recent, 9);
         assert!(app.take_launch().is_none());
         let event = app.history[9].clone();
-        app.update(Action::Tab);
+        app.update(Action::BackTab);
         assert_eq!(app.focus, Focus::Path);
         assert_eq!(app.tool, Tool::Shell, "recent selection fills the form");
         assert_eq!(app.editor.text, app.path_label(&event.path));
@@ -95,21 +137,21 @@ fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
 #[test]
 fn wheel_is_section_local_and_clamped() {
     let mut app = app();
-    wheel(&mut app, 80, 24, 10, 6, true);
+    wheel_section(&mut app, 80, 24, ScrollTarget::Suggestions, true);
     assert_eq!(app.highlighted, Some(0));
     for _ in 0..30 {
-        wheel(&mut app, 80, 24, 10, 6, true);
+        wheel_section(&mut app, 80, 24, ScrollTarget::Suggestions, true);
     }
     assert_eq!(app.highlighted, Some(app.suggestions.len() - 1));
     for _ in 0..30 {
-        wheel(&mut app, 80, 24, 10, 6, false);
+        wheel_section(&mut app, 80, 24, ScrollTarget::Suggestions, false);
     }
     assert_eq!(app.highlighted, Some(0));
-    wheel(&mut app, 80, 24, 10, 16, true);
+    wheel_section(&mut app, 80, 24, ScrollTarget::History, true);
     assert_eq!(app.focus, Focus::History);
     assert_eq!(app.recent, 1);
     for _ in 0..20 {
-        wheel(&mut app, 40, 10, 15, 8, true);
+        wheel_section(&mut app, 40, 10, ScrollTarget::History, true);
     }
     assert_eq!(app.recent, 9);
     wheel(&mut app, 40, 10, 0, 8, false);
@@ -117,7 +159,7 @@ fn wheel_is_section_local_and_clamped() {
     assert_eq!(app.focus, Focus::History);
     assert_eq!(app.recent, 9);
     for _ in 0..20 {
-        wheel(&mut app, 40, 10, 15, 8, false);
+        wheel_section(&mut app, 40, 10, ScrollTarget::History, false);
     }
     assert_eq!(app.recent, 0);
     app.update(Action::Help);
@@ -171,7 +213,10 @@ fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
 #[test]
 fn suggestion_click_accepts_without_launching() {
     let mut app = app();
-    click(&mut app, 80, 24, 12, 7);
+    let (x, y) = point(&app, 80, 24, Pointer::Click, |a| {
+        *a == Action::AcceptSuggestion(1)
+    });
+    click(&mut app, 80, 24, x, y);
     assert_eq!(app.focus, Focus::Path);
     let raw = settle(&mut app, Ok(common::DIRECTORIES[1].into()));
     assert_eq!(raw, common::DIRECTORIES[1], "the second visible row");
@@ -185,9 +230,10 @@ fn scrolled_input_maps_visible_origin_and_clipped_tail() {
     use launchpad_core::cells::{input_cursor, input_window};
     // Still wider than both viewports, with room under the input cap to edit.
     let text = format!("{}修理/e\u{301}👩🏽‍💻", "a".repeat(80));
-    for (w, h, x, y, budget) in [(80, 24, 4, 4, 74), (40, 10, 3, 2, 36)] {
+    for (w, h) in [(80, 24), (40, 10)] {
         let mut app = app();
         app.editor.set(&text);
+        let (x, y, budget) = input_geometry(&app, w, h);
         let (visible, _) = input_window(&text, text.len(), budget);
         let start = text.len() - visible.len();
         click(&mut app, w, h, x, y);
@@ -218,7 +264,7 @@ fn stale_resize_blank_and_tiny_hit_maps_are_inert() {
         }
     }
     assert_eq!(
-        map.action(Pointer::Click, 20, 12, Rect::new(0, 0, 80, 24)),
+        map.action(Pointer::Click, 2, 8, Rect::new(0, 0, 80, 24)),
         None
     ); // separator
 }
@@ -228,7 +274,10 @@ fn scrolled_suggestions_click_the_visible_result() {
     app.highlighted = Some(app.suggestions.len() - 1);
     let last = app.dirs[*app.suggestions.last().unwrap()].path.clone();
     let expected = app.path_label(&last);
-    click(&mut app, 40, 10, 10, 3);
+    let (x, y) = point(&app, 40, 10, Pointer::Click, |a| {
+        *a == Action::AcceptSuggestion(*app.suggestions.last().unwrap())
+    });
+    click(&mut app, 40, 10, x, y);
     let raw = settle(&mut app, Ok(last.clone()));
     assert_eq!(raw, last, "the scrolled-to row, not the first");
     assert_eq!(app.editor.text, expected);
@@ -250,7 +299,7 @@ fn unavailable_selected_tool_and_empty_lists_do_not_launch_or_fall_back() {
     settle(&mut app, Ok(row.path.clone()));
     assert!(app.take_launch().is_none(), "no silent substitution");
     assert!(app.message.as_ref().unwrap().contains("unavailable"));
-    app.update(Action::Tab);
+    app.update(Action::BackTab);
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(
         app.tool,
@@ -261,7 +310,7 @@ fn unavailable_selected_tool_and_empty_lists_do_not_launch_or_fall_back() {
     app.suggestions.clear();
     app.focus = Focus::History;
     app.update(Action::Enter);
-    wheel(&mut app, 80, 24, 10, 16, true);
+    wheel_section(&mut app, 80, 24, ScrollTarget::History, true);
     assert_eq!(app.recent, 5); // no empty-list navigation or implicit launch
     app.update(Action::SelectHistory(u64::MAX));
     app.update(Action::AcceptSuggestion(usize::MAX));
@@ -273,16 +322,17 @@ fn path_click_uses_cells_graphemes_padding_and_focus() {
     let mut app = app();
     app.editor.set("修理/e\u{301}👩🏽‍💻");
     app.focus = Focus::Tools;
-    click(&mut app, 80, 24, 7, 4); // second cell of 理: before the whole grapheme
+    let (x, y, _) = input_geometry(&app, 80, 24);
+    click(&mut app, 80, 24, x + 3, y); // second cell of 理: before the whole grapheme
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(app.editor.cursor, "修".len());
-    click(&mut app, 80, 24, 9, 4);
+    click(&mut app, 80, 24, x + 5, y);
     assert_eq!(app.editor.cursor, "修理/".len());
-    click(&mut app, 80, 24, 10, 4);
+    click(&mut app, 80, 24, x + 6, y);
     assert_eq!(app.editor.cursor, "修理/e\u{301}".len());
-    click(&mut app, 80, 24, 2, 4); // input left padding
+    click(&mut app, 80, 24, x - 2, y); // input left padding
     assert_eq!(app.editor.cursor, 0);
-    click(&mut app, 80, 24, 74, 4);
+    click(&mut app, 80, 24, 74, y);
     assert_eq!(app.editor.cursor, app.editor.text.len());
     assert!(app.take_launch().is_none());
 }
@@ -291,7 +341,7 @@ fn path_click_uses_cells_graphemes_padding_and_focus() {
 fn recent_selection_keeps_launch_button_and_keyboard_in_agreement() {
     for selection in [
         Action::Focus(Focus::History),
-        Action::BackTab,
+        Action::Tab,
         Action::SelectHistory(2),
     ] {
         for submit in [Action::Enter, Action::LaunchForm] {

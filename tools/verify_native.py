@@ -473,7 +473,7 @@ def history_and_layout_cases():
         s.expect('↑↓ select')
         # Recent selection fills the form but never launches on selection or Tab.
         selected_path = next(line for line in s.screen.display if '› ~/space 修理 literal' in line)
-        s.send('\t')
+        s.send('\x1b[Z')
         s.expect('Tab next · ↵ launch')
         assert selected_path in s.screen.display, s.display()
         assert any('Shell' in line and 'Launch' in line for line in s.screen.display), s.display()

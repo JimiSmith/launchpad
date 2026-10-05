@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap},
 };
 
 // Draw into a buffer shared by the terminal renderer and deterministic tests.
@@ -209,99 +209,56 @@ fn dim_section(f: &mut Canvas, area: Rect, active: bool) {
     }
 }
 
+// Two groups: the tool applies to both ways of choosing a directory.
+fn panel(f: &mut Canvas, area: Rect, title: &str, active: bool) -> Rect {
+    let theme = f.theme;
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(if active {
+                theme.accent()
+            } else {
+                theme.base().fg(theme.border)
+            })
+            .title(Line::styled(
+                format!(" {title} "),
+                if active {
+                    theme.accent()
+                } else {
+                    theme.muted()
+                },
+            ))
+            .style(theme.base()),
+        area,
+    );
+    Rect::new(
+        area.x + 2,
+        area.y + 1,
+        area.width.saturating_sub(4),
+        area.height.saturating_sub(2),
+    )
+}
+
 fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let theme = f.theme;
     let short = area.height < 18;
     let roomy = area.height >= 30;
     let footer_y = area.bottom() - 1 - u16::from(roomy);
-    let mut y = area.y + if roomy { 2 } else { u16::from(!short) };
-    pair(
-        f,
-        at(area, y, 1),
-        "›_ Launchpad",
-        if app.simulate_launch { "Preview" } else { "" },
-        theme.muted(),
-    );
-    y += if roomy {
-        3
-    } else if short {
-        1
-    } else {
-        2
-    };
-
-    let directory_y = y;
-    section(f, at(area, y, 1), "Directory", "", app.focus == Focus::Path);
-    y += 1;
-    let input = at(area, y, if short { 1 } else { 2 });
-    let block = Block::default()
-        .borders(if short {
-            Borders::NONE
-        } else {
-            Borders::BOTTOM
-        })
-        .border_style(if app.focus == Focus::Path {
-            theme.accent()
-        } else {
-            theme.base().fg(theme.border)
-        })
-        .style(theme.base());
-    f.render_widget(block, input);
-    row(f, Rect::new(input.x, input.y, 2, 1), "›", theme.accent());
-    let text_area = Rect::new(input.x + 2, input.y, input.width.saturating_sub(2), 1);
-    for x in input.x..input.right() {
-        let cursor = input_cursor(
-            &app.editor.text,
-            app.editor.cursor,
-            text_area.width as usize,
-            x.saturating_sub(text_area.x) as usize,
+    let mut y = area.y;
+    if !short {
+        y += if roomy { 2 } else { 1 };
+        pair(
+            f,
+            at(area, y, 1),
+            "›_ Launchpad",
+            if app.simulate_launch { "Preview" } else { "" },
+            theme.muted(),
         );
-        hits.add(
-            Rect::new(x, input.y, 1, input.height),
-            Action::PathCursor(cursor),
-        );
+        y += 2;
     }
-    let (visible, caret) = input_window(
-        &app.editor.text,
-        app.editor.cursor,
-        text_area.width as usize,
-    );
-    row(f, text_area, &visible, theme.base());
-    if app.focus == Focus::Path && text_area.width > 0 {
-        f.set_cursor_position((text_area.x + caret as u16, text_area.y));
-    }
-    y += input.height;
-    let suggestion_rows = if app.suggestions.is_empty() {
-        u16::from(app.empty_search())
-    } else {
-        app.suggestions.len().min(if short {
-            1
-        } else if roomy {
-            4
-        } else {
-            3
-        }) as u16
-    };
-    suggestions(f, app, at(area, y, suggestion_rows), hits);
-    y += suggestion_rows;
-    dim_section(
-        f,
-        Rect::new(area.x, directory_y, area.width, y - directory_y),
-        app.focus == Focus::Path,
-    );
-    y += if short {
-        0
-    } else if roomy {
-        2
-    } else {
-        1
-    };
-
-    let tools_y = y;
-    section(f, at(area, y, 1), "Tool", "", app.focus == Focus::Tools);
-    y += 1;
     // Reserve space beside the tools for Launch, even when labels wrap.
-    let tool_width = area.width.saturating_sub(12);
+    let tool_width = area.width.saturating_sub(4 + 12);
     let mut tools = app.visible_tools();
     if !app.available(app.tool) {
         tools.push(app.tool);
@@ -323,14 +280,13 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         positions.push((tool_row, column, w, label));
         column += w + 3;
     }
-    let max_rows = if area.height < 12 || (!short && area.height < 24) {
-        1
-    } else {
-        2
-    };
+    let max_rows = if area.height < 12 { 1 } else { 2 };
     let start = positions[selected].0.saturating_sub(max_rows - 1);
     let visible_rows = (tool_row + 1).min(max_rows);
-    let mut end_x = area.x;
+    let tools_outer = Rect::new(area.x, y, area.width, visible_rows + 2);
+    let tools_area = panel(f, tools_outer, "Tool", app.focus == Focus::Tools);
+    y = tools_area.y;
+    let mut end_x = tools_area.x;
     for (&tool, (r, col, w, label)) in tools.iter().zip(&positions) {
         if *r < start || *r >= start + visible_rows {
             continue;
@@ -340,7 +296,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         } else {
             theme.muted()
         };
-        let rect = Rect::new(area.x + col, y + r - start, *w, 1);
+        let rect = Rect::new(tools_area.x + col, y + r - start, *w, 1);
         row(f, rect, label, style);
         hits.add(rect, Action::SelectTool(tool));
         end_x = end_x.max(rect.right());
@@ -348,7 +304,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     if tool_row + 1 > visible_rows {
         let hint = format!("‹ {}/{} ›", selected + 1, tools.len());
         let w = width(&hint) as u16;
-        let heading = Rect::new(area.right() - w, tools_y, w, 1);
+        let heading = Rect::new(tools_outer.right() - w - 2, tools_outer.y, w, 1);
         row(f, heading, &hint, theme.muted());
         hits.add(
             Rect::new(heading.x, heading.y, 1, 1),
@@ -362,42 +318,88 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let launch = Rect::new(end_x + 4, y, 8, 1);
     row(f, launch, "Launch ↵", theme.accent());
     hits.add(launch, Action::LaunchForm);
-    y += visible_rows;
-    dim_section(
-        f,
-        Rect::new(area.x, tools_y, area.width, y - tools_y),
-        app.focus == Focus::Tools,
-    );
-    y += if short {
-        1
-    } else if roomy {
-        3
-    } else {
-        2
-    };
+    dim_section(f, tools_area, app.focus == Focus::Tools);
+    y = tools_outer.bottom() + u16::from(!short);
 
-    // Keep errors visible, with room for a recent row and the footer at small sizes.
+    let directory_outer = Rect::new(area.x, y, area.width, footer_y - y);
+    let content = panel(f, directory_outer, "Directory", app.focus != Focus::Tools);
+    y = content.y;
+    let input = at(content, y, 1);
+    row(f, Rect::new(input.x, input.y, 2, 1), "›", theme.accent());
+    let text_area = Rect::new(input.x + 2, input.y, input.width.saturating_sub(2), 1);
+    for x in input.x..input.right() {
+        let cursor = input_cursor(
+            &app.editor.text,
+            app.editor.cursor,
+            text_area.width as usize,
+            x.saturating_sub(text_area.x) as usize,
+        );
+        hits.add(Rect::new(x, input.y, 1, 1), Action::PathCursor(cursor));
+    }
+    let (visible, caret) = input_window(
+        &app.editor.text,
+        app.editor.cursor,
+        text_area.width as usize,
+    );
+    let input_style = if app.focus == Focus::Path {
+        theme.base().add_modifier(Modifier::UNDERLINED)
+    } else {
+        theme.base()
+    };
+    f.render_widget(Paragraph::new(visible).style(input_style), text_area);
+    if app.focus == Focus::Path && text_area.width > 0 {
+        f.set_cursor_position((text_area.x + caret as u16, text_area.y));
+    }
+    y += input.height;
+
     let config_error = app.config_errors().next().map(|e| {
         format!(
             "Config error: {e} (F1: all {} errors)",
             app.config_errors().count()
         )
     });
-    if let Some(message) = app.message.as_ref().or(config_error.as_ref()) {
-        let max_height = footer_y.saturating_sub(y + 2).clamp(1, 3);
-        let paragraph = Paragraph::new(message.as_str())
-            .style(theme.base().fg(theme.error))
-            .wrap(Wrap { trim: false });
-        let h = (paragraph.line_count(area.width) as u16).clamp(1, max_height);
-        // On the smallest screen use the section gap for the status.
-        if short {
-            y = y.saturating_sub(1);
-        }
-        f.render_widget(paragraph, at(area, y, h));
-        y += h;
+    let message = app.message.as_ref().or(config_error.as_ref());
+    // Keep the input, list heading and one selected row visible even at 40 × 10.
+    let extra = content.bottom().saturating_sub(y + 2);
+    let message_rows = message.map_or(0, |text| {
+        let paragraph = Paragraph::new(text.as_str()).wrap(Wrap { trim: false });
+        (paragraph.line_count(content.width) as u16)
+            .min(3)
+            .min(extra)
+    });
+    let wanted = if app.suggestions.is_empty() {
+        u16::from(app.empty_search())
+    } else {
+        app.suggestions.len().min(if short {
+            1
+        } else if roomy {
+            4
+        } else {
+            3
+        }) as u16
+    };
+    let suggestion_rows = wanted.min(extra.saturating_sub(message_rows));
+    suggestions(f, app, at(content, y, suggestion_rows), hits);
+    y += suggestion_rows;
+    dim_section(
+        f,
+        Rect::new(content.x, content.y, content.width, y - content.y),
+        app.focus == Focus::Path,
+    );
+    if let Some(message) = message {
+        f.render_widget(
+            Paragraph::new(message.as_str())
+                .style(theme.base().fg(theme.error))
+                .wrap(Wrap { trim: false }),
+            at(content, y, message_rows),
+        );
+        y += message_rows;
+    }
+    if !short && content.bottom().saturating_sub(y) > 3 {
+        y += 1;
     }
     let history_y = y;
-    let available_rows = footer_y.saturating_sub(y + 1) as usize;
+    let available_rows = content.bottom().saturating_sub(y + 1) as usize;
     let count = app.list_len();
     let start = app
         .list_selected()
@@ -412,8 +414,8 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     } else {
         String::new()
     };
-    if y < footer_y {
-        let heading = at(area, y, 1);
+    if y < content.bottom() {
+        let heading = at(content, y, 1);
         section(f, heading, "", &range, app.focus == Focus::History);
         let labels = Rect::new(
             heading.x,
@@ -442,17 +444,17 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     y += 1;
     hits.wheels.push((
         Rect::new(
-            area.x,
+            content.x,
             history_y,
-            area.width,
-            footer_y.saturating_sub(history_y),
+            content.width,
+            content.bottom().saturating_sub(history_y),
         ),
         ScrollTarget::History,
     ));
-    if count == 0 && y < footer_y {
+    if count == 0 && y < content.bottom() {
         row(
             f,
-            at(area, y, 1),
+            at(content, y, 1),
             if app.show_saved {
                 "No saved directories · Ctrl+S to save"
             } else {
@@ -475,7 +477,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             } else {
                 theme.base()
             };
-            let a = at(area, y, 1);
+            let a = at(content, y, 1);
             hits.add(a, Action::SelectSaved(i));
             row(f, a, &app.path_label(path), style);
             y += 1;
@@ -494,7 +496,7 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
             } else {
                 theme.base()
             };
-            let a = at(area, y, 1);
+            let a = at(content, y, 1);
             hits.add(a, Action::SelectHistory(event.id));
             row(f, a, &app.path_label(&event.path), style);
             y += 1;
@@ -503,10 +505,10 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     dim_section(
         f,
         Rect::new(
-            area.x,
+            content.x,
             history_y,
-            area.width,
-            footer_y.saturating_sub(history_y),
+            content.width,
+            content.bottom().saturating_sub(history_y),
         ),
         app.focus == Focus::History,
     );
