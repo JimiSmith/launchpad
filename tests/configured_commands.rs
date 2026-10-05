@@ -321,19 +321,18 @@ fn every_keys_screen_row_is_reachable_at_narrow_and_wide_sizes() {
 }
 
 #[test]
-fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
+fn recent_directories_launch_the_current_tool_with_safe_mouse_actions() {
     use launchpad_core::{
-        app::{Focus, Launch},
+        app::{Focus, RecentDirectory},
         view::{Pointer, render_with_hits},
     };
     use ratatui::{Terminal, backend::TestBackend, layout::Rect};
     for (w, h) in [(40, 10), (40, 12), (80, 24), (200, 36)] {
         let mut app = App::from_remote("/fixture".into());
         app.take_remote_request();
-        app.history.push(Launch {
+        app.history.push(RecentDirectory {
             id: 7,
             path: "/fixture/old".into(),
-            tool: Tool::new("removed-long-id").unwrap(),
             age: "1h ago".into(),
         });
         app.focus = Focus::History;
@@ -350,10 +349,7 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
                 hits.action(Pointer::Click, x, y, area) == Some(Action::SelectHistory(7))
             })
             .unwrap();
-        assert!(
-            (x..w).any(|col| frame.buffer[(col, y)].symbol() == "!"),
-            "unavailable marker must survive tool clipping at {w}x{h}"
-        );
+        assert!(!(x..w).any(|col| frame.buffer[(col, y)].symbol() == "!"));
         assert_eq!(
             frame.buffer[(x, y)].symbol(),
             "~",
@@ -369,15 +365,9 @@ fn unavailable_long_history_ids_keep_a_visible_marker_and_safe_mouse_actions() {
             panic!("history validation missing")
         };
         app.finish_remote_validation(generation, Ok("/fixture/old".into()));
-        assert!(app.message.as_ref().unwrap().contains("unavailable"));
-        assert!(app.take_launch().is_none());
-        app.update(Action::Tab);
-        assert_eq!(app.focus, Focus::Path);
-        assert_eq!(
-            app.tool,
-            Tool::new("removed-long-id").unwrap(),
-            "keep the removed tool explicit"
-        );
+        let launch = app.take_launch().expect("current tool launches");
+        assert_eq!(launch.tool, Tool::Shell);
+        assert_eq!(launch.path, "/fixture/old");
     }
 }
 

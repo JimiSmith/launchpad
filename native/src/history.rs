@@ -3,22 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod tool {
-    use super::*;
-    pub fn serialize<S: serde::Serializer>(value: &Tool, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(value.as_str())
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Tool, D::Error> {
-        let value = String::deserialize(d)?;
-        Tool::new(&value).ok_or_else(|| serde::de::Error::custom("invalid command ID"))
-    }
-}
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
     version: u32,
     entries: Vec<Entry>,
 }
-use launchpad_core::app::Tool;
 
 pub struct Store {
     root: PathBuf,
@@ -27,8 +16,6 @@ pub struct Store {
 pub struct Entry {
     pub id: String,
     pub path: String,
-    #[serde(with = "tool")]
-    pub tool: Tool,
     pub opened_at: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -97,7 +84,7 @@ impl Store {
             &journal.join(format!("{}.json", entry.id)),
             &entry.id,
             &serde_json::to_vec(&Event {
-                version: 2,
+                version: 3,
                 id: entry.id.clone(),
                 entry: Some(entry.clone()),
             })
@@ -172,7 +159,7 @@ impl Store {
             &self.root.join("history.json"),
             token,
             &serde_json::to_vec(&Snapshot {
-                version: 2,
+                version: 3,
                 entries: kept.iter().filter_map(|e| e.entry.clone()).collect(),
             })
             .unwrap(),
@@ -219,7 +206,7 @@ impl Store {
             &journal.join(format!("{token}.json")),
             token,
             &serde_json::to_vec(&Event {
-                version: 2,
+                version: 3,
                 id: token.into(),
                 entry: None,
             })
@@ -273,7 +260,7 @@ impl Store {
                 .map_err(|e| e.to_string())?;
             if bytes.len() <= 32768
                 && let Ok(event) = serde_json::from_slice::<Event>(&bytes)
-                && event.version == 2
+                && matches!(event.version, 2 | 3)
                 && valid_token(&event.id)
                 && path.file_name().and_then(|s| s.to_str()) == Some(&format!("{}.json", event.id))
                 && event
@@ -293,7 +280,7 @@ impl Store {
         let mut seen = std::collections::HashSet::new();
         for event in events {
             if let Some(entry) = &event.entry {
-                if seen.len() < 10 && seen.insert((entry.tool, entry.path.clone())) {
+                if seen.len() < 10 && seen.insert(entry.path.clone()) {
                     kept.push(event);
                 }
             } else {
@@ -315,11 +302,10 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         Store::new(&root)
     }
-    fn entry(n: u64, path: &str, tool: Tool) -> Entry {
+    fn entry(n: u64, path: &str) -> Entry {
         Entry {
             id: format!("{n:020}-test"),
             path: path.into(),
-            tool,
             opened_at: n,
         }
     }
@@ -327,34 +313,81 @@ mod tests {
     fn windows_history_roundtrips_and_rejects_parent_traversal() {
         let store = fixture("windows-paths");
         for (n, path) in [(1, r"C:\Users\Ada\notes"), (2, r"\\server\share\Ada\notes")] {
-            let row = entry(n, path, Tool::Shell);
+            let row = entry(n, path);
             store.record(row.clone()).unwrap();
             assert_eq!(store.refresh(&format!("read-{n}")).unwrap()[0], row);
         }
-        assert!(
-            store
-                .record(entry(3, r"C:\Users\Ada\..\outside", Tool::Shell))
-                .is_err()
-        );
+        assert!(store.record(entry(3, r"C:\Users\Ada\..\outside")).is_err());
     }
     #[test]
-    fn arbitrary_stable_command_identity_roundtrips_without_executable_data() {
+    fn directories_roundtrip_without_tool_or_executable_data() {
         let store = fixture("configured-id");
-        let row = entry(1, "/fixture/a", Tool::new("Variant_2.worktree").unwrap());
+        let row = entry(1, "/fixture/a");
         store.record(row.clone()).unwrap();
         assert_eq!(Store::new(&store.root).read().unwrap(), vec![row]);
         let json: serde_json::Value =
             serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap()).unwrap();
-        assert_eq!(json["version"], 2);
-        assert_eq!(json["entries"][0]["tool"], "Variant_2.worktree");
+        assert_eq!(json["version"], 3);
+        assert!(json["entries"][0].get("tool").is_none());
         assert!(json["entries"][0].get("executable").is_none());
     }
+    #[test]
+    fn legacy_tool_pairs_merge_by_directory_and_clear_markers_still_apply() {
+        let store = fixture("legacy-tools");
+        let journal = store.root.join("history.d");
+        fs::create_dir_all(&journal).unwrap();
+        for (n, path, tool) in [
+            (1, "/fixture/shared", "removed"),
+            (2, "/fixture/other", "shell"),
+            (3, "/fixture/shared", "codex"),
+        ] {
+            let row = entry(n, path);
+            let mut json = serde_json::to_value(Event {
+                version: 2,
+                id: row.id.clone(),
+                entry: Some(row.clone()),
+            })
+            .unwrap();
+            json["entry"]["tool"] = tool.into();
+            fs::write(
+                journal.join(format!("{}.json", row.id)),
+                serde_json::to_vec(&json).unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            store.refresh("upgrade").unwrap(),
+            vec![entry(3, "/fixture/shared"), entry(2, "/fixture/other")]
+        );
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap()).unwrap();
+        assert_eq!(snapshot["version"], 3);
+        assert!(
+            snapshot["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e.get("tool").is_none())
+        );
+        let clear = Event {
+            version: 2,
+            id: entry(4, "").id,
+            entry: None,
+        };
+        fs::write(
+            journal.join(format!("{}.json", clear.id)),
+            serde_json::to_vec(&clear).unwrap(),
+        )
+        .unwrap();
+        assert!(store.refresh("legacy-clear").unwrap().is_empty());
+    }
+
     #[test]
     fn unsupported_history_is_ignored_and_current_writes_work() {
         for version in [1, 99] {
             for journal in [false, true] {
                 let store = fixture(&format!("unsupported-{version}-{journal}"));
-                let old = entry(1, "/fixture/old", Tool::new("Hermes").unwrap());
+                let old = entry(1, "/fixture/old");
                 fs::write(
                     store.root.join("history.json"),
                     serde_json::to_vec(&Snapshot {
@@ -394,15 +427,15 @@ mod tests {
                     store.refresh("ignore-unsupported").unwrap().is_empty(),
                     "version {version}, journal {journal}"
                 );
-                let current = entry(2, "/fixture/new", Tool::new("Hermes").unwrap());
+                let current = entry(2, "/fixture/new");
                 store.record(current.clone()).unwrap();
                 assert_eq!(Store::new(&store.root).read().unwrap(), vec![current]);
                 let projection: Snapshot =
                     serde_json::from_slice(&fs::read(store.root.join("history.json")).unwrap())
                         .unwrap();
-                assert_eq!(projection.version, 2);
+                assert_eq!(projection.version, 3);
                 assert_eq!(projection.entries.len(), 1);
-                assert_eq!(projection.entries[0].tool.as_str(), "Hermes");
+                assert_eq!(projection.entries[0].path, "/fixture/new");
             }
         }
     }
@@ -419,7 +452,7 @@ mod tests {
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
             .unwrap();
-        store.record(entry(1, "/fixture/a", Tool::Shell)).unwrap();
+        store.record(entry(1, "/fixture/a")).unwrap();
         assert!(
             !stale.exists(),
             "crash leftovers should be bounded/recoverable"
@@ -429,7 +462,7 @@ mod tests {
     #[test]
     fn refresh_repairs_a_missing_or_stale_projection_from_the_journal() {
         let store = fixture("repair");
-        let row = entry(1, "/fixture/a", Tool::Shell);
+        let row = entry(1, "/fixture/a");
         store.record(row.clone()).unwrap();
         fs::write(
             store.root.join("history.json"),
@@ -449,7 +482,7 @@ mod tests {
     fn unreadable_record_fails_refresh_without_replacing_good_projection() {
         use std::os::unix::fs::PermissionsExt;
         let store = fixture("unreadable-record");
-        let row = entry(1, "/fixture/a", Tool::new("hermes").unwrap());
+        let row = entry(1, "/fixture/a");
         store.record(row.clone()).unwrap();
         let projection = store.root.join("history.json");
         let saved = fs::read(&projection).unwrap();
@@ -486,18 +519,18 @@ mod tests {
     fn prune_failure_is_reported_without_losing_authoritative_records() {
         use std::os::unix::fs::PermissionsExt;
         let store = fixture("prune-denied");
-        let newest = entry(3, "/fixture/a", Tool::new("hermes").unwrap());
-        let other = entry(2, "/fixture/b", Tool::Shell);
+        let newest = entry(3, "/fixture/a");
+        let other = entry(2, "/fixture/b");
         store.record(other.clone()).unwrap();
         store.record(newest.clone()).unwrap();
         let journal = store.root.join("history.d");
-        let old = entry(1, "/fixture/a", newest.tool);
+        let old = entry(1, "/fixture/a");
         let obsolete = journal.join(format!("{}.json", old.id));
         // A published record left behind before another writer's compaction.
         fs::write(
             &obsolete,
             serde_json::to_vec(&Event {
-                version: 2,
+                version: 3,
                 id: old.id.clone(),
                 entry: Some(old),
             })
@@ -550,7 +583,7 @@ mod tests {
             let store = fixture(&format!("symlink-{kind}"));
             let sentinel = store.root.join("sentinel");
             fs::write(&sentinel, "KEEP").unwrap();
-            let row = entry(1, "/fixture/a", Tool::Shell);
+            let row = entry(1, "/fixture/a");
             let journal = store.root.join("history.d");
             fs::create_dir(&journal).unwrap();
             let link = match kind {
@@ -580,17 +613,12 @@ mod tests {
             format!("/{}", "a".repeat(4096)),
             "/fixture/\ncontrol".into(),
         ] {
-            assert!(
-                store.record(entry(1, &path, Tool::Shell)).is_err(),
-                "reject {path:?}"
-            );
+            assert!(store.record(entry(1, &path)).is_err(), "reject {path:?}");
         }
-        let mut bad = entry(1, "/fixture/okay", Tool::Shell);
+        let mut bad = entry(1, "/fixture/okay");
         bad.id = "../escape".into();
         assert!(store.record(bad).is_err());
-        store
-            .record(entry(2, "/fixture/okay", Tool::Shell))
-            .unwrap();
+        store.record(entry(2, "/fixture/okay")).unwrap();
         let journal = store.root.join("history.d");
         for (name, bytes) in [
             ("bad.json", b"{".to_vec()),
@@ -603,10 +631,7 @@ mod tests {
             fs::write(journal.join(name), bytes).unwrap();
         }
         fs::write(store.root.join("history.json"), b"{ corrupt projection").unwrap();
-        assert_eq!(
-            store.read().unwrap(),
-            vec![entry(2, "/fixture/okay", Tool::Shell)]
-        );
+        assert_eq!(store.read().unwrap(), vec![entry(2, "/fixture/okay")]);
         for n in 0..130 {
             fs::write(journal.join(format!("junk{n}")), b"").unwrap();
         }
@@ -620,10 +645,10 @@ mod tests {
         let store = fixture("journal-bound");
         for n in 1..=200 {
             if n % 17 == 0 {
-                store.clear(&entry(n, "", Tool::Shell).id).unwrap();
+                store.clear(&entry(n, "").id).unwrap();
             } else {
                 store
-                    .record(entry(n, &format!("/fixture/{}", n % 13), Tool::Shell))
+                    .record(entry(n, &format!("/fixture/{}", n % 13)))
                     .unwrap();
             }
             assert!(fs::read_dir(store.root.join("history.d")).unwrap().count() <= 11);
@@ -632,31 +657,27 @@ mod tests {
     #[test]
     fn rejection_removes_only_its_exact_attempt_not_concurrent_updates() {
         let store = fixture("rollback");
-        let rejected = entry(1, "/fixture/a", Tool::new("claude").unwrap());
+        let rejected = entry(1, "/fixture/a");
         store.record(rejected.clone()).unwrap();
         store.remove(&rejected.id, "rollback1").unwrap();
         assert!(store.read().unwrap().is_empty());
-        store
-            .record(entry(2, "/fixture/a", Tool::new("claude").unwrap()))
-            .unwrap();
-        let newer = entry(3, "/fixture/a", Tool::new("codex").unwrap());
-        let other = entry(4, "/fixture/b", Tool::Shell);
+        store.record(entry(2, "/fixture/a")).unwrap();
+        let newer = entry(3, "/fixture/a");
+        let other = entry(4, "/fixture/b");
         store.record(newer.clone()).unwrap();
         store.record(other.clone()).unwrap();
-        store
-            .remove(&entry(2, "", Tool::Shell).id, "rollback2")
-            .unwrap();
+        store.remove(&entry(2, "").id, "rollback2").unwrap();
         assert_eq!(store.read().unwrap(), vec![other, newer]);
     }
     #[test]
     fn clear_persists_and_does_not_erase_a_newer_concurrent_launch() {
         let store = fixture("clear");
-        store.record(entry(1, "/fixture/old", Tool::Shell)).unwrap();
-        let newer = entry(3, "/fixture/new", Tool::new("hermes").unwrap());
+        store.record(entry(1, "/fixture/old")).unwrap();
+        let newer = entry(3, "/fixture/new");
         store.record(newer.clone()).unwrap();
-        store.clear(&entry(2, "", Tool::Shell).id).unwrap();
+        store.clear(&entry(2, "").id).unwrap();
         assert_eq!(store.read().unwrap(), vec![newer]);
-        store.clear(&entry(4, "", Tool::Shell).id).unwrap();
+        store.clear(&entry(4, "").id).unwrap();
         assert!(Store::new(&store.root).read().unwrap().is_empty());
     }
     #[test]
@@ -671,11 +692,7 @@ mod tests {
                     scope.spawn(move || {
                         gate.wait();
                         store
-                            .record(entry(
-                                round * 8 + n,
-                                &format!("/fixture/{n}"),
-                                Tool::new("claude").unwrap(),
-                            ))
+                            .record(entry(round * 8 + n, &format!("/fixture/{n}")))
                             .unwrap();
                     });
                 }
@@ -689,22 +706,15 @@ mod tests {
         }
     }
     #[test]
-    fn ten_unique_tool_directory_pairs_keep_the_latest_attempt_and_order() {
+    fn ten_unique_directories_keep_the_latest_attempt_and_order() {
         let store = fixture("bounded");
         for n in 1..=12 {
-            store
-                .record(entry(n, &format!("/fixture/{n}"), Tool::Shell))
-                .unwrap();
+            store.record(entry(n, &format!("/fixture/{n}"))).unwrap();
         }
-        store
-            .record(entry(13, "/fixture/8", Tool::new("codex").unwrap()))
-            .unwrap();
+        store.record(entry(13, "/fixture/8")).unwrap();
         let rows = store.read().unwrap();
         assert_eq!(rows.len(), 10);
-        assert_eq!(
-            rows[0],
-            entry(13, "/fixture/8", Tool::new("codex").unwrap())
-        );
+        assert_eq!(rows[0], entry(13, "/fixture/8"));
         assert_eq!(
             rows.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
             vec![
@@ -713,26 +723,26 @@ mod tests {
                 "/fixture/11",
                 "/fixture/10",
                 "/fixture/9",
-                "/fixture/8",
                 "/fixture/7",
                 "/fixture/6",
                 "/fixture/5",
-                "/fixture/4"
+                "/fixture/4",
+                "/fixture/3"
             ]
         );
     }
     #[test]
-    fn tools_share_a_directory_and_repeated_pairs_refresh_independently() {
+    fn repeated_directories_refresh_and_delete_without_resurrecting_old_entries() {
         let store = fixture("tool-directory-pairs");
-        let shell = entry(1, "/fixture/shared", Tool::Shell);
-        let codex = entry(2, "/fixture/shared", Tool::new("codex").unwrap());
-        let other = entry(3, "/fixture/other", codex.tool);
+        let shell = entry(1, "/fixture/shared");
+        let codex = entry(2, "/fixture/shared");
+        let other = entry(3, "/fixture/other");
         for row in [&shell, &codex, &other] {
             store.record(row.clone()).unwrap();
         }
-        let latest_shell = entry(4, &shell.path, shell.tool);
+        let latest_shell = entry(4, &shell.path);
         store.record(latest_shell.clone()).unwrap();
-        let expected = vec![latest_shell.clone(), other.clone(), codex.clone()];
+        let expected = vec![latest_shell.clone(), other.clone()];
         let reopened = Store::new(&store.root);
         assert_eq!(reopened.refresh("refresh-pairs").unwrap(), expected);
         let snapshot: Snapshot =
@@ -740,26 +750,22 @@ mod tests {
         assert_eq!(snapshot.entries, expected);
         assert_eq!(
             fs::read_dir(store.root.join("history.d")).unwrap().count(),
-            3
+            2
         );
         reopened.remove(&latest_shell.id, "remove-pair").unwrap();
-        assert_eq!(reopened.read().unwrap(), vec![other, codex]);
+        assert_eq!(reopened.read().unwrap(), vec![other]);
     }
     #[test]
-    fn real_store_survives_a_new_reader_with_timestamp_and_tool() {
+    fn real_store_survives_a_new_reader_with_timestamp() {
         let store = fixture("reopen");
         assert!(store.read().unwrap().is_empty());
-        let expected = entry(
-            100,
-            "/fixture/修理 it's literal; $HOME",
-            Tool::new("hermes").unwrap(),
-        );
+        let expected = entry(100, "/fixture/修理 it's literal; $HOME");
         store.record(expected.clone()).unwrap();
         assert_eq!(Store::new(&store.root).read().unwrap(), vec![expected]);
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(store.root.join("history.json")).unwrap())
                 .unwrap();
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
         assert_eq!(json["entries"][0]["opened_at"], 100);
     }
 }

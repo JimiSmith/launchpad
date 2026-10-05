@@ -159,24 +159,22 @@ fn wide_terminals_center_a_maximum_96_column_ui_and_mouse_targets() {
 }
 
 #[test]
-fn recent_rows_show_directory_first_and_clip_long_tool_labels() {
+fn recent_rows_show_only_the_directory() {
     let mut a = app();
     a.history.truncate(1);
     a.history[0].path = "/home/example/recent".into();
-    let tool = a.history[0].tool;
-    a.commands
-        .entries
-        .iter_mut()
-        .find(|c| c.id == tool)
-        .unwrap()
-        .label = "12345678901234567890".into();
     for (w, h) in [(40, 10), (40, 12), (80, 24), (120, 36)] {
         let b = draw(&a, w, h);
-        let rendered = text(&b);
-        assert!(
-            rendered.contains("~/recent") && rendered.contains("123456789012345678"),
-            "{w}x{h}: {rendered}"
-        );
+        let y = (0..h)
+            .find(|&y| {
+                (0..w)
+                    .map(|x| b[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("~/recent")
+            })
+            .unwrap();
+        let row: String = (0..w).map(|x| b[(x, y)].symbol()).collect();
+        assert_eq!(row.trim(), "~/recent");
     }
 }
 
@@ -232,11 +230,7 @@ fn minimal_dashboard_separates_sections_and_dims_inactive_content() {
                     })
                     .unwrap()
             };
-            for (label, active) in [
-                ("Directory", Focus::Path),
-                ("Tool", Focus::Tools),
-                ("Recent", Focus::History),
-            ] {
+            for (label, active) in [("Directory", Focus::Path), ("Tool", Focus::Tools)] {
                 let (x, y) = heading(label);
                 let theme = theme::Theme::default();
                 assert_eq!(
@@ -277,7 +271,7 @@ fn minimal_dashboard_separates_sections_and_dims_inactive_content() {
                     ratatui::style::Color::Rgb(131, 137, 159)
                 }
             );
-            let (x, y) = heading("Recent");
+            let (x, y) = heading("Saved / Recent");
             assert_eq!(b[(x, y + 1)].symbol(), "~");
             assert_eq!(
                 b[(x, y + 1)].modifier.contains(Modifier::UNDERLINED),
@@ -363,4 +357,61 @@ fn medium_height_with_suggestions_and_message_still_shows_a_recent_row() {
     a.message = Some("Worker timed out".into());
     let s = text(&draw(&a, 80, 18));
     assert!(s.contains("only-in-recent") && s.contains("1–"), "{s}");
+}
+
+#[test]
+fn saved_rows_use_full_width_and_scroll_at_small_sizes() {
+    let mut a = app();
+    a.replace_saved(
+        (0..20)
+            .map(|i| format!("/home/example/saved-{i:02}"))
+            .collect(),
+    );
+    let tool = a.tool;
+    a.update(Action::Focus(Focus::History));
+    a.update(Action::End);
+    for (w, h) in [(40, 10), (80, 24)] {
+        let buffer = draw(&a, w, h);
+        let rendered = text(&buffer);
+        assert_list_selection(&buffer, true);
+        assert!(rendered.contains("~/saved-19"));
+        assert!(!rendered.contains("~/saved-00"));
+    }
+    assert_eq!(a.tool, tool);
+    a.update(Action::Right);
+    assert_list_selection(&draw(&a, 80, 24), false);
+    a.update(Action::Focus(Focus::Path));
+    assert_list_selection(&draw(&a, 80, 24), false);
+    a.update(Action::Focus(Focus::History));
+    a.update(Action::Left);
+    a.replace_saved(Vec::new());
+    assert!(text(&draw(&a, 80, 24)).contains("No saved directories"));
+}
+
+fn assert_list_selection(buffer: &Buffer, saved: bool) {
+    use ratatui::style::Modifier;
+    let area = buffer.area;
+    let (x, y) = (area.y..area.bottom())
+        .find_map(|y| {
+            let line: String = (area.x..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            line.find("Saved / Recent").map(|x| (x as u16, y))
+        })
+        .expect("Saved / Recent heading");
+    for offset in 0..14 {
+        let selected = if offset < 5 {
+            saved
+        } else if offset >= 8 {
+            !saved
+        } else {
+            false
+        };
+        assert_eq!(
+            buffer[(x + offset, y)]
+                .modifier
+                .contains(Modifier::UNDERLINED),
+            selected
+        );
+    }
 }

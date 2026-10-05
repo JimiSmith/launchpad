@@ -915,7 +915,7 @@ fn equal_scores_prefer_recent_launches_then_depth() {
 #[test]
 fn launched_directories_win_suggestion_ties_locally_and_remotely() {
     use launchpad_core::{
-        app::{Action, App, Launch, Tool},
+        app::{Action, App, RecentDirectory},
         remote::RemoteRequest,
     };
     let tree = Tree::new();
@@ -923,10 +923,9 @@ fn launched_directories_win_suggestion_ties_locally_and_remotely() {
     tree.dir("Projects/zellij-launchpad");
     let launchpad = tree.0.join("Projects").join("zellij-launchpad");
     let launchpad = launchpad.to_str().unwrap().to_owned();
-    let history = vec![Launch {
+    let history = vec![RecentDirectory {
         id: 1,
         path: launchpad.clone(),
-        tool: Tool::Shell,
         age: "Just now".into(),
     }];
     let mut app = App::from_home(tree.0.clone(), tree.0.clone());

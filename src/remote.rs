@@ -33,5 +33,6 @@ pub(crate) struct Remote {
 #[derive(Debug)]
 pub(crate) enum Validation {
     Accept,
+    Save,
     Launch(crate::app::Tool),
 }

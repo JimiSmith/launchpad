@@ -281,8 +281,8 @@ shell executable with `arguments = ["-c", "your script"]` if you want shell
 interpretation. [Configuration details](docs/configured-commands.md).
 
 An optional `shortcut` launches that command in one keypress: the typed
-directory text (not a highlighted suggestion), or the selected recent row's
-directory with this tool instead of its own. Shortcuts need Ctrl, Alt or Super
+directory text (not a highlighted suggestion), or the selected Saved / Recent row's
+directory with this tool. Shortcuts need Ctrl, Alt or Super
 and must not clash with a built-in key or another shortcut; invalid ones are
 dropped with a visible error while the command stays usable. Shell needs none,
 since Enter launches it by default. Alt shortcuts work in any terminal. Ctrl
@@ -292,7 +292,7 @@ fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
 
 ## Controls and directory policy
 
-- Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or history.
+- Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or the Saved / Recent list.
 - In the directory input: Left/Right moves one Unicode grapheme; Home/End moves to
   the beginning/end. Ctrl+Left/Right moves by path segment; Ctrl+Backspace/Delete
   deletes the same range to the left/right. Ctrl+H is an alias for Ctrl+Backspace
@@ -303,15 +303,22 @@ fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
   Separators are `/` on Unix and both `/` and `\` for Windows home paths.
   Spaces and punctuation within a segment stay together; edits do not normalize
   paths. No text selection is performed.
-- Tab / Shift+Tab cycles forward / backward through path, tools, and history.
+- Tab / Shift+Tab cycles forward / backward through path, tools, and Saved / Recent.
   Type a fuzzy query; arrows select suggestions and Enter accepts.
   Enter without a highlighted suggestion launches the selected tool.
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
 - A configured command shortcut (for example Alt+C) launches that command from
   any section; F1 lists the configured shortcuts.
 - F1 opens the keys screen. F5 refreshes HOME and shared history and restores the invoking cwd.
-- Selecting a recent row fills Directory and Tool. Enter or Launch revalidates
-  and opens that selection. Delete removes, Ctrl+L twice clears;
+- Saved / Recent shares one section. Left/Right switches lists when it is focused.
+  Saved opens by default when it has entries; otherwise Recent opens. Switching
+  and F5 preserve your choice until you reopen Launchpad.
+- Ctrl+S saves the entered directory, or the selected Saved / Recent directory,
+  after validation. It does not launch or switch lists. Saved contains unique
+  directories sorted by full path. Selecting one fills Directory and keeps Tool.
+  Enter launches with that tool; Delete removes only the saved entry.
+- Selecting a recent row fills Directory and keeps the selected Tool. Enter or
+  Launch revalidates the directory and launches that tool. Delete removes, Ctrl+L twice clears;
   Esc cancels confirmation.
 - Ctrl+Q / Ctrl+C quits. Esc dismisses transient UI, then quits an untouched dashboard.
 
@@ -348,10 +355,17 @@ progressively during the first scan. You can safely delete `index.json` to force
 a cold start; a changed HOME, ignore configuration, or index format also causes
 a fresh scan. Cache failures are nonfatal and appear in the search status.
 
-Recent history remembers ten unique command ID–directory pairs under
+Saved directories persist in `saved.json` alongside history under
+`$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`). They are shared
+across panes and sessions; F5 reloads changes. Entries remain until explicitly
+removed, independently of recent history. Missing directories remain listed and
+fail visibly when launched. Saving follows the same directory policy as launching.
+
+Recent history remembers ten unique directories, newest first, under
 `$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`).
 It is shared across panes and sessions. F5 reloads other instances' changes.
-Replay uses the current configuration; removed IDs remain unavailable.
+Recent stores no tool association. Launching another tool in the same directory
+refreshes that one entry. Existing history is loaded with old tool IDs discarded.
 History records validated attempts, not successful tool execution.
 [Persistence details](docs/history.md).
 

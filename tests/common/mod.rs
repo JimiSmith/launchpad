@@ -2,7 +2,7 @@
 //! builds one, seeded from settled worker replies. There is no fixture data
 //! inside the shipped crate, so every test states its own directories.
 #![allow(dead_code)]
-use launchpad_core::app::{Action, App, Launch, Tool};
+use launchpad_core::app::{Action, App, RecentDirectory, Tool};
 use launchpad_core::remote::RemoteRequest;
 
 pub const HOME: &str = "/home/example";
@@ -41,25 +41,24 @@ pub const DIRECTORIES: [&str; 6] = [
 
 /// Ten distinct recent directories, newest first. The oldest row deliberately
 /// carries a shell-looking name so narrow layouts can be checked against it.
-pub fn history() -> Vec<Launch> {
+pub fn history() -> Vec<RecentDirectory> {
     [
-        ("claude", "launchpad", "12m ago"),
-        ("shell", "notes", "38m ago"),
-        ("codex", "service", "1h ago"),
-        ("hermes", "team notes", "2h ago"),
-        ("claude", "修理", "3h ago"),
-        ("copilot", "api", "4h ago"),
-        ("shell", "current", "Yesterday"),
-        ("codex", "docs", "Yesterday"),
-        ("claude", "scratch", "Yesterday"),
-        ("hermes", "it's literal; $HOME", "2d ago"),
+        ("launchpad", "12m ago"),
+        ("notes", "38m ago"),
+        ("service", "1h ago"),
+        ("team notes", "2h ago"),
+        ("修理", "3h ago"),
+        ("api", "4h ago"),
+        ("current", "Yesterday"),
+        ("docs", "Yesterday"),
+        ("scratch", "Yesterday"),
+        ("it's literal; $HOME", "2d ago"),
     ]
     .into_iter()
     .enumerate()
-    .map(|(i, (id, name, age))| Launch {
+    .map(|(i, (name, age))| RecentDirectory {
         id: i as u64,
         path: format!("{HOME}/Projects/{name}"),
-        tool: tool(id),
         age: age.into(),
     })
     .collect()

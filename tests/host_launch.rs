@@ -22,12 +22,11 @@ fn validate(app: &mut App, result: Result<String, String>) {
 }
 #[test]
 fn confirmed_host_history_clear_waits_for_durable_acknowledgement() {
-    use launchpad_core::app::{Focus, Launch};
+    use launchpad_core::app::{Focus, RecentDirectory};
     let mut app = app();
-    app.history.push(Launch {
+    app.history.push(RecentDirectory {
         id: 1,
         path: "/home/fixture/a".into(),
-        tool: Tool::new("codex").unwrap(),
         age: "Yesterday".into(),
     });
     app.update(Action::Focus(Focus::History));

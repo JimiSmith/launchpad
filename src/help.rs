@@ -42,7 +42,7 @@ fn groups(app: &App) -> (Vec<Group>, Vec<Group>) {
         }
     }
     launch.push(Item::Note(if any {
-        "Shortcuts use the typed path, or the selected recent row.".into()
+        "Shortcuts use the typed path, or the selected Saved or Recent row.".into()
     } else {
         r#"Add shortcut = "alt+c" to a command for one-key launches."#.into()
     }));
@@ -71,16 +71,18 @@ fn groups(app: &App) -> (Vec<Group>, Vec<Group>) {
                 ("Shift+Tab", "Previous section"),
                 ("Ctrl+P", "Directory"),
                 ("Ctrl+T", "Tool"),
-                ("Ctrl+R", "Recent"),
+                ("Ctrl+R", "Saved / Recent"),
             ]),
         ),
         (
-            "Recent",
+            "Saved / Recent",
             keys(&[
+                ("← →", "Switch Saved / Recent"),
+                ("Ctrl+S", "Save directory"),
                 ("↑ ↓", "Choose entry"),
                 ("Home / End", "First / last"),
                 ("Delete", "Remove entry"),
-                ("Ctrl+L ×2", "Clear all"),
+                ("Ctrl+L ×2", "Clear Recent"),
             ]),
         ),
         (

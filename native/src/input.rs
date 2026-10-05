@@ -115,6 +115,7 @@ pub fn key_action(key: KeyEvent) -> Option<Action> {
             Char('a') => Some(Action::Home),
             Char('e') => Some(Action::End),
             Char('u') => Some(Action::Clear),
+            Char('s') => Some(Action::SaveDirectory),
             Char('l') => Some(Action::ClearHistory),
             _ => None,
         };
@@ -143,6 +144,15 @@ pub fn key_action(key: KeyEvent) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_directory_is_reserved_and_mapped() {
+        assert_eq!(
+            key_action(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+            Some(Action::SaveDirectory)
+        );
+        assert!(clashes(Shortcut::parse("ctrl+s").unwrap()));
+    }
 
     #[test]
     fn shortcuts_match_legacy_and_kitty_encodings() {

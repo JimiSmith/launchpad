@@ -10,7 +10,7 @@ use launchpad::{
     worker::{self, Reply, Request, Worker},
 };
 use launchpad_core::{
-    app::{Action, App, HistoryMutation, Launch},
+    app::{Action, App, HistoryMutation, Launch, RecentDirectory},
     view::{self, HitMap, Pointer},
 };
 use std::{
@@ -142,6 +142,8 @@ fn run(args: Args) -> Result<(), String> {
         serial: 0,
     };
     history.load(&mut app);
+    let saved = launchpad::saved::Store::new(&root);
+    load_saved(&saved, &mut app);
     if let (Some(handoff), Some(error)) = (&handoff, &shell_failure) {
         let mut message = format!("Default shell failed: {error}");
         if matches!(error, Failure::Rejected(_)) {
@@ -233,6 +235,18 @@ fn run(args: Args) -> Result<(), String> {
         }
         if let Some(mutation) = app.take_history_mutation() {
             history.mutate(&mut app, mutation);
+            dirty = true;
+        }
+        if let Some(mutation) = app.take_saved_mutation() {
+            match saved.mutate(mutation) {
+                Ok((paths, message)) => {
+                    app.replace_saved(paths);
+                    app.message = Some(message.into());
+                }
+                Err(error) => {
+                    app.message = Some(format!("Saved directories change failed: {error}"))
+                }
+            }
             dirty = true;
         }
         if let Some(launch) = app.take_launch() {
@@ -395,6 +409,7 @@ fn run(args: Args) -> Result<(), String> {
                 app.update(action);
                 if reset {
                     history.load(&mut app);
+                    load_saved(&saved, &mut app);
                 }
                 dirty = true;
             }
@@ -407,6 +422,12 @@ fn run(args: Args) -> Result<(), String> {
         host.finish(child, forward)?;
     }
     Ok(())
+}
+fn load_saved(store: &launchpad::saved::Store, app: &mut App) {
+    match store.load() {
+        Ok(paths) => app.replace_saved(paths),
+        Err(error) => app.message = Some(format!("Saved directories unavailable: {error}")),
+    }
 }
 struct History {
     store: Store,
@@ -439,10 +460,9 @@ impl History {
             .rows
             .iter()
             .enumerate()
-            .map(|(id, row)| Launch {
+            .map(|(id, row)| RecentDirectory {
                 id: id as u64,
                 path: row.path.clone(),
-                tool: row.tool,
                 age: history::age(row.opened_at, now),
             })
             .collect();
@@ -471,7 +491,6 @@ impl History {
         if let Err(error) = self.store.record(Entry {
             id: id.clone(),
             path: launch.path.clone(),
-            tool: launch.tool,
             opened_at,
         }) {
             eprintln!("Launchpad: history not saved: {error}");

@@ -398,8 +398,10 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     }
     let history_y = y;
     let available_rows = footer_y.saturating_sub(y + 1) as usize;
-    let count = app.history.len();
-    let start = app.recent.saturating_sub(available_rows.saturating_sub(1));
+    let count = app.list_len();
+    let start = app
+        .list_selected()
+        .saturating_sub(available_rows.saturating_sub(1));
     let range = if available_rows > 0 && available_rows < count {
         format!(
             "{}–{} / {}",
@@ -411,13 +413,31 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         String::new()
     };
     if y < footer_y {
-        section(
-            f,
-            at(area, y, 1),
-            "Recent",
-            &range,
-            app.focus == Focus::History,
+        let heading = at(area, y, 1);
+        section(f, heading, "", &range, app.focus == Focus::History);
+        let labels = Rect::new(
+            heading.x,
+            heading.y,
+            heading.width.saturating_sub(width(&range) as u16 + 1),
+            1,
         );
+        for (offset, label, selected) in [
+            (0, "Saved", app.show_saved),
+            (5, " / ", false),
+            (8, "Recent", !app.show_saved),
+        ] {
+            let style = if selected {
+                theme.accent().add_modifier(Modifier::UNDERLINED)
+            } else {
+                theme.muted()
+            };
+            row(
+                f,
+                Rect::new(labels.x + offset, y, width(label) as u16, 1).intersection(labels),
+                label,
+                style,
+            );
+        }
     }
     y += 1;
     hits.wheels.push((
@@ -429,32 +449,56 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
         ),
         ScrollTarget::History,
     ));
-    if app.history.is_empty() && y < footer_y {
-        row(f, at(area, y, 1), "No recent launches", theme.muted());
+    if count == 0 && y < footer_y {
+        row(
+            f,
+            at(area, y, 1),
+            if app.show_saved {
+                "No saved directories · Ctrl+S to save"
+            } else {
+                "No recent launches"
+            },
+            theme.muted(),
+        );
     }
-    for (i, event) in app
-        .history
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(available_rows)
-    {
-        let active = i == app.recent && app.focus == Focus::History;
-        let style = if active {
-            theme.accent().add_modifier(Modifier::UNDERLINED)
-        } else {
-            theme.base()
-        };
-        let a = at(area, y, 1);
-        hits.add(a, Action::SelectHistory(event.id));
-        let tool = if app.available(event.tool) {
-            app.tool_label(event.tool)
-        } else {
-            format!("! {}", app.tool_label(event.tool))
-        };
-        let tool = clip(&tool, (a.width / 2) as usize);
-        pair(f, a, &app.path_label(&event.path), &tool, style);
-        y += 1;
+    if app.show_saved {
+        for (i, path) in app
+            .saved
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(available_rows)
+        {
+            let active = i == app.saved_selected && app.focus == Focus::History;
+            let style = if active {
+                theme.accent().add_modifier(Modifier::UNDERLINED)
+            } else {
+                theme.base()
+            };
+            let a = at(area, y, 1);
+            hits.add(a, Action::SelectSaved(i));
+            row(f, a, &app.path_label(path), style);
+            y += 1;
+        }
+    } else {
+        for (i, event) in app
+            .history
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(available_rows)
+        {
+            let active = i == app.recent && app.focus == Focus::History;
+            let style = if active {
+                theme.accent().add_modifier(Modifier::UNDERLINED)
+            } else {
+                theme.base()
+            };
+            let a = at(area, y, 1);
+            hits.add(a, Action::SelectHistory(event.id));
+            row(f, a, &app.path_label(&event.path), style);
+            y += 1;
+        }
     }
     dim_section(
         f,
@@ -471,11 +515,11 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     let hints = match app.focus {
         Focus::Path if area.width < 60 && app.highlighted.is_some() => "Tab next · ↵ choose",
         Focus::Tools if area.width < 60 => "Tab next · ←→ · ↵ launch",
-        Focus::History if area.width < 60 => "Tab next · ↑↓ · ↵ launch",
+        Focus::History if area.width < 60 => "←→ lists · ↑↓ · ↵ launch",
         Focus::Path if app.highlighted.is_some() => "Tab next · ↵ choose directory",
         Focus::Path => "Tab next · ↵ launch",
         Focus::Tools => "Tab next · ←→ tool · ↵ launch",
-        Focus::History => "Tab next · ↑↓ recent · ↵ launch",
+        Focus::History => "←→ Saved/Recent · ↑↓ select · ↵ launch",
     };
     row(
         f,

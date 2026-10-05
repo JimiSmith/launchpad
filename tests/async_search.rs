@@ -44,10 +44,9 @@ fn segment_actions_are_ignored_outside_active_path_editor() {
     ] {
         let mut app = App::from_remote("/home/example".into());
         app.editor.set("foo/bar");
-        app.history.push(launchpad_core::app::Launch {
+        app.history.push(launchpad_core::app::RecentDirectory {
             id: 1,
             path: "/home/example/foo/bar".into(),
-            tool: launchpad_core::app::Tool::Shell,
             age: "now".into(),
         });
         app.focus = focus;
@@ -433,7 +432,7 @@ fn old_index_revision_cannot_replace_newer_results() {
 }
 #[test]
 fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
-    use launchpad_core::app::{Focus, Launch, Tool};
+    use launchpad_core::app::{Focus, RecentDirectory};
     for action in [Action::Reset, Action::Quit, Action::Escape] {
         let mut app = App::from_remote("/home/example".into());
         app.take_remote_request();
@@ -450,10 +449,9 @@ fn reset_close_quit_failure_and_section_navigation_keep_pending_work_safe() {
     assert!(app.message.as_deref().unwrap().contains("timed out"));
     assert!(app.history.is_empty());
     let mut app = App::from_remote("/home/example".into());
-    app.history.push(Launch {
+    app.history.push(RecentDirectory {
         id: 1,
         path: "/home/example/saved".into(),
-        tool: Tool::Shell,
         age: "now".into(),
     });
     app.take_remote_request();

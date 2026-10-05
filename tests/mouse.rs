@@ -2,7 +2,7 @@ mod common;
 
 use common::app;
 use launchpad_core::{
-    app::{Action, App, Focus},
+    app::{Action, App, Focus, Tool},
     remote::RemoteRequest,
     view::{self, HitMap, Pointer},
 };
@@ -69,7 +69,7 @@ fn history_click_selects_only_then_replay_is_explicit() {
         let event = app.history[9].clone();
         app.update(Action::Tab);
         assert_eq!(app.focus, Focus::Path);
-        assert_eq!(app.tool, event.tool, "recent selection fills the form");
+        assert_eq!(app.tool, Tool::Shell, "recent selection fills the form");
         assert_eq!(app.editor.text, app.path_label(&event.path));
         assert!(app.take_launch().is_none());
         app.update(Action::Focus(Focus::History));
@@ -79,7 +79,7 @@ fn history_click_selects_only_then_replay_is_explicit() {
         let launch = app
             .take_launch()
             .expect("replay hands one launch to the host");
-        assert_eq!((launch.path, launch.tool), (event.path, event.tool));
+        assert_eq!((launch.path, launch.tool), (event.path, Tool::Shell));
     }
 }
 fn wheel(app: &mut App, w: u16, h: u16, x: u16, y: u16, down: bool) {
@@ -160,7 +160,6 @@ fn explicit_launch_back_help_reset_and_quit_controls() {
 }
 #[test]
 fn tool_click_selects_and_focuses_without_launch_even_when_wrapped() {
-    use launchpad_core::app::Tool;
     for (w, h) in [(80, 24), (120, 36), (40, 12)] {
         let mut app = app();
         click_label(&mut app, w, h, "Codex");
@@ -236,7 +235,7 @@ fn scrolled_suggestions_click_the_visible_result() {
     assert!(app.take_launch().is_none());
 }
 #[test]
-fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
+fn unavailable_selected_tool_and_empty_lists_do_not_launch_or_fall_back() {
     let mut app = app();
     // This instance's configuration no longer defines the copilot command.
     app.configure(&std::collections::BTreeMap::from([
@@ -244,7 +243,8 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
         ("command_claude".to_string(), "claude".to_string()),
     ]));
     let row = app.history[5].clone();
-    assert!(!app.available(row.tool));
+    app.tool = Tool::new("copilot").unwrap();
+    assert!(!app.available(app.tool));
     app.update(Action::SelectHistory(row.id));
     app.update(Action::Enter);
     settle(&mut app, Ok(row.path.clone()));
@@ -253,7 +253,8 @@ fn unavailable_history_and_empty_lists_do_not_launch_or_fall_back() {
     app.update(Action::Tab);
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(
-        app.tool, row.tool,
+        app.tool,
+        Tool::new("copilot").unwrap(),
         "removed tools must not silently become Shell"
     );
     app.history.clear();
@@ -295,17 +296,21 @@ fn recent_selection_keeps_launch_button_and_keyboard_in_agreement() {
     ] {
         for submit in [Action::Enter, Action::LaunchForm] {
             let mut a = app();
+            a.tool = Tool::new("codex").unwrap();
             a.update(selection.clone());
             a.update(Action::Down);
             let expected = a.history[a.recent].clone();
             assert_eq!(a.editor.text, a.path_label(&expected.path));
-            assert_eq!(a.tool, expected.tool);
+            assert_eq!(a.tool, Tool::new("codex").unwrap());
             assert!(a.suggestions.is_empty());
             assert!(a.take_launch().is_none());
             a.update(submit);
             assert_eq!(settle(&mut a, Ok(expected.path.clone())), expected.path);
             let launch = a.take_launch().unwrap();
-            assert_eq!((launch.path, launch.tool), (expected.path, expected.tool));
+            assert_eq!(
+                (launch.path, launch.tool),
+                (expected.path, Tool::new("codex").unwrap())
+            );
         }
     }
     let mut a = app();
@@ -314,5 +319,5 @@ fn recent_selection_keeps_launch_button_and_keyboard_in_agreement() {
     history.remove(0);
     a.replace_history(history);
     assert_eq!(a.editor.text, a.path_label(&a.history[0].path));
-    assert_eq!(a.tool, a.history[0].tool);
+    assert_eq!(a.tool, Tool::Shell);
 }

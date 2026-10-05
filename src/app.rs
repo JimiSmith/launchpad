@@ -15,15 +15,24 @@ pub struct Launch {
     pub age: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentDirectory {
+    pub id: u64,
+    pub path: String,
+    pub age: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Scroll(ScrollTarget, bool),
     PathCursor(usize),
     AcceptSuggestion(usize),
     SelectTool(Tool),
     SelectHistory(u64),
+    SelectSaved(usize),
+    ShowSaved(bool),
+    SaveDirectory,
     LaunchForm,
     /// A configured command shortcut: launch the typed path, or the selected
-    /// recent row's directory, with this tool.
+    /// Saved or Recent row's directory, with this tool.
     Shortcut(Tool),
     Text(String),
     Left,
@@ -54,6 +63,11 @@ pub enum HistoryMutation {
     Clear,
     Remove(u64),
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SavedMutation {
+    Add(String),
+    Remove(String),
+}
 #[derive(Debug)]
 pub struct App {
     pub editor: Editor,
@@ -66,8 +80,13 @@ pub struct App {
     pub theme: crate::theme::Theme,
     pub theme_errors: Vec<String>,
     pub ignore_errors: Vec<String>,
-    pub history: Vec<Launch>,
+    pub history: Vec<RecentDirectory>,
     pub recent: usize,
+    pub saved: Vec<String>,
+    pub saved_selected: usize,
+    pub show_saved: bool,
+    saved_initialized: bool,
+    saved_request: Option<SavedMutation>,
     pub message: Option<String>,
     pub help: bool,
     pub help_scroll: usize,
@@ -113,6 +132,11 @@ impl Default for App {
             ignore_errors: Vec::new(),
             history: Vec::new(),
             recent: 0,
+            saved: Vec::new(),
+            saved_selected: 0,
+            show_saved: false,
+            saved_initialized: false,
+            saved_request: None,
             message: None,
             help: false,
             help_scroll: 0,
@@ -163,6 +187,58 @@ impl App {
     }
     pub fn take_history_mutation(&mut self) -> Option<HistoryMutation> {
         self.history_request.take()
+    }
+    pub fn take_saved_mutation(&mut self) -> Option<SavedMutation> {
+        self.saved_request.take()
+    }
+    pub fn replace_saved(&mut self, mut paths: Vec<String>) {
+        let selected = self.saved.get(self.saved_selected).cloned();
+        paths.sort();
+        paths.dedup();
+        self.saved = paths;
+        self.saved_selected = selected
+            .and_then(|p| self.saved.iter().position(|s| s == &p))
+            .unwrap_or(self.saved_selected.min(self.saved.len().saturating_sub(1)));
+        if !self.saved_initialized {
+            self.show_saved = !self.saved.is_empty();
+            self.saved_initialized = true;
+        }
+        let message = self.message.take();
+        self.sync_recent();
+        self.message = message;
+    }
+    pub fn list_len(&self) -> usize {
+        if self.show_saved {
+            self.saved.len()
+        } else {
+            self.history.len()
+        }
+    }
+    pub fn list_selected(&self) -> usize {
+        if self.show_saved {
+            self.saved_selected
+        } else {
+            self.recent
+        }
+    }
+    fn selected_path(&self) -> Option<String> {
+        if self.show_saved {
+            self.saved.get(self.saved_selected).cloned()
+        } else {
+            self.history.get(self.recent).map(|e| e.path.clone())
+        }
+    }
+    fn finish_save(&mut self, path: String) {
+        if self.saved.contains(&path) {
+            self.message = Some("Already saved".into());
+        } else if self.simulate_launch {
+            let mut paths = self.saved.clone();
+            paths.push(path);
+            self.replace_saved(paths);
+            self.message = Some("Directory saved".into());
+        } else {
+            self.saved_request = Some(SavedMutation::Add(path));
+        }
     }
     pub fn take_launch(&mut self) -> Option<Launch> {
         self.launch_request.take()
@@ -278,6 +354,7 @@ impl App {
                     self.touched = true;
                 }
                 crate::remote::Validation::Launch(tool) => self.finish_launch(path, tool),
+                crate::remote::Validation::Save => self.finish_save(path),
             },
         }
         true
@@ -403,7 +480,7 @@ impl App {
         // Likewise, repeated submit must not replace an in-flight launch request.
         if matches!(
             action,
-            Action::Enter | Action::LaunchForm | Action::Shortcut(_)
+            Action::Enter | Action::LaunchForm | Action::Shortcut(_) | Action::SaveDirectory
         ) && self.remote.as_ref().is_some_and(|r| r.validation.is_some())
         {
             return;
@@ -413,11 +490,13 @@ impl App {
         let changes_validation_intent = match &action {
             Action::Focus(focus) => *focus != self.focus,
             Action::PathCursor(_) => self.focus != Focus::Path,
-            Action::Left | Action::Right => self.focus == Focus::Tools,
+            Action::Left | Action::Right => self.focus != Focus::Path,
             Action::Up => self.focus != Focus::Path,
             Action::Down => self.focus != Focus::Path || self.suggestions.is_empty(),
             Action::Home | Action::End => self.focus == Focus::History,
             Action::SelectTool(_)
+            | Action::SelectSaved(_)
+            | Action::ShowSaved(_)
             | Action::SelectHistory(_)
             | Action::Scroll(ScrollTarget::History, _)
             | Action::ClearHistory
@@ -439,6 +518,7 @@ impl App {
                         | Action::AcceptSuggestion(_)
                         | Action::LaunchForm
                         | Action::Shortcut(_)
+                        | Action::SaveDirectory
                         | Action::Escape
                         | Action::Reset
                         | Action::Help
@@ -470,7 +550,15 @@ impl App {
             let index = self.index.as_ref().map(|i| i.restart());
             let status = self.search_status.clone();
             let windows_paths = self.editor.windows_paths;
+            let saved = std::mem::take(&mut self.saved);
+            let saved_selected = self.saved_selected;
+            let show_saved = self.show_saved;
+            let saved_initialized = self.saved_initialized;
             *self = Self::default();
+            self.saved = saved;
+            self.saved_selected = saved_selected;
+            self.show_saved = show_saved;
+            self.saved_initialized = saved_initialized;
             self.editor.windows_paths = windows_paths;
             if let Some(index) = index {
                 self.search_status = index.status();
@@ -578,14 +666,49 @@ impl App {
             self.sync_recent();
             return;
         }
-        if action == Action::LaunchForm {
-            if self.focus == Focus::History
-                && let Some(event) = self.history.get(self.recent).cloned()
-            {
-                self.launch(event.path, event.tool);
-                return;
+        if action == Action::SaveDirectory {
+            let raw = if self.focus == Focus::History {
+                self.selected_path()
+            } else {
+                None
             }
-            self.launch(self.editor.text.clone(), self.tool);
+            .unwrap_or_else(|| self.editor.text.clone());
+            if self.remote.is_some() {
+                self.request_validation(raw, crate::remote::Validation::Save);
+            } else if let Some(index) = &self.index {
+                match index.validate(&raw) {
+                    Ok(path) => self.finish_save(path),
+                    Err(error) => self.message = Some(error),
+                }
+            } else {
+                self.message = Some(self.search_status.clone());
+            }
+            return;
+        }
+        if let Action::ShowSaved(saved) = action {
+            self.show_saved = saved;
+            self.saved_initialized = true;
+            self.focus = Focus::History;
+            self.sync_recent();
+            return;
+        }
+        if let Action::SelectSaved(index) = action {
+            if index < self.saved.len() {
+                self.saved_selected = index;
+                self.show_saved = true;
+                self.focus = Focus::History;
+                self.sync_recent();
+            }
+            return;
+        }
+        if action == Action::LaunchForm {
+            let path = if self.focus == Focus::History {
+                self.selected_path()
+            } else {
+                None
+            }
+            .unwrap_or_else(|| self.editor.text.clone());
+            self.launch(path, self.tool);
             return;
         }
         if let Action::Shortcut(tool) = action {
@@ -596,7 +719,7 @@ impl App {
             self.touched = true;
             // Suggestions stay unaccepted: the shortcut uses the typed text.
             let path = (self.focus == Focus::History)
-                .then(|| self.history.get(self.recent).map(|e| e.path.clone()))
+                .then(|| self.selected_path())
                 .flatten()
                 .unwrap_or_else(|| self.editor.text.clone());
             self.launch(path, tool);
@@ -604,7 +727,7 @@ impl App {
         }
         if let Action::Scroll(target, down) = action {
             match target {
-                ScrollTarget::History if !self.history.is_empty() => {
+                ScrollTarget::History if self.list_len() > 0 => {
                     self.focus = Focus::History;
                     self.update(if down { Action::Down } else { Action::Up });
                 }
@@ -626,6 +749,7 @@ impl App {
         }
         if let Action::SelectHistory(id) = action {
             if let Some(index) = self.history.iter().position(|e| e.id == id) {
+                self.show_saved = false;
                 self.recent = index;
                 self.focus = Focus::History;
                 self.sync_recent();
@@ -733,23 +857,35 @@ impl App {
                 _ => {}
             },
             Focus::History => match action {
-                Action::Up => {
-                    self.recent = self.recent.saturating_sub(1);
-                    self.sync_recent();
-                }
-                Action::Down => {
-                    self.recent = (self.recent + 1).min(self.history.len().saturating_sub(1));
-                    self.sync_recent();
-                }
-                Action::Home => {
-                    self.recent = 0;
-                    self.sync_recent();
-                }
-                Action::End => {
-                    self.recent = self.history.len().saturating_sub(1);
+                Action::Left | Action::Right => self.update(Action::ShowSaved(!self.show_saved)),
+                Action::Up | Action::Down | Action::Home | Action::End => {
+                    let last = self.list_len().saturating_sub(1);
+                    let selected = self.list_selected();
+                    let next = match action {
+                        Action::Up => selected.saturating_sub(1),
+                        Action::Down => (selected + 1).min(last),
+                        Action::Home => 0,
+                        _ => last,
+                    };
+                    if self.show_saved {
+                        self.saved_selected = next;
+                    } else {
+                        self.recent = next;
+                    }
                     self.sync_recent();
                 }
                 Action::Enter => self.update(Action::LaunchForm),
+                Action::Delete if self.show_saved => {
+                    if let Some(path) = self.selected_path() {
+                        if self.simulate_launch {
+                            let paths =
+                                self.saved.iter().filter(|p| **p != path).cloned().collect();
+                            self.replace_saved(paths);
+                        } else {
+                            self.saved_request = Some(SavedMutation::Remove(path));
+                        }
+                    }
+                }
                 Action::Delete => {
                     if let Some(row) = self.history.get(self.recent) {
                         if self.simulate_launch {
@@ -761,7 +897,7 @@ impl App {
                     self.recent = self.recent.min(self.history.len().saturating_sub(1));
                     self.sync_recent();
                 }
-                Action::ClearHistory => {
+                Action::ClearHistory if !self.show_saved => {
                     if self.confirm_clear {
                         if self.simulate_launch {
                             self.history.clear();
@@ -781,15 +917,13 @@ impl App {
             },
         }
     }
-    // A recent selection fills the form, so mouse Launch and Enter agree.
-    // Keep removed command IDs intact: validation must never substitute Shell.
+    // List selection fills the form, so mouse Launch and Enter agree.
     fn sync_recent(&mut self) {
         if self.focus != Focus::History {
             return;
         }
-        if let Some(event) = self.history.get(self.recent) {
-            self.editor.set(&self.path_label(&event.path));
-            self.tool = event.tool;
+        if let Some(path) = self.selected_path() {
+            self.editor.set(&self.path_label(&path));
             self.show_suggestions = false;
             self.suggestions.clear();
             self.highlighted = None;
@@ -807,7 +941,7 @@ impl App {
     }
 
     /// Replace host history and keep the selected row consistent with the form.
-    pub fn replace_history(&mut self, history: Vec<Launch>) {
+    pub fn replace_history(&mut self, history: Vec<RecentDirectory>) {
         let message = self.message.take();
         self.history = history;
         self.recent = self.recent.min(self.history.len().saturating_sub(1));
@@ -890,9 +1024,15 @@ impl App {
                 self.tool_label(tool),
                 self.path_label(&event.path)
             ));
-            self.history
-                .retain(|row| row.tool != event.tool || row.path != event.path);
-            self.history.insert(0, event);
+            self.history.retain(|row| row.path != event.path);
+            self.history.insert(
+                0,
+                RecentDirectory {
+                    id: event.id,
+                    path: event.path,
+                    age: event.age,
+                },
+            );
             self.history.truncate(10);
             self.recent = 0;
             return;
@@ -940,6 +1080,97 @@ mod tests {
     fn query(app: &mut App, text: &str) {
         app.update(Action::Clear);
         app.update(Action::Text(text.into()));
+    }
+
+    #[test]
+    fn saved_defaults_switching_refresh_and_tool_independence() {
+        let mut a = app();
+        a.replace_saved(vec![format!("{HOME}/z"), format!("{HOME}/a")]);
+        assert!(a.show_saved);
+        a.tool = tool("codex");
+        a.update(Action::Focus(Focus::History));
+        assert_eq!(a.editor.text, "~/a");
+        assert_eq!(a.tool, tool("codex"));
+        a.update(Action::Down);
+        assert_eq!(a.editor.text, "~/z");
+        a.update(Action::Enter);
+        validate(&mut a, Ok(format!("{HOME}/z")));
+        assert_eq!(a.take_launch().unwrap().tool, tool("codex"));
+        a.launch_rejected();
+        a.update(Action::Right);
+        assert!(!a.show_saved);
+        a.update(Action::Reset);
+        a.replace_saved(vec![format!("{HOME}/a")]);
+        assert!(!a.show_saved, "refresh preserves chosen list");
+        a.update(Action::Focus(Focus::History));
+        a.update(Action::Left);
+        a.update(Action::ClearHistory);
+        assert!(!a.confirm_clear, "bulk clear belongs to Recent only");
+        a.update(Action::Delete);
+        assert_eq!(
+            a.take_saved_mutation(),
+            Some(SavedMutation::Remove(format!("{HOME}/a")))
+        );
+        assert_eq!(a.saved.len(), 1, "wait for persistence before removing");
+        a.replace_saved(Vec::new());
+        assert!(a.show_saved, "only startup chooses a default");
+    }
+
+    #[test]
+    fn save_validates_typed_path_without_launching_or_switching_lists() {
+        let mut a = app();
+        a.replace_saved(Vec::new());
+        query(&mut a, "~/a");
+        results(&mut a, &["/home/example/another"]);
+        a.update(Action::Down);
+        a.update(Action::SaveDirectory);
+        let Some(RemoteRequest::Validate { generation, raw }) = a.take_remote_request() else {
+            panic!()
+        };
+        assert_eq!(raw, "~/a");
+        a.finish_remote_validation(generation, Ok(format!("{HOME}/a")));
+        assert_eq!(
+            a.take_saved_mutation(),
+            Some(SavedMutation::Add(format!("{HOME}/a")))
+        );
+        assert!(a.take_launch().is_none());
+        assert!(a.history.is_empty());
+        a.replace_saved(vec![format!("{HOME}/a")]);
+        assert!(!a.show_saved, "saving the first entry keeps Recent visible");
+        a.update(Action::SaveDirectory);
+        validate(&mut a, Ok(format!("{HOME}/a")));
+        assert_eq!(a.message.as_deref(), Some("Already saved"));
+        assert!(a.take_saved_mutation().is_none());
+        a.update(Action::SaveDirectory);
+        validate(&mut a, Err("Directory unavailable".into()));
+        assert!(a.take_saved_mutation().is_none());
+    }
+
+    #[test]
+    fn save_recent_and_stale_save_reply_cannot_change_new_intent() {
+        let mut a = app();
+        a.replace_saved(Vec::new());
+        a.history = vec![RecentDirectory {
+            id: 1,
+            path: format!("{HOME}/recent"),
+            age: String::new(),
+        }];
+        a.update(Action::Focus(Focus::History));
+        a.update(Action::SaveDirectory);
+        let Some(RemoteRequest::Validate { generation, raw }) = a.take_remote_request() else {
+            panic!()
+        };
+        assert_eq!(raw, format!("{HOME}/recent"));
+        a.update(Action::Right);
+        assert!(!a.finish_remote_validation(generation, Ok(raw)));
+        assert!(a.take_saved_mutation().is_none());
+        a.update(Action::Left);
+        a.update(Action::SaveDirectory);
+        validate(&mut a, Ok(format!("{HOME}/recent")));
+        assert_eq!(
+            a.take_saved_mutation(),
+            Some(SavedMutation::Add(format!("{HOME}/recent")))
+        );
     }
 
     #[test]
@@ -1075,33 +1306,28 @@ mod tests {
     }
 
     #[test]
-    fn simulated_history_deduplicates_tool_directory_pairs() {
+    fn simulated_history_deduplicates_directories_across_tools() {
         let mut a = app();
         a.simulate_launch = true;
         for id in ["shell", "codex", "shell"] {
             a.finish_launch("/home/example/notes".into(), tool(id));
         }
-        assert_eq!(a.history.len(), 2);
-        assert_eq!(a.history[0].tool, Tool::Shell);
+        assert_eq!(a.history.len(), 1);
         assert_eq!(a.history[0].id, 3);
-        assert_eq!(a.history[1].tool, tool("codex"));
-        assert_eq!(a.history[1].id, 2);
     }
 
     #[test]
     fn history_mutations_wait_for_the_store_unless_simulating() {
         let mut a = app();
         a.history = vec![
-            Launch {
+            RecentDirectory {
                 id: 0,
                 path: "/home/example/a".into(),
-                tool: Tool::Shell,
                 age: "1h ago".into(),
             },
-            Launch {
+            RecentDirectory {
                 id: 1,
                 path: "/home/example/b".into(),
-                tool: tool("claude"),
                 age: "2h ago".into(),
             },
         ];
@@ -1148,12 +1374,11 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_on_a_recent_row_replaces_its_tool() {
+    fn shortcut_launches_its_tool_in_the_recent_directory() {
         let mut a = app();
-        a.history = vec![Launch {
+        a.history = vec![RecentDirectory {
             id: 0,
             path: "/home/example/Projects/notes".into(),
-            tool: Tool::Shell,
             age: "12m ago".into(),
         }];
         a.update(Action::Focus(Focus::History));
@@ -1188,13 +1413,13 @@ mod tests {
     }
 
     #[test]
-    fn history_replay_never_substitutes_a_removed_command() {
+    fn history_selection_preserves_the_selected_tool_even_if_unavailable() {
         let mut a = app();
         let removed = tool("retired");
-        a.history = vec![Launch {
+        a.tool = removed;
+        a.history = vec![RecentDirectory {
             id: 0,
             path: "/home/example/Projects/notes".into(),
-            tool: removed,
             age: "12m ago".into(),
         }];
         a.update(Action::Focus(Focus::History));

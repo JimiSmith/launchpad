@@ -321,7 +321,7 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                     assert record['argv'] == ['a b', '', '$HOME', ';', '$(touch NO_EXPANSION)'], record
                 state = json.loads((s.out / 'state/launchpad/history.json').read_text())
                 assert state['entries'][0]['path'] == str(target)
-                assert state['entries'][0]['tool'] == selected.lower()
+                assert 'tool' not in state['entries'][0]
                 s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit ' + ('17' if floating else '0') + '\n')
                 s.pump(.4)
                 assert [p['id'] for p in s.panes() if not p['is_plugin']] == [neighbor['id']]
@@ -358,8 +358,8 @@ def interactive_shell_history_cases():
                 state = json.loads((state_root / 'history.json').read_text())
                 assert len(state['entries']) == 2, (state, log.read_text())
                 assert state['entries'][0]['path'] == str(s.cwd), (state, log.read_text())
-                assert state['entries'][0]['tool'] == selected.lower()
-                assert state['entries'][1] == previous
+                assert 'tool' not in state['entries'][0]
+                assert state['entries'][1] == {k: v for k, v in previous.items() if k != 'tool'}
                 print('PASS interactive shell preserves history', selected,
                       'floating' if floating else 'tiled', s.out, flush=True)
             finally:
@@ -408,6 +408,50 @@ def recovery_cases():
         s.close()
 
 
+def saved_directory_cases():
+    s = Session()
+    def expect_list(saved):
+        s.expect('Saved / Recent')
+        y, line = next((y, line) for y, line in enumerate(s.screen.display)
+                       if 'Saved / Recent' in line)
+        x = line.index('Saved / Recent')
+        assert s.screen.buffer[y][x].underscore == saved, s.display()
+        assert s.screen.buffer[y][x + 8].underscore != saved, s.display()
+    try:
+        s.wait_indexed()
+        expect_list(False)
+        before = s.records()
+        s.send('\x13')  # Ctrl+S saves the invoking cwd without launching.
+        s.expect('Directory saved')
+        saved_file = s.out / 'state/launchpad/saved.json'
+        assert json.loads(saved_file.read_text())['directories'] == [str(s.cwd)]
+        expect_list(False)
+        assert s.records() == before
+        s.send('\x13')
+        s.expect('Already saved')
+        s.send('\x14\x1b[C\x12\x1b[D')  # Fixture, list focus, Saved.
+        expect_list(True)
+        assert any('Fixture' in line and 'Launch' in line for line in s.screen.display), s.display()
+        s.send('\r')
+        s.wait_record('fixture', str(s.cwd))
+        s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
+        s.wait_indexed()
+        expect_list(True)
+        s.send('\x12\x1b[C\x1b[15~')  # Choose Recent, then F5 keeps it.
+        s.wait_indexed()
+        expect_list(False)
+        s.send('\x12\x1b[D\x1b[3~')
+        s.expect('No saved directories')
+        assert json.loads(saved_file.read_text())['directories'] == []
+        assert json.loads((s.out / 'state/launchpad/history.json').read_text())['entries']
+        s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
+        s.wait_indexed()
+        expect_list(False)
+        print('PASS saved directories, shortcut, tool preservation, reopen, refresh and delete', flush=True)
+    finally:
+        s.close()
+
+
 def history_and_layout_cases():
     s = Session()
     try:
@@ -421,29 +465,29 @@ def history_and_layout_cases():
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
         s.wait_indexed()
         s.expect('Recent')
-        assert any('Fixture' in line and '~/space 修理 literal' in line
+        assert any('~/space 修理 literal' in line
                    for line in s.screen.display), s.display()
         s.expect('Shell')
         records_before = s.records()
         s.send('\x12')
-        s.expect('↑↓ recent')
+        s.expect('↑↓ select')
         # Recent selection fills the form but never launches on selection or Tab.
         selected_path = next(line for line in s.screen.display if '› ~/space 修理 literal' in line)
         s.send('\t')
         s.expect('Tab next · ↵ launch')
         assert selected_path in s.screen.display, s.display()
-        assert any('Fixture' in line and 'Launch' in line for line in s.screen.display), s.display()
+        assert any('Shell' in line and 'Launch' in line for line in s.screen.display), s.display()
         assert s.records() == records_before, s.records()
 
-        # Replay must use the remembered directory and command shown in the form.
+        # Recent must use the selected Shell, despite the prior Fixture launch.
         s.send('\x12\r')
-        s.wait_record('fixture', str(s.cwd), count=2)
+        s.wait_record('default-shell', str(s.cwd))
         s.expect('FIXTURE_READY')
         records = s.records()
         assert len(records) == len(records_before) + 1, records
-        assert records[-1]['exe'] == 'fixture', records
+        assert records[-1]['exe'] == 'default-shell', records
         assert records[-1]['cwd'] == str(s.cwd), records
-        assert records[-1]['argv'] == ['a b', '', '$HOME', ';', '$(touch NO_EXPANSION)'], records
+        assert records[-1]['argv'] == [], records
         launched = next(p for p in s.panes() if not p['is_plugin'] and p['title'] != 'neighbor')
         s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
         s.pump(.3)
@@ -533,16 +577,16 @@ def shortcut_cases():
         assert launched['tab_name'] == 'notes · Keys', launched
         s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit 0\n')
         s.pump(.3)
-        # On a recent row, a legacy-encoded Alt+F replaces the row's tool.
+        # On a recent row, a legacy-encoded Alt+F launches Fixture in that directory.
         s.cli('action', 'new-tab', '--layout', str(ROOT / 'examples/launchpad.kdl'))
         s.wait_indexed()
         s.send('\x12')
-        s.expect('↑↓ recent')
+        s.expect('↑↓ select')
         s.send('\x1bf')
         s.wait_record('fixture', str(s.home / 'notes'))
         state = json.loads((s.out / 'state/launchpad/history.json').read_text())
-        assert [(e['path'], e['tool']) for e in state['entries'][:2]] == [
-            (str(s.home / 'notes'), 'fixture'), (str(s.home / 'notes'), 'keys')], state
+        assert [e['path'] for e in state['entries']] == [str(s.home / 'notes')], state
+        assert all('tool' not in e for e in state['entries']), state
         print('PASS configured shortcuts, typed text and recent row', s.out, flush=True)
     finally:
         s.close()
@@ -745,6 +789,7 @@ if __name__ == '__main__':
                auto_name_tabs=False)
         interactive_shell_history_cases()
         recovery_cases()
+        saved_directory_cases()
         history_and_layout_cases()
         shortcut_cases()
         hangup_case()
