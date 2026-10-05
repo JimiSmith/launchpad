@@ -201,7 +201,7 @@ fn many_long_unicode_labels_keep_selected_control_visible_and_clickable() {
             );
             for y in 0..h {
                 for x in 0..w {
-                    if w > 96 && !((w - 96) / 2..(w - 96) / 2 + 96).contains(&x) {
+                    if w > 134 && !((w - 134) / 2..(w - 134) / 2 + 134).contains(&x) {
                         assert!(hits.action(Pointer::Click, x, y, area).is_none());
                         assert_eq!(terminal.backend().buffer()[(x, y)].symbol(), " ");
                     }
@@ -234,7 +234,7 @@ fn every_keys_screen_row_is_reachable_at_narrow_and_wide_sizes() {
             // A long status wraps under the key column.
             app.search_status = format!("{} END_OF_STATUS", label);
             app.update(Action::Help);
-            let inner = (w.min(96) - if w >= 80 { 4 } else { 2 }) as usize;
+            let inner = (w.min(134) - if w >= 80 { 4 } else { 2 }) as usize;
             let expected = help::lines(&app, inner);
             assert!(
                 expected

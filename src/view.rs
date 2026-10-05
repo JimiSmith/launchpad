@@ -166,7 +166,7 @@ fn render_ui(f: &mut Canvas, app: &App, hits: &mut HitMap) {
     let theme = f.theme;
     let viewport = f.area();
     f.render_widget(Block::default().style(theme.base()), viewport);
-    let width = viewport.width.min(96);
+    let width = viewport.width.min(134);
     let full = Rect::new(
         viewport.x + (viewport.width - width) / 2,
         viewport.y,

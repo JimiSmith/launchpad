@@ -92,7 +92,7 @@ fn help_scrolls_at_small_sizes_and_unicode_cells_do_not_shift_neighbors() {
     }
 }
 #[test]
-fn wide_terminals_center_a_maximum_96_column_ui_and_mouse_targets() {
+fn wide_terminals_center_a_maximum_134_column_ui_and_mouse_targets() {
     use ratatui::layout::Rect;
     use view::Pointer;
 
@@ -111,20 +111,20 @@ fn wide_terminals_center_a_maximum_96_column_ui_and_mouse_targets() {
 
     for app in states {
         for height in [24, 36] {
-            let mut baseline = Terminal::new(TestBackend::new(96, height)).unwrap();
+            let mut baseline = Terminal::new(TestBackend::new(134, height)).unwrap();
             let mut base_hits = view::HitMap::default();
             baseline
                 .draw(|f| base_hits = view::render_with_hits(f, &app))
                 .unwrap();
-            for width in [97, 160, 241] {
-                let offset = (width - 96) / 2;
+            for width in [135, 160, 241] {
+                let offset = (width - 134) / 2;
                 let mut wide = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut hits = view::HitMap::default();
                 wide.draw(|f| hits = view::render_with_hits(f, &app))
                     .unwrap();
                 for y in 0..height {
                     for x in 0..width {
-                        if x >= offset && x < offset + 96 {
+                        if x >= offset && x < offset + 134 {
                             assert_eq!(
                                 wide.backend().buffer()[(x, y)],
                                 baseline.backend().buffer()[(x - offset, y)],
@@ -135,12 +135,12 @@ fn wide_terminals_center_a_maximum_96_column_ui_and_mouse_targets() {
                         }
                         for pointer in [Pointer::Click, Pointer::ScrollUp, Pointer::ScrollDown] {
                             let actual = hits.action(pointer, x, y, Rect::new(0, 0, width, height));
-                            let expected = if x >= offset && x < offset + 96 {
+                            let expected = if x >= offset && x < offset + 134 {
                                 base_hits.action(
                                     pointer,
                                     x - offset,
                                     y,
-                                    Rect::new(0, 0, 96, height),
+                                    Rect::new(0, 0, 134, height),
                                 )
                             } else {
                                 None
@@ -283,7 +283,7 @@ fn narrow_view_scrolls_history_and_tiny_view_has_no_hidden_launch_controls() {
 fn resized_layout_keeps_launch_history_and_errors_reachable() {
     use ratatui::layout::Rect;
     use view::Pointer;
-    for w in [40, 48, 60, 80, 96, 160] {
+    for w in [40, 48, 60, 80, 96, 134, 160] {
         for h in 10..=36 {
             let mut a = app();
             a.commands.entries[1].label = "A long custom tool label with 修理".into();
