@@ -8,9 +8,10 @@ fn initial_cwd_is_a_full_identity_and_one_enter_validates_once_during_indexing()
     let cwd = format!("/home/owned/{} 修理 e\u{301}; $HOME", "long".repeat(40));
     let mut app = App::from_remote("/home/owned".into());
     app.set_initial_cwd(cwd.clone());
+    assert_eq!(app.editor.text, "");
     assert_eq!(
-        app.editor.text,
-        format!("~/{}", cwd.strip_prefix("/home/owned/").unwrap())
+        app.blank_path_target(),
+        Some(format!("~/{}", cwd.strip_prefix("/home/owned/").unwrap()))
     );
     assert_eq!(app.tool, Tool::Shell);
     assert_eq!(app.focus, Focus::Path);
@@ -50,7 +51,7 @@ fn reset_restores_original_identity_and_shell_but_editing_stays_normal_search() 
     };
     assert_eq!(text, "needle");
     app.update(Action::Reset);
-    assert_eq!(app.editor.text, "/outside/notes");
+    assert_eq!(app.editor.text, "");
     assert_eq!(app.tool, Tool::Shell);
     assert_eq!(app.focus, Focus::Path);
     assert_eq!(app.highlighted, None);
@@ -66,7 +67,7 @@ fn reset_restores_original_identity_and_shell_but_editing_stays_normal_search() 
         generation,
         Err("Invoking directory unavailable; no fallback.".into())
     ));
-    assert_eq!(app.editor.text, "/outside/notes");
+    assert_eq!(app.editor.text, "");
     assert!(app.message.as_ref().unwrap().contains("no fallback"));
     assert!(app.take_launch().is_none());
 }

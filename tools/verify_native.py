@@ -608,7 +608,7 @@ def shortcut_cases():
         s.close()
 
 
-def path_editing_case(s, explicit_backspace=False):
+def path_editing_case(s, placeholder, explicit_backspace=False):
     def expect_input(text, cursor):
         deadline = time.monotonic() + 12
         while True:
@@ -632,7 +632,7 @@ def path_editing_case(s, explicit_backspace=False):
         ('\x1b[1;5C', 'foo/bar/baz', 7),  # Ctrl+Right
         ('\x1b[3;5~', 'foo/bar', 7),      # Ctrl+Delete
         ('\x08', 'foo/', 4),             # Legacy Ctrl+Backspace / Ctrl+H
-        ('\x08', '', 0),
+        ('\x08', placeholder, 0),        # A blank input shows the invoking cwd label.
     ]:
         s.send(keys)
         expect_input(text, cursor)
@@ -666,15 +666,16 @@ def focus_colours_case():
                 if x >= 0:
                     return s.screen.buffer[y][x + offset].fg
             raise AssertionError(f'Missing {label!r}\n{s.display()}')
-        assert colour('› ~', 2) == 'cad3f5'
+        # The blank input shows the invoking cwd placeholder in the muted colour.
+        assert colour('› ~', 2) == 'a5adcb'
         assert colour('Shell') == '80689f'
         assert colour('Launch ↵') == '80689f'
         s.send('\x14')
-        assert colour('› ~', 2) == '83899f'
+        assert colour('› ~', 2) == '6b7083'
         assert colour('Shell') == 'c6a0f6'
         assert colour('Launch ↵') == 'c6a0f6'
         s.send('\x10')
-        assert colour('› ~', 2) == 'cad3f5'
+        assert colour('› ~', 2) == 'a5adcb'
         assert colour('Shell') == '80689f'
         print('PASS inactive foreground colours through live Zellij', flush=True)
     finally:
@@ -686,7 +687,7 @@ def live_path_editing_case():
     try:
         s.wait_indexed()
         records = s.records()
-        path_editing_case(s)
+        path_editing_case(s, '~/space 修理 literal')
         assert s.records() == records, 'editing must never launch a command'
         print('PASS path editing through live Zellij', flush=True)
     finally:
@@ -734,7 +735,7 @@ esac
                                  env=env, cwd=out / 'home', preexec_fn=setup)
         try:
             s.wait_indexed()
-            path_editing_case(s, explicit_backspace=True)
+            path_editing_case(s, '~', explicit_backspace=True)
             s.send('\x15\x1b[200~notes\x1b[201~')
             s.expect('~/notes/')
             s.send('\x1bOP')  # F1

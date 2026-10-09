@@ -57,8 +57,9 @@ absolute executable path. Use Zellij's locked mode (normally Ctrl+G) so shortcut
 reach Launchpad. Quit returns to the invoking shell, or closes a dedicated pane
 started with `--close-on-exit` / `close_on_exit true`.
 
-The input starts at the invoking cwd; **Enter once launches Shell** even while
-HOME is indexing. Shell uses Zellij's configured default shell. Configured tools
+The input starts blank and shows the invoking cwd as a placeholder. Enter, a tool
+shortcut, or Save on a blank input uses the invoking cwd, so **Enter once launches
+Shell** even while HOME is indexing. Shell uses Zellij's configured default shell. Configured tools
 receive the chosen directory and literal argument arrays. No command availability
 or authentication checks run before launch.
 
@@ -311,7 +312,7 @@ fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
 - Left/Right choose a tool. Mouse clicks select; the launch button launches.
 - A configured command shortcut (for example Alt+C) launches that command from
   any section; F1 lists the configured shortcuts.
-- F1 opens the keys screen. F5 refreshes HOME and shared history and restores the invoking cwd.
+- F1 opens the keys screen. F5 refreshes HOME and shared history and clears the input.
 - Saved / Recent shares one section. Left/Right switches lists when it is focused.
   Saved opens by default when it has entries; otherwise Recent opens. Switching
   and F5 preserve your choice until you reopen Launchpad.

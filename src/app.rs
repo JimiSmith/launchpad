@@ -159,9 +159,9 @@ impl Default for App {
     }
 }
 impl App {
-    /// Host-supplied identity, not typed input: never apply the insertion cap.
+    /// Clears the path field. A launch or save with a blank field uses `cwd`.
     pub fn set_initial_cwd(&mut self, cwd: String) {
-        self.editor.set(&self.path_label(&cwd));
+        self.editor.set("");
         self.initial_cwd = Some(cwd);
         self.show_suggestions = false;
         self.suggestions.clear();
@@ -455,6 +455,21 @@ impl App {
         }
         paths
     }
+    /// The label of the directory that a blank path field launches, if the field is blank.
+    pub fn blank_path_target(&self) -> Option<String> {
+        let cwd = self.initial_cwd.as_deref()?;
+        self.editor
+            .text
+            .trim()
+            .is_empty()
+            .then(|| self.path_label(cwd))
+    }
+    fn path_or_initial_cwd(&self, raw: String) -> String {
+        match &self.initial_cwd {
+            Some(cwd) if raw.trim().is_empty() => self.path_label(cwd),
+            _ => raw,
+        }
+    }
     pub fn path_label(&self, path: &str) -> String {
         self.index
             .as_ref()
@@ -673,6 +688,7 @@ impl App {
                 None
             }
             .unwrap_or_else(|| self.editor.text.clone());
+            let raw = self.path_or_initial_cwd(raw);
             if self.remote.is_some() {
                 self.request_validation(raw, crate::remote::Validation::Save);
             } else if let Some(index) = &self.index {
@@ -990,6 +1006,7 @@ impl App {
         self.touched = true;
     }
     fn launch(&mut self, raw: String, tool: Tool) {
+        let raw = self.path_or_initial_cwd(raw);
         if self.remote.is_some() {
             self.request_validation(raw, crate::remote::Validation::Launch(tool));
             return;
@@ -1507,7 +1524,7 @@ mod tests {
     fn reset_restores_the_invoking_cwd_and_shell_but_keeps_configuration() {
         let mut a = app();
         a.set_initial_cwd("/home/example/Projects".into());
-        assert_eq!(a.editor.text, "~/Projects");
+        assert_eq!(a.editor.text, "");
         query(&mut a, "elsewhere");
         a.update(Action::Focus(Focus::Tools));
         a.update(Action::Right);
@@ -1515,11 +1532,44 @@ mod tests {
         let refresh = a.remote_refresh();
 
         a.update(Action::Reset);
-        assert_eq!(a.editor.text, "~/Projects");
+        assert_eq!(a.editor.text, "");
+        assert_eq!(a.blank_path_target().as_deref(), Some("~/Projects"));
         assert_eq!(a.tool, Tool::Shell);
         assert_eq!(a.focus, Focus::Path);
         assert!(!a.touched);
         assert_eq!(a.tool_label(tool("codex")), "Codex CLI", "config survives");
         assert_eq!(a.remote_refresh(), refresh + 1, "reset rebuilds the index");
+    }
+
+    #[test]
+    fn a_blank_path_field_launches_and_saves_the_invoking_cwd() {
+        let launched = |action: Action| {
+            let mut a = app();
+            a.set_initial_cwd(format!("{HOME}/Projects"));
+            assert_eq!(a.blank_path_target().as_deref(), Some("~/Projects"));
+            a.update(action);
+            let Some(RemoteRequest::Validate { raw, .. }) = a.take_remote_request() else {
+                panic!("a blank field must validate the invoking cwd");
+            };
+            raw
+        };
+        assert_eq!(launched(Action::Enter), "~/Projects");
+        assert_eq!(launched(Action::LaunchForm), "~/Projects");
+        assert_eq!(launched(Action::Shortcut(tool("claude"))), "~/Projects");
+        assert_eq!(launched(Action::SaveDirectory), "~/Projects");
+
+        let mut a = app();
+        a.set_initial_cwd(format!("{HOME}/Projects"));
+        query(&mut a, "~/notes");
+        assert_eq!(
+            a.blank_path_target(),
+            None,
+            "typed text hides the placeholder"
+        );
+        a.update(Action::Shortcut(tool("claude")));
+        let Some(RemoteRequest::Validate { raw, .. }) = a.take_remote_request() else {
+            panic!("expected a pending validation");
+        };
+        assert_eq!(raw, "~/notes");
     }
 }

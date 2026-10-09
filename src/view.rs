@@ -346,7 +346,14 @@ fn dashboard(f: &mut Canvas, app: &App, area: Rect, hits: &mut HitMap) {
     } else {
         theme.base()
     };
-    f.render_widget(Paragraph::new(visible).style(input_style), text_area);
+    if let Some(placeholder) = app.blank_path_target() {
+        f.render_widget(
+            Paragraph::new(placeholder).style(input_style.patch(theme.muted())),
+            text_area,
+        );
+    } else {
+        f.render_widget(Paragraph::new(visible).style(input_style), text_area);
+    }
     if app.focus == Focus::Path && text_area.width > 0 {
         f.set_cursor_position((text_area.x + caret as u16, text_area.y));
     }
