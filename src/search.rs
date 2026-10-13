@@ -31,15 +31,13 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
 /// history (`recent`, most recent first), then shallower paths, then path order.
 /// These only break ties: Frizbee's local alignment ignores trailing text,
 /// so a project and all of its subdirectories often score identically.
+/// Matching allows typos up to the limit from `max_typos`.
 pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) -> Vec<usize> {
     use neo_frizbee::{Config, Matcher, Matching};
     if raw.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
     }
-    let config = Config {
-        max_typos: Some(0),
-        ..Config::default()
-    };
+    let config = Config::default();
     let windows = crate::host_path::HostPath::parse(home).is_some_and(|p| p.is_windows());
     let raw = if windows {
         raw.replace('\\', "/")
@@ -90,7 +88,7 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) 
         .filter(|segment| !matches!(*segment, "" | "~" | "." | ".."))
         .map(|segment| Matcher::new(segment, &config.matching(Matching::Substring)));
     let mut scores = vec![None; dirs.len()];
-    let mut matcher = Matcher::new(&query, &config);
+    let mut matcher = Matcher::new(&query, &config.max_typos(Some(max_typos(&query))));
     for m in matcher
         .match_list(&paths)
         .into_iter()
@@ -136,6 +134,11 @@ pub fn matches_in(raw: &str, dirs: &[Directory], home: &str, recent: &[String]) 
             .then_with(|| dirs[a.0].path.cmp(&dirs[b.0].path))
     });
     ranked.into_iter().map(|(i, ..)| i).collect()
+}
+
+/// The fff-search rule: about one typo for each four query bytes, from 2 to 6.
+fn max_typos(query: &str) -> u16 {
+    (query.len() / 4).clamp(2, 6) as u16
 }
 
 #[derive(Debug, Clone)]
