@@ -370,6 +370,8 @@ It is shared across panes and sessions. F5 reloads other instances' changes.
 Recent stores no tool association. Launching another tool in the same directory
 refreshes that one entry. Existing history is loaded with old tool IDs discarded.
 History records validated attempts, not successful tool execution.
+Search also ranks directories higher when you launched them often and recently in
+the last 30 days (frecency). Clearing Recent also clears frecency.
 [Persistence details](docs/history.md).
 
 ## Migrating from the plugin

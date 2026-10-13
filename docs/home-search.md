@@ -89,16 +89,28 @@ divided by 4, from 2 to 6 (the fff-search rule). Explicit paths (`~`, `/`, `./`,
 `../` or a drive letter) allow no typos, because they name one directory. They
 reject a swapped, extra or wrong letter, but they still accept a missing letter.
 Each typo lowers the score, so an exact match of the same text ranks above a typo
-match. Short queries can match many unrelated directories with a low score. Equal
-scores are common because Frizbee ignores text after the best alignment, so ties
-are broken in order by:
+match. Short queries can match many unrelated directories with a low score.
+
+Frecency raises the score of launched directories. Frecency is a number from how
+often and how recently you launched a directory (the fff-search rule). Each launch in
+the last 30 days adds `exp(-0.0693 * days_ago)`, so a launch counts half after 10
+days. A sum above 10 becomes `10 + sqrt(sum - 10)`, and the result is rounded. The
+total score is `score + score * frecency / 100`: each recent launch adds about 1%, so
+a much better text match still wins. The boost is rounded down, so a few launches
+do not change the score of a short query. The worker loads the launch times at
+start, at F5 and at the first query after Ctrl+L. [Frecency storage](history.md#frecency).
+
+Equal totals are common because Frizbee ignores text after the best alignment, so
+ties are broken in order by:
 
 1. the directory's own name containing the query's last typed `/` segment
    (exact substring with no typos; skipped for a trailing `/`, `~`, `.` and
    `..`), so `repo/branch` prefers the checkout over folders inside it;
-2. the most recent launch from history;
-3. fewer path components;
-4. path order.
+2. fewer path components;
+3. path order.
+
+Because frecency adds to the score, a launched folder inside a checkout can rank
+above the checkout itself.
 
 Tie-breaks never outrank a higher score or change which directories match. The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
 Queries over 100 Unicode scalar values return no suggestions, including after

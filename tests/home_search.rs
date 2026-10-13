@@ -1,4 +1,7 @@
-use launchpad_core::search::{HomeIndex, Receive};
+use launchpad_core::{
+    frecency::Frecency,
+    search::{HomeIndex, Receive},
+};
 use std::{
     fs,
     path::PathBuf,
@@ -174,7 +177,7 @@ fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
             expected.as_str(),
         ] {
             assert_eq!(index.validate(raw).unwrap(), expected);
-            let results = matches_in(raw, &index.dirs, home, &[]);
+            let results = matches_in(raw, &index.dirs, home, &Frecency::default());
             assert_eq!(index.dirs[results[0]].path, expected);
         }
         for invalid in [
@@ -203,9 +206,10 @@ fn fuzzy_matching_rejects_oversized_raw_and_expanded_queries() {
         note: "directory",
         error: None,
     }];
-    assert!(matches_in(&"a".repeat(101), &dirs, &home, &[]).is_empty());
-    assert!(matches_in("~/needle", &dirs, &home, &[]).is_empty());
-    assert_eq!(matches_in("needle", &dirs, &home, &[]), vec![0]);
+    let none = Frecency::default();
+    assert!(matches_in(&"a".repeat(101), &dirs, &home, &none).is_empty());
+    assert!(matches_in("~/needle", &dirs, &home, &none).is_empty());
+    assert_eq!(matches_in("needle", &dirs, &home, &none), vec![0]);
 }
 
 #[test]
@@ -804,17 +808,23 @@ fn parallel_walk_shares_budgets_and_sorts_the_completed_index() {
     assert!(index.dirs.is_sorted_by(|a, b| a.path < b.path));
 }
 
-fn ranked(raw: &str, paths: &[String], home: &str, recent: &[String]) -> Vec<String> {
-    use launchpad_core::search::{Directory, matches_in};
-    let dirs: Vec<_> = paths
+const NOW: u64 = 1_000 * 86_400;
+
+fn directories(paths: &[String]) -> Vec<launchpad_core::search::Directory> {
+    paths
         .iter()
-        .map(|path| Directory {
+        .map(|path| launchpad_core::search::Directory {
             path: path.clone(),
             note: "directory",
             error: None,
         })
-        .collect();
-    matches_in(raw, &dirs, home, recent)
+        .collect()
+}
+
+/// Ranks `paths`. Each directory in `launched` has one launch now, so its frecency is 1.
+fn ranked(raw: &str, paths: &[String], home: &str, launched: &[String]) -> Vec<String> {
+    let frecency = Frecency::new(home, NOW, launched.iter().map(|p| (p.as_str(), NOW)));
+    launchpad_core::search::matches_in(raw, &directories(paths), home, &frecency)
         .into_iter()
         .map(|i| paths[i].clone())
         .collect()
@@ -867,7 +877,8 @@ fn equal_scores_prefer_shallower_directories_over_path_order() {
 }
 
 #[test]
-fn equal_scores_prefer_recent_launches_then_depth() {
+fn frecency_raises_launched_directories_above_equal_scores() {
+    use launchpad_core::search::matches_in;
     let home = "/home/ada";
     let paths: Vec<_> = [
         "/home/ada/Projects/zellij-agent-wrangler/crates",
@@ -878,12 +889,12 @@ fn equal_scores_prefer_recent_launches_then_depth() {
     .into();
     let wrangler = paths[1].clone();
     let launchpad = paths[2].clone();
-    // Without history: depth, then path order.
+    // Without launches: the last segment, then depth, then path order.
     assert_eq!(
-        ranked("proj/zel", &paths, home, &[])[..2],
-        [wrangler.clone(), launchpad.clone()]
+        ranked("proj/zel", &paths, home, &[]),
+        [wrangler.clone(), launchpad.clone(), paths[0].clone()]
     );
-    // History spellings normalize to the index's canonical form.
+    // Launch spellings normalize to the index's canonical form.
     for spelling in [
         "/home/ada/Projects/zellij-launchpad",
         "/home/ada/Projects/zellij-launchpad/",
@@ -891,27 +902,34 @@ fn equal_scores_prefer_recent_launches_then_depth() {
         "/home/ada/Projects/./zellij-launchpad",
     ] {
         let results = ranked("proj/zel", &paths, home, &[spelling.into()]);
-        assert_eq!(results[0], launchpad, "{spelling}");
-        assert_eq!(results[1], wrangler, "{spelling}");
+        assert_eq!(
+            results[..2],
+            [launchpad.clone(), wrangler.clone()],
+            "{spelling}"
+        );
     }
-    // More recent (earlier in history) wins; history never beats a higher score
-    // or a directory named by the last segment (`crates` does not contain `zel`).
-    let recent = [launchpad.clone(), wrangler.clone()];
+    // Frecency adds to the score, so it also wins over the last-segment tie-break.
     assert_eq!(
-        ranked("proj/zel", &paths, home, &recent),
-        [launchpad.clone(), wrangler.clone(), paths[0].clone()]
+        ranked("proj/zel", &paths, home, &[paths[0].clone()])[0],
+        paths[0]
     );
-    let recent = [wrangler.clone(), launchpad.clone()];
+    // More recent launches give a higher frecency.
+    let frecency = Frecency::new(
+        home,
+        NOW,
+        [
+            (wrangler.as_str(), NOW),
+            (launchpad.as_str(), NOW),
+            (launchpad.as_str(), NOW),
+        ],
+    );
     assert_eq!(
-        ranked("proj/zel", &paths, home, &recent),
-        [wrangler.clone(), launchpad.clone(), paths[0].clone()]
+        matches_in("proj/zel", &directories(&paths), home, &frecency)[..2],
+        [2, 1]
     );
-    assert_eq!(
-        ranked("proj/zel", &paths, home, &[paths[0].clone()]),
-        [wrangler.clone(), launchpad.clone(), paths[0].clone()]
-    );
-    assert_eq!(ranked("launchpad", &paths, home, &[wrangler])[0], launchpad);
-    // Windows history compares case-insensitively and accepts either separator.
+    // Frecency never adds a directory that does not match.
+    assert_eq!(ranked("launchpad", &paths, home, &[wrangler]), [launchpad]);
+    // Windows launches compare case-insensitively and accept either separator.
     let home = r"C:\Users\Ada";
     let paths: Vec<_> = [
         r"C:\Users\Ada\Projects\zellij-agent-wrangler",
@@ -933,45 +951,29 @@ fn equal_scores_prefer_recent_launches_then_depth() {
 }
 
 #[test]
-fn launched_directories_win_suggestion_ties_locally_and_remotely() {
-    use launchpad_core::{
-        app::{Action, App, RecentDirectory},
-        remote::RemoteRequest,
-    };
-    let tree = Tree::new();
-    tree.dir("Projects/zellij-agent-wrangler");
-    tree.dir("Projects/zellij-launchpad");
-    let launchpad = tree.0.join("Projects").join("zellij-launchpad");
-    let launchpad = launchpad.to_str().unwrap().to_owned();
-    let history = vec![RecentDirectory {
-        id: 1,
-        path: launchpad.clone(),
-        age: "Just now".into(),
-    }];
-    let mut app = App::from_home(tree.0.clone(), tree.0.clone());
-    while app.is_indexing() {
-        app.index_tick();
-    }
-    app.update(Action::Clear);
-    app.update(Action::Text("proj/zel".into()));
-    assert_ne!(app.dirs[app.suggestions[0]].path, launchpad);
-    app.replace_history(history.clone());
-    app.update(Action::Clear);
-    app.update(Action::Text("proj/zel".into()));
-    assert_eq!(app.dirs[app.suggestions[0]].path, launchpad);
-    // The native worker ranks with the same history.
-    let mut app = App::from_remote("/home/ada".into());
-    app.replace_history(history);
-    let Some(RemoteRequest::Query { recent, .. }) = app.take_remote_request() else {
-        panic!()
-    };
-    assert_eq!(recent, [launchpad]);
+fn a_much_better_match_wins_over_frecency() {
+    use launchpad_core::search::matches_in;
+    let home = "/home/ada";
+    // The second directory matches each letter, but with gaps.
+    let paths: Vec<_> = [
+        "/home/ada/Projects/launchpad",
+        "/home/ada/Projects/lxaxuxnxcxhxpxaxd",
+    ]
+    .map(str::to_owned)
+    .into();
+    // 128 launches now, the store maximum, give the highest frecency.
+    let frecency = Frecency::new(home, NOW, (0..128).map(|_| (paths[1].as_str(), NOW)));
+    assert_eq!(frecency.get(&paths[1]), 21);
+    assert_eq!(
+        matches_in("launchpad", &directories(&paths), home, &frecency),
+        [0, 1]
+    );
 }
 
 #[test]
-fn last_segment_names_the_checkout_over_launched_folders_inside_it() {
-    // Projects/<repo>/<branch> worktrees: a launched subfolder ties with its
-    // checkout on score, but only the checkout is named by `main` or `105`.
+fn last_segment_names_the_checkout_over_folders_inside_it() {
+    // Projects/<repo>/<branch> worktrees: a subfolder ties with its checkout on
+    // score, but only the checkout is named by `main` or `105`.
     let home = "/home/ada";
     let paths: Vec<_> = [
         "/home/ada/Projects/zellij-launchpad/fix-history",
@@ -984,16 +986,20 @@ fn last_segment_names_the_checkout_over_launched_folders_inside_it() {
     ]
     .map(str::to_owned)
     .into();
-    let recent = [paths[3].clone(), paths[1].clone(), paths[6].clone()];
-    for (raw, checkout, launched) in [
+    for (raw, checkout, inside) in [
         ("launchpad/main", &paths[2], &paths[3]),
         ("proj/launchpad/main", &paths[2], &paths[3]),
         ("launchpad/fix", &paths[0], &paths[1]),
         ("tracker/105", &paths[5], &paths[6]),
     ] {
-        let results = ranked(raw, &paths, home, &recent);
-        assert_eq!(results[..2], [checkout.clone(), launched.clone()], "{raw}");
+        let results = ranked(raw, &paths, home, &[]);
+        assert_eq!(results[..2], [checkout.clone(), inside.clone()], "{raw}");
     }
+    // Frecency adds to the score, so a launched subfolder ranks above its checkout.
+    assert_eq!(
+        ranked("launchpad/main", &paths, home, &[paths[3].clone()])[..2],
+        [paths[3].clone(), paths[2].clone()]
+    );
     // Substring, not fuzzy: `tie` is scattered through `native` but only
     // contained in the checkout's name.
     let paths: Vec<_> = [
@@ -1002,16 +1008,13 @@ fn last_segment_names_the_checkout_over_launched_folders_inside_it() {
     ]
     .map(str::to_owned)
     .into();
-    assert_eq!(
-        ranked("launchpad/tie", &paths, home, &[paths[1].clone()]),
-        paths
-    );
+    assert_eq!(ranked("launchpad/tie", &paths, home, &[]), paths);
 }
 
 #[test]
 fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
     // `~`, `./` and `..` expand to HOME, whose own name (`ada`) must not
-    // promote `canada` or `ada-lib` over recent launches.
+    // promote `canada` or `ada-lib` over launched directories.
     let home = "/home/ada";
     let paths: Vec<_> = [
         "/home/ada/canada",
@@ -1022,10 +1025,11 @@ fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
     ]
     .map(str::to_owned)
     .into();
-    let recent = ["~/Projects/zellij-launchpad".into(), "~/work".into()];
+    let launched = ["~/Projects/zellij-launchpad".into(), "~/work".into()];
     for raw in ["~", "~/", "./", "~/Projects/.."] {
-        let results = ranked(raw, &paths, home, &recent);
-        assert_eq!(results[..2], [paths[3].clone(), paths[4].clone()], "{raw}");
+        let results = ranked(raw, &paths, home, &launched);
+        // Equal frecency: the shallower directory first.
+        assert_eq!(results[..2], [paths[4].clone(), paths[3].clone()], "{raw}");
     }
     // A trailing `/` means no segment rule: `Projects-archive` ties with the
     // launched checkout but gets no boost for containing `Projects`.
@@ -1035,8 +1039,8 @@ fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
     ]
     .map(str::to_owned)
     .into();
-    let recent = ["~/Projects/zellij-launchpad".into()];
-    assert_eq!(ranked("~/Projects/", &paths, home, &recent)[0], paths[1]);
+    let launched = ["~/Projects/zellij-launchpad".into()];
+    assert_eq!(ranked("~/Projects/", &paths, home, &launched)[0], paths[1]);
     assert_eq!(ranked("~/Projects/", &paths, home, &[])[0], paths[0]);
 }
 

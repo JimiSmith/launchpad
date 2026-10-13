@@ -65,6 +65,7 @@ fn background_index_progress_search_and_refresh_use_epochs() {
             .requests
             .send(Request {
                 epoch,
+                frecency_revision: 0,
                 request: RemoteRequest::Validate {
                     generation: 17,
                     raw: "~/needle".into(),
@@ -106,6 +107,7 @@ fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation(
             .requests
             .send(Request {
                 epoch,
+                frecency_revision: 0,
                 request: RemoteRequest::Validate {
                     generation: 17,
                     raw: "~/needle/deep".into(),
@@ -142,10 +144,10 @@ fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation(
             .requests
             .send(Request {
                 epoch,
+                frecency_revision: 0,
                 request: RemoteRequest::Query {
                     generation: 18,
                     text: "needle".into(),
-                    recent: Vec::new(),
                 },
             })
             .unwrap();
@@ -167,4 +169,71 @@ fn configured_ignores_filter_queries_after_refresh_but_allow_literal_validation(
             }
         }
     }
+}
+#[test]
+fn frecency_loads_at_start_and_again_after_a_clear() {
+    use launchpad::frecency::{Launch, Store};
+    let f = Fixture::new("frecency");
+    let home = f.0.join("home");
+    for name in ["proj-a", "proj-b"] {
+        std::fs::create_dir(home.join(name)).unwrap();
+    }
+    let state = f.0.join("state");
+    std::fs::create_dir(&state).unwrap();
+    let store = Store::new(&state);
+    // Ten launches give a frecency of 10, which raises even a short query's score.
+    for _ in 0..10 {
+        let (id, at) = launchpad::history::operation_id();
+        store
+            .record(Launch {
+                id,
+                path: home.join("proj-b").to_str().unwrap().into(),
+                at,
+            })
+            .unwrap();
+    }
+    let worker = Worker::start_with_cache(
+        home.clone(),
+        home.to_str().unwrap().into(),
+        Vec::new(),
+        None,
+        Some(state),
+    )
+    .unwrap();
+    loop {
+        if let Reply::Progress { status, .. } =
+            worker.replies.recv_timeout(Duration::from_secs(5)).unwrap()
+            && status.contains("indexed")
+        {
+            break;
+        }
+    }
+    let first = |frecency| {
+        worker
+            .requests
+            .send(Request {
+                epoch: 0,
+                frecency_revision: frecency,
+                request: RemoteRequest::Query {
+                    generation: 1,
+                    text: "proj".into(),
+                },
+            })
+            .unwrap();
+        loop {
+            match worker.replies.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Reply::Results { paths, .. } => break paths[0].clone(),
+                Reply::Failed(error) => panic!("{error}"),
+                _ => {}
+            }
+        }
+    };
+    assert_eq!(first(0), home.join("proj-b").to_str().unwrap());
+    store.clear(&launchpad::history::operation_id().0).unwrap();
+    assert_eq!(
+        first(0),
+        home.join("proj-b").to_str().unwrap(),
+        "the scores stay until the revision changes"
+    );
+    assert_eq!(first(1), home.join("proj-a").to_str().unwrap());
 }

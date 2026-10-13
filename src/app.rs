@@ -298,7 +298,6 @@ impl App {
         Some(crate::remote::RemoteRequest::Query {
             generation: remote.generation,
             text: self.editor.text.clone(),
-            recent: self.recent_paths(),
         })
     }
     fn request_validation(&mut self, raw: String, kind: crate::remote::Validation) {
@@ -448,20 +447,15 @@ impl App {
             return Vec::new();
         };
         let home = index.home.to_str().expect("validated HOME");
-        let mut results =
-            crate::search::matches_in(&self.editor.text, &self.dirs, home, &self.recent_paths());
+        // Only the native worker reads the frecency store.
+        let mut results = crate::search::matches_in(
+            &self.editor.text,
+            &self.dirs,
+            home,
+            &crate::frecency::Frecency::default(),
+        );
         results.truncate(100);
         results
-    }
-    /// Launched directories, most recent first, for search tie-breaks.
-    fn recent_paths(&self) -> Vec<String> {
-        let mut paths: Vec<String> = Vec::new();
-        for event in &self.history {
-            if !paths.contains(&event.path) {
-                paths.push(event.path.clone());
-            }
-        }
-        paths
     }
     /// The label of the directory that a blank path field launches, if the field is blank.
     pub fn blank_path_target(&self) -> Option<String> {
@@ -609,8 +603,6 @@ impl App {
                     remote.outbound = Some(crate::remote::RemoteRequest::Query {
                         generation: remote.generation,
                         text: self.editor.text.clone(),
-                        // Reset clears history until the host reloads it.
-                        recent: Vec::new(),
                     });
                 }
             }

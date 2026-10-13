@@ -1,6 +1,7 @@
 //! One bounded native worker owns persistence, traversal, matching and validation.
 use launchpad_core::{
     editor::MAX_INPUT_CHARS,
+    frecency::Frecency,
     remote::RemoteRequest,
     search::{HomeIndex, Receive, ScanState},
 };
@@ -15,6 +16,8 @@ use crate::index_store::{Snapshot, Store};
 
 pub struct Request {
     pub epoch: u64,
+    /// The worker loads the frecency scores again when this value changes.
+    pub frecency_revision: u64,
     pub request: RemoteRequest,
 }
 #[derive(Debug)]
@@ -50,22 +53,24 @@ impl Worker {
         cwd: String,
         ignore: Vec<String>,
     ) -> std::io::Result<Self> {
-        Self::start_with_cache(home, cwd, ignore, None)
+        Self::start_with_cache(home, cwd, ignore, None, None)
     }
-    /// Load and publish snapshots under `cache_root`; `None` keeps IO limited to
-    /// traversal and validation, as used by the uncached constructors and tests.
+    /// Uses the index cache in `cache_root` and frecency in `state_root`, if given.
     pub fn start_with_cache(
         home: PathBuf,
         cwd: String,
         ignore: Vec<String>,
         cache_root: Option<PathBuf>,
+        state_root: Option<PathBuf>,
     ) -> std::io::Result<Self> {
         let (requests, demand) = mpsc::sync_channel::<Request>(1);
         let (responses, replies) = mpsc::sync_channel(4);
         thread::Builder::new()
             .name("home-search".into())
             .spawn(move || {
-                if let Err(error) = run(home, cwd, ignore, cache_root, demand, &responses) {
+                let frecency = state_root.map(|root| crate::frecency::Store::new(&root));
+                if let Err(error) = run(home, cwd, ignore, cache_root, frecency, demand, &responses)
+                {
                     let _ = responses.send(Reply::Failed(error));
                 }
             })?;
@@ -77,19 +82,22 @@ fn run(
     cwd: String,
     ignore: Vec<String>,
     cache_root: Option<PathBuf>,
+    frecency_store: Option<crate::frecency::Store>,
     demand: Receiver<Request>,
     responses: &SyncSender<Reply>,
 ) -> Result<(), String> {
     let index = HomeIndex::new_with_ignore(home.clone(), home.clone(), ignore.clone())?;
     let store = cache_root.map(|root| Store::new(root, &home, &ignore, index.limits));
     let mut state = SearchIndex::new(index, store);
+    let (mut frecency, mut frecency_warning) = load_frecency(frecency_store.as_ref(), &home);
+    let mut frecency_revision = 0;
     // Loading precedes traversal and the first query. The UI itself never waits
     // synchronously for disk IO.
     if responses
         .send(Reply::Progress {
             epoch: 0,
             revision: state.revision,
-            status: state.status(),
+            status: status(&state, frecency_warning.as_deref()),
         })
         .is_err()
     {
@@ -119,19 +127,20 @@ fn run(
         };
         if let Some(Request {
             epoch: requested,
+            frecency_revision: requested_frecency,
             request,
         }) = request
         {
-            if requested != epoch {
-                epoch = requested;
-                state.restart();
+            if requested != epoch || requested_frecency != frecency_revision {
+                if requested != epoch {
+                    epoch = requested;
+                    state.restart();
+                }
+                frecency_revision = requested_frecency;
+                (frecency, frecency_warning) = load_frecency(frecency_store.as_ref(), &home);
             }
             let reply = match request {
-                RemoteRequest::Query {
-                    generation,
-                    text,
-                    recent,
-                } => {
+                RemoteRequest::Query { generation, text } => {
                     let mut bytes = 0;
                     let paths = if text.chars().count() > MAX_INPUT_CHARS {
                         Vec::new()
@@ -140,7 +149,7 @@ fn run(
                             &text,
                             state.dirs(),
                             home.to_str().unwrap(),
-                            &recent,
+                            &frecency,
                         )
                         .into_iter()
                         .take(100)
@@ -176,7 +185,7 @@ fn run(
                     .send(Reply::Progress {
                         epoch,
                         revision: state.revision,
-                        status: state.status(),
+                        status: status(&state, frecency_warning.as_deref()),
                     })
                     .is_err()
                 {
@@ -187,6 +196,40 @@ fn run(
         }
     }
     Ok(())
+}
+/// Compacts the frecency journal and scores its launches. A failure gives no scores.
+fn load_frecency(
+    store: Option<&crate::frecency::Store>,
+    home: &std::path::Path,
+) -> (Frecency, Option<String>) {
+    let Some(store) = store else {
+        return (Frecency::default(), None);
+    };
+    let (token, now) = crate::history::operation_id();
+    match store.refresh(&token, now) {
+        Ok(refreshed) => (
+            Frecency::new(
+                home.to_str().unwrap(),
+                now,
+                refreshed.launches.iter().map(|l| (l.path.as_str(), l.at)),
+            ),
+            refreshed
+                .warning
+                .map(|e| format!("Frecency compaction failed: {e}")),
+        ),
+        Err(error) => (
+            Frecency::default(),
+            Some(format!("Frecency unavailable: {error}")),
+        ),
+    }
+}
+fn status(state: &SearchIndex, frecency_warning: Option<&str>) -> String {
+    let mut status = state.status();
+    if let Some(warning) = frecency_warning {
+        status.push_str(" · ");
+        status.push_str(warning);
+    }
+    status
 }
 /// Time between two checks for directory batches while the walk runs.
 const BATCH_POLL: Duration = Duration::from_millis(5);

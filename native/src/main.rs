@@ -20,7 +20,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[derive(Parser)]
@@ -138,8 +138,9 @@ fn run(args: Args) -> Result<(), String> {
     }
     let mut history = History {
         store: Store::new(&root),
+        frecency: launchpad::frecency::Store::new(&root),
+        frecency_revision: 0,
         rows: Vec::new(),
-        serial: 0,
     };
     history.load(&mut app);
     let saved = launchpad::saved::Store::new(&root);
@@ -147,8 +148,7 @@ fn run(args: Args) -> Result<(), String> {
     if let (Some(handoff), Some(error)) = (&handoff, &shell_failure) {
         let mut message = format!("Default shell failed: {error}");
         if matches!(error, Failure::Rejected(_)) {
-            let (token, _) = history.token();
-            if let Err(e) = history.store.remove(&handoff.attempt, &token) {
+            if let Err(e) = history.remove_attempt(&handoff.attempt) {
                 message.push_str(&format!(" History rollback failed: {e}"));
             }
             let original = Origin {
@@ -163,8 +163,8 @@ fn run(args: Args) -> Result<(), String> {
         app.message = Some(message);
     }
     let cache_root = launchpad::index_store::cache_root(&home);
-    let worker =
-        Worker::start_with_cache(home, cwd, ignore, Some(cache_root)).map_err(|e| e.to_string())?;
+    let worker = Worker::start_with_cache(home, cwd, ignore, Some(cache_root), Some(root))
+        .map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     for signal in [
@@ -304,8 +304,7 @@ fn run(args: Args) -> Result<(), String> {
             // signal would at once be forwarded to.
             if stop.load(Ordering::Relaxed) {
                 let _ = host.restore_name(&original, &name);
-                let (token, _) = history.token();
-                let _ = history.store.remove(&attempt, &token);
+                let _ = history.remove_attempt(&attempt);
                 break;
             }
             screen.suspend();
@@ -322,8 +321,7 @@ fn run(args: Args) -> Result<(), String> {
                         if let Err(e) = host.restore_name(&original, &name) {
                             message.push_str(&format!(" Tab restore failed: {e}"));
                         }
-                        let (token, _) = history.token();
-                        if let Err(e) = history.store.remove(&attempt, &token) {
+                        if let Err(e) = history.remove_attempt(&attempt) {
                             message.push_str(&format!(" History rollback failed: {e}"));
                         }
                         app.launch_rejected();
@@ -352,6 +350,7 @@ fn run(args: Args) -> Result<(), String> {
                 .requests
                 .send(Request {
                     epoch: app.remote_refresh(),
+                    frecency_revision: history.frecency_revision,
                     request,
                 })
                 .map_err(|_| "Search worker stopped")?;
@@ -431,27 +430,15 @@ fn load_saved(store: &launchpad::saved::Store, app: &mut App) {
 }
 struct History {
     store: Store,
+    /// Shares the operation IDs of history, so a rejected launch rolls back in both stores.
+    frecency: launchpad::frecency::Store,
+    /// Changes after a frecency clear, so that the worker loads the scores again.
+    frecency_revision: u64,
     rows: Vec<Entry>,
-    serial: u64,
 }
 impl History {
-    fn token(&mut self) -> (String, u64) {
-        self.serial += 1;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        (
-            format!(
-                "{:039}-{}-{}",
-                now.as_nanos(),
-                std::process::id(),
-                self.serial
-            ),
-            now.as_secs(),
-        )
-    }
     fn load(&mut self, app: &mut App) {
-        let (token, now) = self.token();
+        let (token, now) = history::operation_id();
         match self.store.refresh(&token) {
             Ok(rows) => self.rows = rows,
             Err(error) => app.message = Some(format!("History unavailable: {error}")),
@@ -469,9 +456,15 @@ impl History {
         app.replace_history(history);
     }
     fn mutate(&mut self, app: &mut App, mutation: HistoryMutation) {
-        let (token, _) = self.token();
+        let (token, _) = history::operation_id();
         let result = match mutation {
-            HistoryMutation::Clear => self.store.clear(&token),
+            HistoryMutation::Clear => {
+                let frecency = self.frecency.clear(&token);
+                self.frecency_revision += 1;
+                self.store
+                    .clear(&token)
+                    .and(frecency.map_err(|e| format!("Frecency was not cleared: {e}")))
+            }
             HistoryMutation::Remove(id) => self
                 .rows
                 .get(id as usize)
@@ -486,8 +479,9 @@ impl History {
             Err(error) => app.message = Some(format!("History change failed: {error}")),
         }
     }
+    /// Records the launch in history and frecency. A failure does not stop the launch.
     fn record(&mut self, launch: &Launch) -> String {
-        let (id, opened_at) = self.token();
+        let (id, opened_at) = history::operation_id();
         if let Err(error) = self.store.record(Entry {
             id: id.clone(),
             path: launch.path.clone(),
@@ -495,7 +489,22 @@ impl History {
         }) {
             eprintln!("Launchpad: history not saved: {error}");
         }
+        if let Err(error) = self.frecency.record(launchpad::frecency::Launch {
+            id: id.clone(),
+            path: launch.path.clone(),
+            at: opened_at,
+        }) {
+            eprintln!("Launchpad: frecency not saved: {error}");
+        }
         id
+    }
+    /// Removes a rejected launch from history and frecency.
+    fn remove_attempt(&mut self, attempt: &str) -> Result<(), String> {
+        let (token, _) = history::operation_id();
+        let frecency = self.frecency.remove(attempt);
+        self.store
+            .remove(attempt, &token)
+            .and(frecency.map_err(|e| format!("Frecency rollback failed: {e}")))
     }
 }
 #[cfg(test)]
