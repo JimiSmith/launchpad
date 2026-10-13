@@ -74,11 +74,12 @@ scratch. There is no expiry timer or filesystem watcher.
 Frizbee ranks candidates using the existing normalization and matching behavior.
 Each directory scores the better of its full path and its own name. Matching
 tolerates typos: a swapped, missing or extra letter still matches. The typo limit
-is the byte length of the query after HOME expansion divided by 4, from 2 to 6
-(the fff-search rule). Each typo lowers the score, so an exact match of the same
-text ranks above a typo match. Short queries can match many unrelated directories
-with a low score. Equal scores are common because Frizbee ignores text after the
-best alignment, so ties are broken in order by:
+is the byte length of the typed query divided by 4, from 2 to 6 (the fff-search
+rule). Explicit paths (`~`, `/`, `./`, `../` or a drive letter) allow no typos,
+because they name one directory. Each typo lowers the score, so an exact match of
+the same text ranks above a typo match. Short queries can match many unrelated
+directories with a low score. Equal scores are common because Frizbee ignores
+text after the best alignment, so ties are broken in order by:
 
 1. the directory's own name containing the query's last typed `/` segment
    (exact substring with no typos; skipped for a trailing `/`, `~`, `.` and

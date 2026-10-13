@@ -559,11 +559,7 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     query(&mut app, "~/Projects/research");
     assert!(!app.suggestions.is_empty(), "explicit HOME queries match");
     query(&mut app, "~/Projects/.archive");
-    assert!(
-        !app.suggestions
-            .iter()
-            .any(|&i| app.dirs[i].path.contains(".archive"))
-    );
+    assert!(app.suggestions.is_empty());
     app.update(Action::Enter);
     assert!(
         app.take_launch()
@@ -1061,8 +1057,45 @@ fn exact_matches_rank_above_typo_matches() {
     .into();
     let recent = [paths[0].clone()];
     // A trailing `/` skips the last-segment tie-break.
-    for raw in ["launchpad/", "proj/launchpad/", "~/Projects/launchpad/"] {
+    for raw in ["launchpad/", "proj/launchpad/"] {
         let results = ranked(raw, &paths, home, &recent);
         assert_eq!(results, [paths[1].clone(), paths[0].clone()], "{raw}");
+    }
+}
+
+#[test]
+fn typo_limit_is_a_quarter_of_the_query_bytes() {
+    // Each `q` is one extra letter. 12 bytes allow 3 typos, 11 bytes allow 2.
+    let home = "/home/ada";
+    let paths = vec!["/home/ada/Projects/zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lauqnchqpaqd", &paths, home, &[]), paths);
+    assert!(ranked("lauqnchqpqd", &paths, home, &[]).is_empty());
+}
+
+#[test]
+fn explicit_paths_allow_no_typos() {
+    let home = "/home/ada";
+    let paths = vec!["/home/ada/Projects/zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lanuchpad", &paths, home, &[]), paths);
+    for raw in [
+        "~/Projects/zellij-lanuchpad",
+        "/home/ada/Projects/zellij-lanuchpad",
+        "./Projects/zellij-lanuchpad",
+        "../ada/Projects/zellij-lanuchpad",
+    ] {
+        assert!(ranked(raw, &paths, home, &[]).is_empty(), "{raw}");
+    }
+    assert_eq!(
+        ranked("~/Projects/zellij-launchpad", &paths, home, &[]),
+        paths
+    );
+    let home = r"C:\Users\Ada";
+    let paths = vec![r"C:\Users\Ada\Projects\zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lanuchpad", &paths, home, &[]), paths);
+    for raw in [
+        r"C:\Users\Ada\Projects\zellij-lanuchpad",
+        "C:/Users/Ada/Projects/zellij-lanuchpad",
+    ] {
+        assert!(ranked(raw, &paths, home, &[]).is_empty(), "{raw}");
     }
 }
