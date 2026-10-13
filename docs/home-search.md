@@ -103,15 +103,16 @@ start, at F5 and at the first query after Ctrl+L. [Frecency storage](history.md#
 Equal totals are common because Frizbee ignores text after the best alignment, so
 ties are broken in order by:
 
-1. higher frecency, so a launched directory wins a tie also when its boost is 0;
+1. higher frecency (a launched directory then wins a tie, also when its boost is 0);
 2. the directory's own name containing the query's last typed `/` segment
    (exact substring with no typos; skipped for a trailing `/`, `~`, `.` and
    `..`), so `repo/branch` prefers the checkout over folders inside it;
 3. fewer path components;
 4. path order.
 
-Because frecency adds to the score, a launched folder inside a checkout can rank
-above the checkout itself.
+Higher frecency comes before the last-segment tie-break. If the scores are equal, a
+launched folder inside a checkout ranks above the checkout. The boost can also put
+it above a checkout that scores slightly higher.
 
 Tie-breaks never outrank a higher score or change which directories match. The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
 Queries over 100 Unicode scalar values return no suggestions, including after

@@ -908,7 +908,7 @@ fn frecency_raises_launched_directories_above_equal_scores() {
             "{spelling}"
         );
     }
-    // Frecency adds to the score, so it also wins over the last-segment tie-break.
+    // The frecency tie-break comes before the last-segment tie-break.
     assert_eq!(
         ranked("proj/zel", &paths, home, &[paths[0].clone()])[0],
         paths[0]
@@ -952,19 +952,14 @@ fn frecency_raises_launched_directories_above_equal_scores() {
 
 #[test]
 fn frecency_wins_a_tie_when_its_boost_rounds_to_zero() {
-    use neo_frizbee::{Config, Matcher};
     let home = "/home/ada";
     // The launched directory is deeper and later in path order.
     let paths: Vec<_> = ["/home/ada/zellij", "/home/ada/Projects/zellij-launchpad"]
         .map(str::to_owned)
         .into();
-    let scores: Vec<_> = Matcher::new("zel", &Config::default())
-        .match_list(&paths)
-        .into_iter()
-        .map(|m| m.score)
-        .collect();
+    let scores = frizbee_scores("zel", &paths);
     assert!(
-        scores.len() == 2 && scores[0] == scores[1] && scores[0] < 100,
+        scores[0] == scores[1] && scores[0] < 100,
         "the fixture needs equal scores below 100, so frecency 1 adds 0: {scores:?}"
     );
     assert_eq!(ranked("zel", &paths, home, &[]), paths);
@@ -972,6 +967,52 @@ fn frecency_wins_a_tie_when_its_boost_rounds_to_zero() {
         ranked("zel", &paths, home, &[paths[1].clone()]),
         [paths[1].clone(), paths[0].clone()]
     );
+}
+
+#[test]
+fn the_frecency_boost_lifts_a_slightly_worse_match() {
+    use launchpad_core::search::matches_in;
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/Projects/launchpad",
+        "/home/ada/Projects/laun-chpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    let scores = frizbee_scores("launchpad", &paths);
+    assert!(scores[1] < scores[0], "{scores:?}");
+    assert_eq!(ranked("launchpad", &paths, home, &[]), paths);
+    // Up to 10 launches now give a frecency equal to their count. Use the fewest
+    // launches whose boost puts the worse match above the better one.
+    let launches = (1..=10)
+        .find(|&n| scores[1] + scores[1] * n / 100 > scores[0])
+        .expect("the score gap is too large for the fixture");
+    let frecency = Frecency::new(home, NOW, (0..launches).map(|_| (paths[1].as_str(), NOW)));
+    assert_eq!(frecency.get(&paths[1]), launches);
+    assert_eq!(
+        matches_in("launchpad", &directories(&paths), home, &frecency),
+        [1, 0]
+    );
+}
+
+/// The Frizbee score of each path: the better of its full path and its own name.
+fn frizbee_scores(query: &str, paths: &[String]) -> Vec<u32> {
+    use neo_frizbee::{Config, Matcher};
+    let names: Vec<_> = paths
+        .iter()
+        .map(|p| p.rsplit('/').next().unwrap())
+        .collect();
+    let mut matcher = Matcher::new(query, &Config::default());
+    let mut scores = vec![0; paths.len()];
+    for m in matcher
+        .match_list(paths)
+        .into_iter()
+        .chain(matcher.match_list(&names))
+    {
+        let score = &mut scores[m.index as usize];
+        *score = (*score).max(u32::from(m.score));
+    }
+    scores
 }
 
 #[test]

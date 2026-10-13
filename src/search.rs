@@ -38,8 +38,8 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
 /// Embedded Frizbee ranks basename and full path. Launch frecency raises the score:
 /// the total is `score + score * frecency / 100`, as in fff-search. Equal totals prefer
 /// higher frecency, then a directory whose own name contains the query's last `/`
-/// segment, then shallower paths, then path order. These only break ties: Frizbee's local alignment ignores
-/// trailing text, so a project and all of its subdirectories often score identically.
+/// segment, then shallower paths, then path order. These only break ties: Frizbee's local
+/// alignment ignores trailing text, so a project and its subdirectories often score the same.
 /// Typed text allows typos up to the limit from `max_typos`. Explicit paths allow none.
 pub fn matches_in(
     raw: &str,
