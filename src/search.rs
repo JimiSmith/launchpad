@@ -1,6 +1,15 @@
 //! Home-only cached directory index. No shell, subprocess, or render-time IO.
 use crate::editor::MAX_INPUT_CHARS;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
+    },
+    time::{Duration, Instant},
+};
 
 #[cfg(windows)]
 fn is_hidden(entry: &ignore::DirEntry) -> bool {
@@ -174,12 +183,22 @@ pub struct HomeIndex {
     root: PathBuf,
     ignore: Vec<crate::host_path::HostPath>,
     pub limits: Limits,
-    visited: usize,
-    retained_bytes: usize,
     limited: bool,
     error: Option<String>,
-    walker: Option<ignore::Walk>,
-    started: bool,
+    scan: Scan,
+}
+enum Scan {
+    NotStarted,
+    Running(ParallelScan),
+    Finished,
+}
+/// How `HomeIndex::receive` waits for the walk threads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Receive {
+    /// Return at once if no message is ready.
+    Poll,
+    /// Wait until the next batch arrives or the walk ends.
+    Block,
 }
 /// Only completed scans are eligible to replace a persistent snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,12 +247,9 @@ impl HomeIndex {
                 })
                 .collect::<Result<_, String>>()?,
             limits: Limits::default(),
-            visited: 0,
-            retained_bytes: 0,
             limited: false,
             error: None,
-            walker: None,
-            started: false,
+            scan: Scan::NotStarted,
         })
     }
     fn host_path(&self) -> crate::host_path::HostPath {
@@ -309,126 +325,289 @@ impl HomeIndex {
         }
     }
     pub fn is_scanning(&self) -> bool {
-        !self.started || self.walker.is_some()
+        !matches!(self.scan, Scan::Finished)
     }
-    /// Bound returned entries and cooperate between iterator calls. One next()
-    /// can consume many ignored entries or block in IO; this is not a syscall
-    /// or hard time budget. The native adapter calls this inside its background worker.
-    pub fn step(&mut self, budget: usize) {
-        if budget == 0 {
-            return;
+    /// Starts the walk on the first call. Adds at most one batch of directories.
+    /// Returns true if the index changed. The completed index is sorted by path.
+    pub fn receive(&mut self, mode: Receive) -> bool {
+        if matches!(self.scan, Scan::NotStarted) {
+            self.scan = self.start();
+            if matches!(self.scan, Scan::Finished) {
+                return true;
+            }
         }
-        let started = std::time::Instant::now();
-        if !self.started {
-            self.started = true;
-            let home = self.host_path();
-            if self.ignore.iter().any(|path| path.contains(&home)) {
-                return;
+        let Scan::Running(scan) = &self.scan else {
+            return false;
+        };
+        let message = match mode {
+            Receive::Poll => match scan.messages.try_recv() {
+                Ok(message) => Some(message),
+                Err(TryRecvError::Empty) => return false,
+                Err(TryRecvError::Disconnected) => None,
+            },
+            Receive::Block => scan.messages.recv().ok(),
+        };
+        match message {
+            Some(WalkMessage::Batch(dirs)) => {
+                self.dirs.extend(dirs);
+                return true;
             }
-            if let Err(error) = self.validate("~") {
-                self.error = Some(error);
-                return;
+            Some(WalkMessage::Finished { limited, error }) => {
+                self.limited = limited;
+                self.error = error;
             }
-            let mut builder = ignore::WalkBuilder::new(&self.root);
-            let root = self.root.clone();
-            let ignore = self.ignore.clone();
-            builder
-                .follow_links(false)
-                .max_depth(Some(self.limits.max_depth))
-                .filter_entry(move |entry| {
-                    if entry.depth() == 0 {
-                        return true;
+            None => self.error = Some("HOME scan stopped unexpectedly.".into()),
+        }
+        self.scan = Scan::Finished;
+        self.dirs.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+        true
+    }
+    fn start(&mut self) -> Scan {
+        let home = self.host_path();
+        if self.ignore.iter().any(|path| path.contains(&home)) {
+            return Scan::Finished;
+        }
+        if let Err(error) = self.validate("~") {
+            self.error = Some(error);
+            return Scan::Finished;
+        }
+        let mut builder = ignore::WalkBuilder::new(&self.root);
+        let root = self.root.clone();
+        let ignore = self.ignore.clone();
+        let filter_home = home.clone();
+        builder
+            .follow_links(false)
+            .max_depth(Some(self.limits.max_depth))
+            .filter_entry(move |entry| {
+                if entry.depth() == 0 {
+                    return true;
+                }
+                if !ignore.is_empty() {
+                    let Some(parts) = entry.path().strip_prefix(&root).ok().and_then(|path| {
+                        path.components()
+                            .map(|part| part.as_os_str().to_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                    }) else {
+                        return false;
+                    };
+                    let Some(path) = crate::host_path::HostPath::parse(&filter_home.join(&parts))
+                    else {
+                        return false;
+                    };
+                    if ignore.iter().any(|ignored| ignored.contains(&path)) {
+                        return false;
                     }
-                    if !ignore.is_empty() {
-                        let Some(parts) = entry.path().strip_prefix(&root).ok().and_then(|path| {
-                            path.components()
-                                .map(|part| part.as_os_str().to_str().map(str::to_owned))
-                                .collect::<Option<Vec<_>>>()
-                        }) else {
-                            return false;
-                        };
-                        let Some(path) = crate::host_path::HostPath::parse(&home.join(&parts))
-                        else {
-                            return false;
-                        };
-                        if ignore.iter().any(|ignored| ignored.contains(&path)) {
-                            return false;
-                        }
-                    }
-                    entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(|name| !name.chars().any(char::is_control))
-                        && !is_hidden(entry)
+                }
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| !name.chars().any(char::is_control))
+                    && !is_hidden(entry)
+            });
+        let walk = builder.build_parallel();
+        let shared = Arc::new(WalkShared {
+            root: self.root.clone(),
+            home,
+            limits: self.limits,
+            cancel: AtomicBool::new(false),
+            entries: AtomicUsize::new(0),
+            directories: AtomicUsize::new(0),
+            retained_bytes: AtomicUsize::new(0),
+            limited: AtomicBool::new(false),
+            error: OnceLock::new(),
+        });
+        let (sender, messages) = mpsc::sync_channel(BATCH_CHANNEL_CAPACITY);
+        let thread_shared = Arc::clone(&shared);
+        let spawned = std::thread::Builder::new()
+            .name("home-walk".into())
+            .spawn(move || {
+                walk.visit(&mut VisitorBuilder {
+                    shared: Arc::clone(&thread_shared),
+                    sender: sender.clone(),
                 });
-            self.walker = Some(builder.build());
-        }
-        for _ in 0..budget {
-            if started.elapsed() >= std::time::Duration::from_millis(5) {
-                break;
-            }
-            if self.dirs.len() >= self.limits.max_directories
-                || self.visited >= self.limits.max_entries
-                || self.retained_bytes > self.limits.max_bytes
-            {
-                self.limited = true;
-                self.walker = None;
-                break;
-            }
-            let Some(walker) = self.walker.as_mut() else {
-                break;
-            };
-            let entry = match walker.next() {
-                Some(Ok(entry)) => entry,
-                Some(Err(error)) => {
-                    if error.depth() == Some(0) {
-                        self.error = Some(format!("Directory unavailable: {error}"));
-                        self.walker = None;
-                        break;
-                    }
-                    continue;
-                }
-                None => {
-                    self.walker = None;
-                    break;
-                }
-            };
-            if entry.depth() == 0 {
-                continue;
-            }
-            self.visited += 1;
-            if !entry.file_type().is_some_and(|kind| kind.is_dir()) {
-                continue;
-            }
-            let Ok(relative) = entry.path().strip_prefix(&self.root) else {
-                continue;
-            };
-            let parts: Option<Vec<_>> = relative
-                .components()
-                .map(|c| c.as_os_str().to_str().map(str::to_owned))
-                .collect();
-            if let Some(parts) = parts {
-                let path = self.host_path().join(&parts);
-                // Keep the conservative path/allocation allowance even though
-                // the serial DFS walker no longer retains a breadth-first queue.
-                let cost = path.len() + relative.as_os_str().len() + 128;
-                if path.len() > 4096
-                    || self.retained_bytes.saturating_add(cost) > self.limits.max_bytes
-                {
-                    self.limited = true;
-                    self.walker = None;
-                    break;
-                }
-                self.retained_bytes += cost;
-                self.dirs.push(Directory {
-                    path,
-                    note: "directory",
-                    error: None,
+                // The walk joins its threads before it returns, so every batch is sent.
+                let _ = sender.send(WalkMessage::Finished {
+                    limited: thread_shared.limited.load(Ordering::Relaxed),
+                    error: thread_shared.error.get().cloned(),
                 });
-                if entry.depth() >= self.limits.max_depth {
-                    self.limited = true;
-                }
+            });
+        match spawned {
+            Ok(_) => Scan::Running(ParallelScan { messages, shared }),
+            Err(error) => {
+                self.error = Some(format!("Directory scan unavailable: {error}"));
+                Scan::Finished
             }
         }
+    }
+}
+
+/// Directories in one batch. A smaller batch gives results sooner.
+const BATCH_LEN: usize = 128;
+/// A walk thread sends a partial batch at its next entry after this time.
+const BATCH_AGE: Duration = Duration::from_millis(10);
+/// Batches that wait for the receiver. When the channel is full, the walk threads wait.
+const BATCH_CHANNEL_CAPACITY: usize = 16;
+
+enum WalkMessage {
+    Batch(Vec<Directory>),
+    Finished {
+        limited: bool,
+        error: Option<String>,
+    },
+}
+
+/// A running walk. Drop tells the walk threads to stop and discards their late batches.
+struct ParallelScan {
+    messages: Receiver<WalkMessage>,
+    shared: Arc<WalkShared>,
+}
+impl Drop for ParallelScan {
+    fn drop(&mut self) {
+        self.shared.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// State that all walk threads share. The counters record the use of each `Limits` budget.
+struct WalkShared {
+    root: PathBuf,
+    home: crate::host_path::HostPath,
+    limits: Limits,
+    cancel: AtomicBool,
+    entries: AtomicUsize,
+    directories: AtomicUsize,
+    retained_bytes: AtomicUsize,
+    limited: AtomicBool,
+    error: OnceLock<String>,
+}
+impl WalkShared {
+    fn stop_at_limit(&self) -> ignore::WalkState {
+        self.limited.store(true, Ordering::Relaxed);
+        ignore::WalkState::Quit
+    }
+}
+
+/// Adds `amount` to `counter` and returns the new total, or `None` if the total exceeds `limit`.
+fn claim(counter: &AtomicUsize, amount: usize, limit: usize) -> Option<usize> {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            used.checked_add(amount).filter(|total| *total <= limit)
+        })
+        .ok()
+        .map(|used| used + amount)
+}
+
+struct VisitorBuilder {
+    shared: Arc<WalkShared>,
+    sender: SyncSender<WalkMessage>,
+}
+impl<'s> ignore::ParallelVisitorBuilder<'s> for VisitorBuilder {
+    fn build(&mut self) -> Box<dyn ignore::ParallelVisitor + 's> {
+        Box::new(Visitor {
+            shared: Arc::clone(&self.shared),
+            sender: self.sender.clone(),
+            batch: Vec::new(),
+            batch_started: Instant::now(),
+        })
+    }
+}
+
+/// One walk thread. Drop sends the last partial batch.
+struct Visitor {
+    shared: Arc<WalkShared>,
+    sender: SyncSender<WalkMessage>,
+    batch: Vec<Directory>,
+    batch_started: Instant,
+}
+impl Visitor {
+    /// Applies the budgets to one entry below HOME and keeps it if it is a directory.
+    fn add(&mut self, entry: &ignore::DirEntry) -> ignore::WalkState {
+        use ignore::WalkState;
+        let shared = &*self.shared;
+        let limits = shared.limits;
+        let Some(entries) = claim(&shared.entries, 1, limits.max_entries) else {
+            return shared.stop_at_limit();
+        };
+        let state = if entries == limits.max_entries {
+            shared.stop_at_limit()
+        } else {
+            WalkState::Continue
+        };
+        if !entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            return state;
+        }
+        let Ok(relative) = entry.path().strip_prefix(&shared.root) else {
+            return state;
+        };
+        let Some(parts) = relative
+            .components()
+            .map(|c| c.as_os_str().to_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return state;
+        };
+        let path = shared.home.join(&parts);
+        // Estimate the retained size of the path and its allocation.
+        let cost = path.len() + relative.as_os_str().len() + 128;
+        if path.len() > 4096 || claim(&shared.retained_bytes, cost, limits.max_bytes).is_none() {
+            return shared.stop_at_limit();
+        }
+        let Some(directories) = claim(&shared.directories, 1, limits.max_directories) else {
+            return shared.stop_at_limit();
+        };
+        if self.batch.is_empty() {
+            self.batch_started = Instant::now();
+        }
+        self.batch.push(Directory {
+            path,
+            note: "directory",
+            error: None,
+        });
+        if entry.depth() >= limits.max_depth {
+            shared.limited.store(true, Ordering::Relaxed);
+        }
+        if directories == limits.max_directories {
+            return shared.stop_at_limit();
+        }
+        state
+    }
+    /// Returns false if the receiver is gone.
+    fn send_batch(&mut self) -> bool {
+        self.batch.is_empty()
+            || self
+                .sender
+                .send(WalkMessage::Batch(std::mem::take(&mut self.batch)))
+                .is_ok()
+    }
+}
+impl ignore::ParallelVisitor for Visitor {
+    fn visit(&mut self, entry: Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState {
+        use ignore::WalkState;
+        if self.shared.cancel.load(Ordering::Relaxed) {
+            return WalkState::Quit;
+        }
+        let state = match entry {
+            Ok(entry) if entry.depth() == 0 => WalkState::Continue,
+            Ok(entry) => self.add(&entry),
+            Err(error) if error.depth() == Some(0) => {
+                let _ = self
+                    .shared
+                    .error
+                    .set(format!("Directory unavailable: {error}"));
+                WalkState::Quit
+            }
+            // Inaccessible subdirectories are skipped.
+            Err(_) => WalkState::Continue,
+        };
+        let full = self.batch.len() >= BATCH_LEN
+            || (!self.batch.is_empty() && self.batch_started.elapsed() >= BATCH_AGE);
+        if full && !self.send_batch() {
+            return WalkState::Quit;
+        }
+        state
+    }
+}
+impl Drop for Visitor {
+    fn drop(&mut self) {
+        self.send_batch();
     }
 }

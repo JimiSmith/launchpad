@@ -418,17 +418,25 @@ impl App {
         if !index.is_scanning() {
             return false;
         }
-        index.step(128);
-        self.dirs.extend_from_slice(&index.dirs[self.dirs.len()..]);
+        let selected = self
+            .highlighted
+            .and_then(|i| self.suggestions.get(i))
+            .map(|&id| self.dirs[id].path.clone());
+        index.receive(crate::search::Receive::Block);
+        if index.is_scanning() {
+            self.dirs.extend_from_slice(&index.dirs[self.dirs.len()..]);
+        } else {
+            // The completed index is sorted, so directory ids change.
+            self.dirs.clone_from(&index.dirs);
+        }
         self.search_status = index.status();
         if self.show_suggestions {
-            let selected = self
-                .highlighted
-                .and_then(|i| self.suggestions.get(i))
-                .copied();
             self.suggestions = self.matches();
-            self.highlighted =
-                selected.and_then(|id| self.suggestions.iter().position(|&i| i == id));
+            self.highlighted = selected.and_then(|path| {
+                self.suggestions
+                    .iter()
+                    .position(|&i| self.dirs[i].path == path)
+            });
         }
         true
     }

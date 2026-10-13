@@ -4,9 +4,10 @@ One native thread owns the populated HOME index, directory validation, and fuzzy
 matching. The main thread owns the terminal and application state. Both use
 absolute filesystem paths; there are no remounts, permissions or reload handshakes.
 
-The worker advances the existing cooperative walker in bounded 128-entry slices
-and checks demand between slices. It publishes progress at most every 100 ms,
-plus completion immediately. Matching returns at most 100 paths / 64 KiB.
+The worker does not walk HOME itself. The walk threads send directory batches
+on a bounded channel, and the worker adds them between requests. While a scan
+runs, the worker checks for batches every 5 ms. It publishes progress at most
+every 100 ms, plus completion immediately. Matching returns at most 100 paths / 64 KiB.
 
 The UI permits one outstanding request; newer edits replace unsent demand.
 The search scheduler observes the actual input text each UI iteration, including

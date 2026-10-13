@@ -6,7 +6,7 @@ validation. Filesystem work does not run on the terminal event loop.
 
 ## Traversal
 
-The serial `ignore` walker uses its standard ignore handling, including parent
+The parallel `ignore` walker uses its standard ignore handling, including parent
 `.gitignore` and `.ignore` files, nested rules and negation, global Git ignores,
 and `.git/info/exclude`. Git-related rules use the crate's default repository
 detection. `node_modules` is indexed unless excluded by ignore rules.
@@ -27,10 +27,19 @@ ancestor skips traversal entirely, including for hidden HOME directories.
 F5 keeps the loaded exclusions; reopen to load configuration edits. Literal
 validation, invoking-directory exceptions and history replay are unaffected.
 
-Traversal cooperatively yields after at most 128 entries or its existing 5 ms
-budget. Limits are 200,000 retained directories, 2,000,000 visited entries,
+The walk runs on its own threads, one for each CPU and at most 12. The walk
+threads send batches of at most 128 directories. A thread sends a partial batch
+at its next entry after 10 ms. The search worker adds the batches between
+requests. F5 and a new epoch stop the walk threads at their next entry and
+discard their late batches. The completed index is
+sorted by path. During a scan, results with equal scores can change order.
+
+Limits are 200,000 retained directories, 2,000,000 visited entries,
 depth 64 and 60 MiB of estimated retained index memory, excluding the walker's
-internal allocations and ignore matchers. The UI reports limits and errors.
+internal allocations and ignore matchers. All walk threads share these budgets.
+The walk stops when a budget is full. Because the threads visit directories in
+a different order on each scan, a scan that stops at a limit can keep a different
+set of directories each time. The UI reports limits and errors.
 There is no external search process. While rebuilding, the previous snapshot
 and the new index each have their own retained-data budget.
 
