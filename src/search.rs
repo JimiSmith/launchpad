@@ -37,8 +37,8 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
 
 /// Embedded Frizbee ranks basename and full path. Launch frecency raises the score:
 /// the total is `score + score * frecency / 100`, as in fff-search. Equal totals prefer
-/// a directory whose own name contains the query's last `/` segment, then shallower
-/// paths, then path order. These only break ties: Frizbee's local alignment ignores
+/// higher frecency, then a directory whose own name contains the query's last `/`
+/// segment, then shallower paths, then path order. These only break ties: Frizbee's local alignment ignores
 /// trailing text, so a project and all of its subdirectories often score identically.
 /// Typed text allows typos up to the limit from `max_typos`. Explicit paths allow none.
 pub fn matches_in(
@@ -118,18 +118,20 @@ pub fn matches_in(
         .enumerate()
         .filter_map(|(i, score)| {
             let score = u32::from(score?);
-            let total = score + score.saturating_mul(frecency.get(&dirs[i].path)) / 100;
+            let frecency_score = frecency.get(&dirs[i].path);
+            let total = score + score.saturating_mul(frecency_score) / 100;
             let named = last_segment
                 .as_mut()
                 .is_none_or(|m| m.match_one(names[i], 0).is_some());
             let depth = paths[i].split('/').filter(|p| !p.is_empty()).count();
-            Some((i, total, named, depth))
+            Some((i, total, frecency_score, named, depth))
         })
         .collect();
     ranked.sort_by(|a, b| {
         b.1.cmp(&a.1)
             .then(b.2.cmp(&a.2))
-            .then(a.3.cmp(&b.3))
+            .then(b.3.cmp(&a.3))
+            .then(a.4.cmp(&b.4))
             .then_with(|| dirs[a.0].path.cmp(&dirs[b.0].path))
     });
     ranked.into_iter().map(|(i, ..)| i).collect()

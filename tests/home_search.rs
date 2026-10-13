@@ -951,6 +951,30 @@ fn frecency_raises_launched_directories_above_equal_scores() {
 }
 
 #[test]
+fn frecency_wins_a_tie_when_its_boost_rounds_to_zero() {
+    use neo_frizbee::{Config, Matcher};
+    let home = "/home/ada";
+    // The launched directory is deeper and later in path order.
+    let paths: Vec<_> = ["/home/ada/zellij", "/home/ada/Projects/zellij-launchpad"]
+        .map(str::to_owned)
+        .into();
+    let scores: Vec<_> = Matcher::new("zel", &Config::default())
+        .match_list(&paths)
+        .into_iter()
+        .map(|m| m.score)
+        .collect();
+    assert!(
+        scores.len() == 2 && scores[0] == scores[1] && scores[0] < 100,
+        "the fixture needs equal scores below 100, so frecency 1 adds 0: {scores:?}"
+    );
+    assert_eq!(ranked("zel", &paths, home, &[]), paths);
+    assert_eq!(
+        ranked("zel", &paths, home, &[paths[1].clone()]),
+        [paths[1].clone(), paths[0].clone()]
+    );
+}
+
+#[test]
 fn a_much_better_match_wins_over_frecency() {
     use launchpad_core::search::matches_in;
     let home = "/home/ada";

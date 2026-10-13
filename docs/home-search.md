@@ -96,18 +96,19 @@ often and how recently you launched a directory (the fff-search rule). Each laun
 the last 30 days adds `exp(-0.0693 * days_ago)`, so a launch counts half after 10
 days. A sum above 10 becomes `10 + sqrt(sum - 10)`, and the result is rounded. The
 total score is `score + score * frecency / 100`: each recent launch adds about 1%, so
-a much better text match still wins. The boost is rounded down, so a few launches
-do not change the score of a short query. The worker loads the launch times at
+a much better text match still wins. The boost is rounded down, so it can be 0
+for a short query. The worker loads the launch times at
 start, at F5 and at the first query after Ctrl+L. [Frecency storage](history.md#frecency).
 
 Equal totals are common because Frizbee ignores text after the best alignment, so
 ties are broken in order by:
 
-1. the directory's own name containing the query's last typed `/` segment
+1. higher frecency, so a launched directory wins a tie also when its boost is 0;
+2. the directory's own name containing the query's last typed `/` segment
    (exact substring with no typos; skipped for a trailing `/`, `~`, `.` and
    `..`), so `repo/branch` prefers the checkout over folders inside it;
-2. fewer path components;
-3. path order.
+3. fewer path components;
+4. path order.
 
 Because frecency adds to the score, a launched folder inside a checkout can rank
 above the checkout itself.
