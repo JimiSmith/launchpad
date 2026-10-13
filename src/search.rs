@@ -35,11 +35,9 @@ pub fn normalize_in(raw: &str, home: &str) -> Option<String> {
     crate::host_path::normalize(raw, home)
 }
 
-/// Embedded Frizbee ranks basename and full path. Launch frecency raises the score:
-/// the total is `score + score * frecency / 100`, as in fff-search. Equal totals prefer
-/// higher frecency, then a directory whose own name contains the query's last `/`
-/// segment, then shallower paths, then path order. These only break ties: Frizbee's local
-/// alignment ignores trailing text, so a project and its subdirectories often score the same.
+/// Embedded Frizbee matches the full path. The total is the score, plus the launch frecency boost
+/// `score * frecency / 100`, plus the name bonus from `name_bonus`, as in fff-search. Equal totals
+/// prefer higher frecency, then shallower paths, then path order.
 /// Typed text allows typos up to the limit from `max_typos`. Explicit paths allow none.
 pub fn matches_in(
     raw: &str,
@@ -47,7 +45,7 @@ pub fn matches_in(
     home: &str,
     frecency: &crate::frecency::Frecency,
 ) -> Vec<usize> {
-    use neo_frizbee::{Config, Matcher, Matching};
+    use neo_frizbee::{Config, Matcher};
     if raw.chars().count() > MAX_INPUT_CHARS {
         return Vec::new();
     }
@@ -89,52 +87,47 @@ pub fn matches_in(
             }
         })
         .collect();
-    let names: Vec<_> = paths
-        .iter()
-        .map(|p| p.rsplit('/').next().unwrap_or(p))
-        .collect();
-    // The last typed segment must appear in a directory's own name to win ties,
-    // so `repo/branch` prefers the checkout over launched folders inside it.
-    // Read it before HOME expansion: `~`, `./` and `..` name no folder.
-    let mut last_segment = raw
-        .rsplit('/')
-        .next()
-        .filter(|segment| !matches!(*segment, "" | "~" | "." | ".."))
-        .map(|segment| Matcher::new(segment, &config.matching(Matching::Substring)));
-    let mut scores = vec![None; dirs.len()];
     // An explicit path names one directory, so a typo must not match others.
     let typos = if explicit { 0 } else { max_typos(raw) };
     let mut matcher = Matcher::new(&query, &config.max_typos(Some(typos)));
-    for m in matcher
+    let mut ranked: Vec<_> = matcher
         .match_list(&paths)
         .into_iter()
-        .chain(matcher.match_list(&names))
-    {
-        let score = &mut scores[m.index as usize];
-        *score = Some(score.unwrap_or(0).max(m.score));
-    }
-    let mut ranked: Vec<_> = scores
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, score)| {
-            let score = u32::from(score?);
+        .map(|m| {
+            let i = m.index as usize;
+            let path: &str = &paths[i];
+            let base = u32::from(m.score);
             let frecency_score = frecency.get(&dirs[i].path);
-            let total = score + score.saturating_mul(frecency_score) / 100;
-            let named = last_segment
-                .as_mut()
-                .is_none_or(|m| m.match_one(names[i], 0).is_some());
-            let depth = paths[i].split('/').filter(|p| !p.is_empty()).count();
-            Some((i, total, frecency_score, named, depth))
+            let boost = base.saturating_mul(frecency_score) / 100;
+            let total = base + boost + name_bonus(&query, path, m.end_col, base);
+            let depth = path.split('/').filter(|p| !p.is_empty()).count();
+            (i, total, frecency_score, depth)
         })
         .collect();
     ranked.sort_by(|a, b| {
         b.1.cmp(&a.1)
             .then(b.2.cmp(&a.2))
-            .then(b.3.cmp(&a.3))
-            .then(a.4.cmp(&b.4))
+            .then(a.3.cmp(&b.3))
             .then_with(|| dirs[a.0].path.cmp(&dirs[b.0].path))
     });
     ranked.into_iter().map(|(i, ..)| i).collect()
+}
+
+/// The fff-search name bonus. `end_col` is the start byte of the last matched character. The match
+/// is in the name when its estimated start (`end_col` minus the query bytes before its last
+/// character) is in the last `/` segment. A name equal to the query (ASCII
+/// case-insensitive) adds 40% of `base`. Other name matches add about 16%.
+fn name_bonus(query: &str, path: &str, end_col: u16, base: u32) -> u32 {
+    let name_start = path.rfind('/').map_or(0, |slash| slash + 1);
+    let last_char = query.chars().next_back().map_or(0, char::len_utf8);
+    let start = usize::from(end_col).saturating_sub(query.len() - last_char);
+    if start < name_start {
+        0
+    } else if query.eq_ignore_ascii_case(&path[name_start..]) {
+        base / 5 * 2
+    } else {
+        base / 6
+    }
 }
 
 /// The fff-search rule: about one typo for each four typed bytes, from 2 to 6.
