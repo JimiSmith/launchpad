@@ -562,7 +562,8 @@ fn app_searches_real_home_accepts_then_revalidates_without_invented_history() {
     assert!(app.suggestions.is_empty());
     app.update(Action::Enter);
     assert!(
-        app.take_launch().is_some(),
+        app.take_launch()
+            .is_some_and(|launch| launch.path.ends_with(".archive")),
         "an explicit hidden literal launches"
     );
     app.launch_rejected();
@@ -1018,4 +1019,83 @@ fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
     let recent = ["~/Projects/zellij-launchpad".into()];
     assert_eq!(ranked("~/Projects/", &paths, home, &recent)[0], paths[1]);
     assert_eq!(ranked("~/Projects/", &paths, home, &[])[0], paths[0]);
+}
+
+#[test]
+fn queries_tolerate_swapped_missing_and_extra_letters() {
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/Projects/zellij-launchpad",
+        "/home/ada/Projects/ov-tracker",
+        "/home/ada/work",
+    ]
+    .map(str::to_owned)
+    .into();
+    // A missing letter is a plain fuzzy match, so it passes with no typo budget.
+    // The swapped, extra and wrong letters each need one typo.
+    for raw in [
+        "lanuchpad",
+        "launchpaad",
+        "launchped",
+        "lauchpad",
+        "proj/zelij",
+    ] {
+        assert_eq!(ranked(raw, &paths, home, &[]), [paths[0].clone()], "{raw}");
+    }
+}
+
+#[test]
+fn exact_matches_rank_above_typo_matches() {
+    // The typo match is launched and first in path order, so only the score
+    // keeps the exact match first.
+    let home = "/home/ada";
+    let paths: Vec<_> = [
+        "/home/ada/Projects/lanchpad",
+        "/home/ada/Projects/zellij-launchpad",
+    ]
+    .map(str::to_owned)
+    .into();
+    let recent = [paths[0].clone()];
+    // A trailing `/` skips the last-segment tie-break.
+    for raw in ["launchpad/", "proj/launchpad/"] {
+        let results = ranked(raw, &paths, home, &recent);
+        assert_eq!(results, [paths[1].clone(), paths[0].clone()], "{raw}");
+    }
+}
+
+#[test]
+fn typo_limit_is_a_quarter_of_the_query_bytes() {
+    // Each `q` is one extra letter. 12 bytes allow 3 typos, 11 bytes allow 2.
+    let home = "/home/ada";
+    let paths = vec!["/home/ada/Projects/zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lauqnchqpaqd", &paths, home, &[]), paths);
+    assert!(ranked("lauqnchqpqd", &paths, home, &[]).is_empty());
+}
+
+#[test]
+fn explicit_paths_allow_no_typos() {
+    let home = "/home/ada";
+    let paths = vec!["/home/ada/Projects/zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lanuchpad", &paths, home, &[]), paths);
+    for raw in [
+        "~/Projects/zellij-lanuchpad",
+        "/home/ada/Projects/zellij-lanuchpad",
+        "./Projects/zellij-lanuchpad",
+        "../ada/Projects/zellij-lanuchpad",
+    ] {
+        assert!(ranked(raw, &paths, home, &[]).is_empty(), "{raw}");
+    }
+    // A missing letter is a fuzzy match, not a typo, so explicit paths accept it.
+    for raw in ["~/Projects/zellij-launchpad", "~/Projects/zellij-lauchpad"] {
+        assert_eq!(ranked(raw, &paths, home, &[]), paths, "{raw}");
+    }
+    let home = r"C:\Users\Ada";
+    let paths = vec![r"C:\Users\Ada\Projects\zellij-launchpad".to_owned()];
+    assert_eq!(ranked("lanuchpad", &paths, home, &[]), paths);
+    for raw in [
+        r"C:\Users\Ada\Projects\zellij-lanuchpad",
+        "C:/Users/Ada/Projects/zellij-lanuchpad",
+    ] {
+        assert!(ranked(raw, &paths, home, &[]).is_empty(), "{raw}");
+    }
 }

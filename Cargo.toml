@@ -14,7 +14,7 @@ resolver = "2"
 shlex = "=2.0.1"
 ignore = "=0.4.33"
 ratatui = { version = "=0.30.2", default-features = false, features = ["unstable-rendered-line-info"] }
-neo_frizbee = { version = "=0.13.1", default-features = false, features = ["safe_read"] }
+neo_frizbee = { version = "=0.13.3", default-features = false, features = ["safe_read"] }
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
 unicode-normalization = "0.1"
