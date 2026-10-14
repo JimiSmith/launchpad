@@ -236,4 +236,34 @@ fn frecency_loads_at_start_and_again_after_a_clear() {
         "the scores stay until the revision changes"
     );
     assert_eq!(first(1), home.join("proj-a").to_str().unwrap());
+    // A reload without an index restart still sends the frecency status.
+    let journal = f.0.join("state/frecency.d");
+    std::fs::remove_dir_all(&journal).unwrap();
+    std::fs::write(&journal, "").unwrap();
+    let status = |frecency| {
+        worker
+            .requests
+            .send(Request {
+                epoch: 0,
+                frecency_revision: frecency,
+                request: RemoteRequest::Query {
+                    generation: 2,
+                    text: "proj".into(),
+                },
+            })
+            .unwrap();
+        loop {
+            match worker.replies.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Reply::Progress { status, .. } => break status,
+                Reply::Failed(error) => panic!("{error}"),
+                _ => {}
+            }
+        }
+    };
+    assert!(status(2).contains("Frecency unavailable"));
+    std::fs::remove_file(&journal).unwrap();
+    assert!(
+        !status(3).contains("Frecency"),
+        "a fixed store clears the warning"
+    );
 }

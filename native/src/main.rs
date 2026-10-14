@@ -457,24 +457,31 @@ impl History {
     }
     fn mutate(&mut self, app: &mut App, mutation: HistoryMutation) {
         let (token, _) = history::operation_id();
+        // `Ok` holds a frecency error. History changed, so Recent loads again.
         let result = match mutation {
             HistoryMutation::Clear => {
                 let frecency = self.frecency.clear(&token);
                 self.frecency_revision += 1;
-                self.store
-                    .clear(&token)
-                    .and(frecency.map_err(|e| format!("Frecency was not cleared: {e}")))
+                self.store.clear(&token).map(|()| {
+                    frecency
+                        .err()
+                        .map(|e| format!("Frecency was not cleared: {e}"))
+                })
             }
             HistoryMutation::Remove(id) => self
                 .rows
                 .get(id as usize)
                 .ok_or_else(|| "History selection changed; refresh and retry".to_string())
-                .and_then(|row| self.store.remove(&row.id, &token)),
+                .and_then(|row| self.store.remove(&row.id, &token))
+                .map(|()| None),
         };
         match result {
-            Ok(()) => {
+            Ok(frecency_error) => {
                 app.message = None;
                 self.load(app);
+                if let Some(error) = frecency_error {
+                    app.message.get_or_insert(error);
+                }
             }
             Err(error) => app.message = Some(format!("History change failed: {error}")),
         }
@@ -510,6 +517,41 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::ShellHandoff;
+    #[test]
+    fn a_failed_frecency_clear_still_clears_recent() {
+        use super::{App, Entry, History, HistoryMutation, Store, history};
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/native-main-tests")
+            .join(format!("{}-clear", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // A file in place of the journal directory makes each frecency write fail.
+        std::fs::write(root.join("frecency.d"), "").unwrap();
+        let mut history = History {
+            store: Store::new(&root),
+            frecency: launchpad::frecency::Store::new(&root),
+            frecency_revision: 0,
+            rows: Vec::new(),
+        };
+        let (id, opened_at) = history::operation_id();
+        history
+            .store
+            .record(Entry {
+                id,
+                path: "/fixture/a".into(),
+                opened_at,
+            })
+            .unwrap();
+        let mut app = App::from_remote("/fixture".into());
+        history.load(&mut app);
+        assert_eq!(app.history.len(), 1);
+        history.mutate(&mut app, HistoryMutation::Clear);
+        assert!(app.history.is_empty());
+        let message = app.message.unwrap();
+        assert!(message.starts_with("Frecency was not cleared"), "{message}");
+        assert_eq!(history.frecency_revision, 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
     #[test]
     fn handoff_accepts_numeric_tab_ids_from_older_releases() {
         for id in ["3", "\"3\""] {

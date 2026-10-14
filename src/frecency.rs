@@ -42,11 +42,11 @@ impl Frecency {
         now: u64,
         launches: impl IntoIterator<Item = (&'a str, u64)>,
     ) -> Self {
-        let windows = crate::host_path::HostPath::parse(home).is_some_and(|p| p.is_windows());
+        let windows = is_windows(home);
         let mut times: HashMap<String, Vec<u64>> = HashMap::new();
         for (path, at) in launches {
-            if let Some(path) = crate::search::normalize_in(path, home) {
-                times.entry(Self::key(windows, path)).or_default().push(at);
+            if let Some(key) = key(windows, path, home) {
+                times.entry(key).or_default().push(at);
             }
         }
         let scores = times
@@ -69,12 +69,23 @@ impl Frecency {
         };
         score.copied().unwrap_or(0)
     }
+}
 
-    fn key(windows: bool, path: String) -> String {
-        if windows {
-            path.to_ascii_lowercase()
-        } else {
-            path
-        }
-    }
+/// The key of the directory that `path` names, the same for each spelling of one directory.
+/// `None` if the path cannot be normalized, so that no index directory has it.
+pub fn directory_key(path: &str, home: &str) -> Option<String> {
+    key(is_windows(home), path, home)
+}
+
+fn is_windows(home: &str) -> bool {
+    crate::host_path::HostPath::parse(home).is_some_and(|p| p.is_windows())
+}
+
+fn key(windows: bool, path: &str, home: &str) -> Option<String> {
+    let path = crate::search::normalize_in(path, home)?;
+    Some(if windows {
+        path.to_ascii_lowercase()
+    } else {
+        path
+    })
 }

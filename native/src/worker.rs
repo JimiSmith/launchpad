@@ -138,6 +138,17 @@ fn run(
                 }
                 frecency_revision = requested_frecency;
                 (frecency, frecency_warning) = load_frecency(frecency_store.as_ref(), &home);
+                // The status shows a new frecency error, or stops showing a fixed one.
+                if responses
+                    .send(Reply::Progress {
+                        epoch,
+                        revision: state.revision,
+                        status: status(&state, frecency_warning.as_deref()),
+                    })
+                    .is_err()
+                {
+                    break;
+                }
             }
             let reply = match request {
                 RemoteRequest::Query { generation, text } => {
@@ -206,10 +217,11 @@ fn load_frecency(
         return (Frecency::default(), None);
     };
     let (token, now) = crate::history::operation_id();
-    match store.refresh(&token, now) {
+    let home = home.to_str().unwrap();
+    match store.refresh(&token, now, home) {
         Ok(refreshed) => (
             Frecency::new(
-                home.to_str().unwrap(),
+                home,
                 now,
                 refreshed.launches.iter().map(|l| (l.path.as_str(), l.at)),
             ),

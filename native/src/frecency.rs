@@ -1,7 +1,7 @@
 //! Shared launch times for search frecency, in the native XDG state directory.
 //! The journal uses the history protocol: immutable records, rename, no lock.
 use crate::history::{concurrent_io, publish, safe_path, valid_path, valid_token};
-use launchpad_core::frecency::{MAX_AGE_SECONDS, MAX_LAUNCHES};
+use launchpad_core::frecency::{MAX_AGE_SECONDS, MAX_LAUNCHES, directory_key};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -12,6 +12,8 @@ const JOURNAL: &str = "frecency.d";
 /// A compacted record holds every kept launch, so it is larger than a history record.
 const MAX_RECORD_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_RECORDS: usize = 1024;
+/// The maximum number of bytes that one scan reads from all journal files.
+const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Launch {
@@ -94,13 +96,14 @@ impl Store {
         })
     }
 
-    /// Compacts the kept launches into record `token` and returns them.
-    pub fn refresh(&self, token: &str, now: u64) -> Result<Refreshed, String> {
+    /// Compacts the kept launches into record `token` and returns them. `home` is the
+    /// HOME index root, which gives the directory of each launch path.
+    pub fn refresh(&self, token: &str, now: u64, home: &str) -> Result<Refreshed, String> {
         if !valid_token(token) {
             return Err("Invalid frecency token".into());
         }
         let records = self.records()?;
-        let kept = select(&records, now);
+        let kept = select(&records, now, home);
         let clear = latest_clear(&records);
         let obsolete: Vec<_> = records
             .iter()
@@ -131,10 +134,9 @@ impl Store {
         }
         // Only observed records are removed. A concurrent launch stays in its own record.
         // The compaction is already published, so a failed removal does not lose the launches.
-        let warning = obsolete
-            .iter()
-            .filter(|id| *id != token)
-            .find_map(|id| self.unlink(id).err());
+        let warning = remove_all(obsolete.iter().filter(|id| *id != token), |id| {
+            self.unlink(id)
+        });
         Ok(Refreshed {
             launches: kept,
             warning,
@@ -179,6 +181,7 @@ impl Store {
             Err(e) => return Err(e.to_string()),
         };
         let mut records = Vec::new();
+        let mut total = 0;
         for (n, file) in dir.enumerate() {
             if n >= MAX_RECORDS {
                 return Err(format!(
@@ -199,6 +202,13 @@ impl Store {
             file.take(MAX_RECORD_BYTES + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
+            total += bytes.len() as u64;
+            if total > MAX_JOURNAL_BYTES {
+                return Err(format!(
+                    "Frecency journal exceeds 64 MiB; move {} aside to recover",
+                    self.journal().display()
+                ));
+            }
             // Unknown and corrupt files stay in place for diagnosis and are ignored.
             if bytes.len() as u64 <= MAX_RECORD_BYTES
                 && let Ok(record) = serde_json::from_slice::<Record>(&bytes)
@@ -212,6 +222,20 @@ impl Store {
         }
         Ok(records)
     }
+}
+
+/// Removes each record, also after a failure, and returns the first error.
+fn remove_all<'a>(
+    ids: impl Iterator<Item = &'a String>,
+    mut unlink: impl FnMut(&str) -> Result<(), String>,
+) -> Option<String> {
+    let mut first = None;
+    for id in ids {
+        if let Err(error) = unlink(id) {
+            first.get_or_insert(error);
+        }
+    }
+    first
 }
 
 fn valid_body(body: &Body) -> bool {
@@ -232,12 +256,14 @@ fn latest_clear(records: &[Record]) -> Option<&String> {
 }
 
 /// Launches after the latest clear, of the last 30 days, at most 128 for each directory.
-fn select(records: &[Record], now: u64) -> Vec<Launch> {
+/// Spellings of one directory share the cap. Launches with a path that cannot be normalized
+/// are removed.
+fn select(records: &[Record], now: u64, home: &str) -> Vec<Launch> {
     let clear = latest_clear(records);
     let cutoff = now.saturating_sub(MAX_AGE_SECONDS);
     let mut seen = HashSet::new();
     // Sort by directory, then newest first, so that the cap keeps the newest launches.
-    let mut launches: Vec<Launch> = records
+    let mut launches: Vec<(String, Launch)> = records
         .iter()
         .filter_map(|r| match &r.body {
             Body::Launches { launches } => Some(launches),
@@ -246,16 +272,16 @@ fn select(records: &[Record], now: u64) -> Vec<Launch> {
         .flatten()
         .filter(|l| l.at >= cutoff && clear.is_none_or(|c| l.id > *c))
         .filter(|l| seen.insert(l.id.clone()))
-        .cloned()
+        .filter_map(|l| Some((directory_key(&l.path, home)?, l.clone())))
         .collect();
-    launches.sort_by(|a, b| a.path.cmp(&b.path).then(b.id.cmp(&a.id)));
+    launches.sort_by(|(a_key, a), (b_key, b)| a_key.cmp(b_key).then(b.id.cmp(&a.id)));
     let mut count: HashMap<String, usize> = HashMap::new();
-    launches.retain(|l| {
-        let n = count.entry(l.path.clone()).or_default();
+    launches.retain(|(key, _)| {
+        let n = count.entry(key.clone()).or_default();
         *n += 1;
         *n <= MAX_LAUNCHES
     });
-    launches
+    launches.into_iter().map(|(_, launch)| launch).collect()
 }
 
 #[cfg(test)]
@@ -263,6 +289,7 @@ mod tests {
     use super::*;
     const DAY: u64 = 86_400;
     const NOW: u64 = 1_000 * DAY;
+    const HOME: &str = "/fixture";
 
     fn fixture(name: &str) -> Store {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -298,10 +325,16 @@ mod tests {
             store.record(row.clone()).unwrap();
         }
         let expected = vec![rows[2].clone(), rows[0].clone(), rows[1].clone()];
-        assert_eq!(store.refresh(&token(4), NOW).unwrap().launches, expected);
+        assert_eq!(
+            store.refresh(&token(4), NOW, HOME).unwrap().launches,
+            expected
+        );
         assert_eq!(files(&store), 1);
         let reopened = Store::new(&store.root);
-        assert_eq!(reopened.refresh(&token(5), NOW).unwrap().launches, expected);
+        assert_eq!(
+            reopened.refresh(&token(5), NOW, HOME).unwrap().launches,
+            expected
+        );
         assert!(
             store.journal().join(format!("{}.json", token(4))).is_file(),
             "an unchanged journal is not written again"
@@ -319,19 +352,19 @@ mod tests {
             .unwrap();
         store.record(launch(3, "/fixture/a", NOW)).unwrap();
         assert_eq!(
-            store.refresh(&token(4), NOW).unwrap().launches,
+            store.refresh(&token(4), NOW, HOME).unwrap().launches,
             [
                 launch(3, "/fixture/a", NOW),
                 launch(2, "/fixture/a", NOW - 30 * DAY)
             ]
         );
         assert_eq!(
-            store.refresh(&token(5), NOW + 1).unwrap().launches,
+            store.refresh(&token(5), NOW + 1, HOME).unwrap().launches,
             [launch(3, "/fixture/a", NOW)]
         );
         assert!(
             store
-                .refresh(&token(6), NOW + 31 * DAY)
+                .refresh(&token(6), NOW + 31 * DAY, HOME)
                 .unwrap()
                 .launches
                 .is_empty()
@@ -346,7 +379,7 @@ mod tests {
             store.record(launch(n, "/fixture/a", NOW)).unwrap();
         }
         store.record(launch(131, "/fixture/b", NOW)).unwrap();
-        let kept = store.refresh(&token(200), NOW).unwrap().launches;
+        let kept = store.refresh(&token(200), NOW, HOME).unwrap().launches;
         let a: Vec<_> = kept.iter().filter(|l| l.path == "/fixture/a").collect();
         assert_eq!(a.len(), 128);
         assert_eq!(a[0].id, launch(130, "", 0).id);
@@ -356,31 +389,104 @@ mod tests {
     }
 
     #[test]
+    fn spellings_of_one_directory_share_the_cap() {
+        let store = fixture("cap-spellings");
+        for n in 1..=130 {
+            let path = if n % 2 == 0 {
+                "/fixture/a/"
+            } else {
+                "/fixture/a"
+            };
+            store.record(launch(n, path, NOW)).unwrap();
+        }
+        let kept = store.refresh(&token(200), NOW, HOME).unwrap().launches;
+        assert_eq!(kept.len(), 128);
+        assert_eq!(kept[0].id, launch(130, "", 0).id);
+        assert_eq!(kept[127].id, launch(3, "", 0).id);
+
+        let store = fixture("cap-windows");
+        for n in 1..=130 {
+            let path = if n % 2 == 0 {
+                r"C:\Users\Ada\Work"
+            } else {
+                r"c:\users\ada\WORK\"
+            };
+            store.record(launch(n, path, NOW)).unwrap();
+        }
+        let kept = store
+            .refresh(&token(200), NOW, r"C:\Users\Ada")
+            .unwrap()
+            .launches;
+        assert_eq!(kept.len(), 128, "Windows paths compare without case");
+    }
+
+    #[test]
+    fn a_failed_removal_does_not_stop_the_other_removals() {
+        let ids: Vec<String> = ["a", "b", "c"].map(String::from).into();
+        let mut removed = Vec::new();
+        let warning = remove_all(ids.iter(), |id| {
+            removed.push(id.to_string());
+            if id == "c" {
+                Ok(())
+            } else {
+                Err(format!("fail {id}"))
+            }
+        });
+        assert_eq!(removed, ["a", "b", "c"]);
+        assert_eq!(
+            warning.as_deref(),
+            Some("fail a"),
+            "the first error is the warning"
+        );
+    }
+
+    #[test]
+    fn a_journal_over_64_mib_is_an_error() {
+        let store = fixture("budget");
+        store.record(launch(1, "/fixture/a", NOW)).unwrap();
+        // Sparse files: each one reads as a full record of zeros, which is not valid JSON.
+        for n in 0..MAX_JOURNAL_BYTES / MAX_RECORD_BYTES {
+            fs::File::create(store.journal().join(format!("big-{n}.json")))
+                .unwrap()
+                .set_len(MAX_RECORD_BYTES)
+                .unwrap();
+        }
+        let error = store.refresh(&token(2), NOW, HOME).err().unwrap();
+        assert!(error.contains("exceeds 64 MiB"), "{error}");
+    }
+
+    #[test]
     fn clear_removes_older_launches_but_not_a_newer_concurrent_launch() {
         let store = fixture("clear");
         store.record(launch(1, "/fixture/old", NOW)).unwrap();
-        store.refresh(&token(2), NOW).unwrap();
+        store.refresh(&token(2), NOW, HOME).unwrap();
         store
             .record(launch(3, "/fixture/older-pending", NOW))
             .unwrap();
         store.record(launch(5, "/fixture/new", NOW)).unwrap();
         store.clear(&launch(4, "", 0).id).unwrap();
         assert_eq!(
-            store.refresh(&token(6), NOW).unwrap().launches,
+            store.refresh(&token(6), NOW, HOME).unwrap().launches,
             [launch(5, "/fixture/new", NOW)]
         );
         assert_eq!(files(&store), 2, "the compaction and the latest clear");
         store.clear(&launch(7, "", 0).id).unwrap();
         assert!(
             Store::new(&store.root)
-                .refresh(&token(8), NOW)
+                .refresh(&token(8), NOW, HOME)
                 .unwrap()
                 .launches
                 .is_empty()
         );
         // A launch that a paused writer publishes late, with an ID before the clear.
         store.record(launch(6, "/fixture/late", NOW)).unwrap();
-        assert!(store.refresh(&token(9), NOW).unwrap().launches.is_empty());
+        assert!(
+            store
+                .refresh(&token(9), NOW, HOME)
+                .unwrap()
+                .launches
+                .is_empty()
+        );
         assert_eq!(files(&store), 1, "only the latest clear");
     }
 
@@ -392,7 +498,7 @@ mod tests {
         store.remove(&launch(2, "", 0).id).unwrap();
         store.remove(&launch(9, "", 0).id).unwrap();
         assert_eq!(
-            store.refresh(&token(3), NOW).unwrap().launches,
+            store.refresh(&token(3), NOW, HOME).unwrap().launches,
             [launch(1, "/fixture/a", NOW)]
         );
     }
@@ -414,13 +520,13 @@ mod tests {
                             .unwrap();
                         // Half of the writers compact while the others publish.
                         if n % 2 == 0 {
-                            store.refresh(&token(id + 1), NOW).unwrap();
+                            store.refresh(&token(id + 1), NOW, HOME).unwrap();
                         }
                     });
                 }
             });
             let kept = store
-                .refresh(&token(round * 100 + 99), NOW)
+                .refresh(&token(round * 100 + 99), NOW, HOME)
                 .unwrap()
                 .launches;
             assert_eq!(kept.len() as u64, (round + 1) * 8, "round {round}");
@@ -443,7 +549,7 @@ mod tests {
                         store
                             .record(launch(id, &format!("/fixture/{n}"), NOW))
                             .unwrap();
-                        store.refresh(&token(id + 1), NOW).unwrap();
+                        store.refresh(&token(id + 1), NOW, HOME).unwrap();
                     }
                 });
             }
@@ -454,7 +560,7 @@ mod tests {
             });
         });
         let mut ids: Vec<_> = store
-            .refresh(&token(999), NOW)
+            .refresh(&token(999), NOW, HOME)
             .unwrap()
             .launches
             .into_iter()
@@ -489,7 +595,7 @@ mod tests {
             fs::write(store.journal().join(name), bytes).unwrap();
         }
         assert_eq!(
-            store.refresh(&token(3), NOW).unwrap().launches,
+            store.refresh(&token(3), NOW, HOME).unwrap().launches,
             [launch(2, "/fixture/a", NOW)]
         );
         assert_eq!(files(&store), 4, "unknown files stay for diagnosis");
@@ -503,7 +609,7 @@ mod tests {
         fs::create_dir(&target).unwrap();
         std::os::unix::fs::symlink(&target, store.journal()).unwrap();
         assert!(store.record(launch(1, "/fixture/a", NOW)).is_err());
-        assert!(store.refresh(&token(2), NOW).is_err());
+        assert!(store.refresh(&token(2), NOW, HOME).is_err());
         assert_eq!(fs::read_dir(target).unwrap().count(), 0);
     }
 }
