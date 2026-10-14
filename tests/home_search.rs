@@ -1085,10 +1085,10 @@ fn explicit_paths_allow_no_typos() {
     ] {
         assert!(ranked(raw, &paths, home, &[]).is_empty(), "{raw}");
     }
-    assert_eq!(
-        ranked("~/Projects/zellij-launchpad", &paths, home, &[]),
-        paths
-    );
+    // A missing letter is a fuzzy match, not a typo, so explicit paths accept it.
+    for raw in ["~/Projects/zellij-launchpad", "~/Projects/zellij-lauchpad"] {
+        assert_eq!(ranked(raw, &paths, home, &[]), paths, "{raw}");
+    }
     let home = r"C:\Users\Ada";
     let paths = vec![r"C:\Users\Ada\Projects\zellij-launchpad".to_owned()];
     assert_eq!(ranked("lanuchpad", &paths, home, &[]), paths);
