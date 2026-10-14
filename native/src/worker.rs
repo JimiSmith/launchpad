@@ -2,11 +2,11 @@
 use launchpad_core::{
     editor::MAX_INPUT_CHARS,
     remote::RemoteRequest,
-    search::{HomeIndex, ScanState},
+    search::{HomeIndex, Receive, ScanState},
 };
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError},
+    sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     thread,
     time::{Duration, Instant},
 };
@@ -97,12 +97,19 @@ fn run(
     }
     let mut epoch = 0;
     let mut progress = Instant::now() - Duration::from_secs(1);
+    let mut batches_waiting = false;
     loop {
+        // While the walk threads run, wake often to add their batches.
         let request = if state.building.is_scanning() {
-            match demand.try_recv() {
+            let timeout = if batches_waiting {
+                Duration::ZERO
+            } else {
+                BATCH_POLL
+            };
+            match demand.recv_timeout(timeout) {
                 Ok(r) => Some(r),
-                Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         } else {
             match demand.recv() {
@@ -163,7 +170,7 @@ fn run(
             }
         }
         if state.building.is_scanning() {
-            state.step(128);
+            batches_waiting = (0..MAX_BATCHES_PER_POLL).all(|_| state.receive(Receive::Poll));
             if progress.elapsed() >= Duration::from_millis(100) || !state.building.is_scanning() {
                 if responses
                     .send(Reply::Progress {
@@ -181,6 +188,11 @@ fn run(
     }
     Ok(())
 }
+/// Time between two checks for directory batches while the walk runs.
+const BATCH_POLL: Duration = Duration::from_millis(5);
+/// Maximum batches added before the worker checks for a request again.
+const MAX_BATCHES_PER_POLL: usize = 64;
+
 /// The active snapshot never changes while a replacement is traversed.
 struct SearchIndex {
     building: HomeIndex,
@@ -219,12 +231,13 @@ impl SearchIndex {
         }
         self.building = self.building.restart();
     }
-    fn step(&mut self, budget: usize) {
+    /// Adds at most one batch from the walk. Returns true if the building index changed.
+    fn receive(&mut self, mode: Receive) -> bool {
         if !self.building.is_scanning() {
-            return;
+            return false;
         }
         let before = self.building.dirs.len();
-        self.building.step(budget);
+        let changed = self.building.receive(mode);
         if self.active.is_none() && before != self.building.dirs.len() {
             self.revision += 1;
         }
@@ -239,6 +252,7 @@ impl SearchIndex {
             self.active = Some(snapshot);
             self.revision += 1;
         }
+        changed
     }
     fn status(&self) -> String {
         let mut status = match self.building.scan_state() {
@@ -335,7 +349,7 @@ mod persistence_tests {
     }
     fn finish(state: &mut SearchIndex) {
         while state.building.is_scanning() {
-            state.step(1);
+            state.receive(Receive::Block);
         }
     }
     fn names(state: &SearchIndex) -> Vec<String> {
@@ -360,7 +374,7 @@ mod persistence_tests {
         }
         let mut first = f.state();
         while first.dirs().is_empty() {
-            first.step(1);
+            first.receive(Receive::Block);
         }
         assert!(first.building.is_scanning());
         assert!(first.store.as_ref().unwrap().load().unwrap().is_none());
@@ -376,7 +390,7 @@ mod persistence_tests {
         assert_eq!(names(&reopened), old, "cache loaded before any traversal");
         assert!(validate(&reopened.building, f.home.to_str().unwrap(), "~/old-0").is_err());
         let revision = reopened.revision;
-        reopened.step(1);
+        reopened.receive(Receive::Block);
         assert!(reopened.building.is_scanning());
         assert_eq!(names(&reopened), old);
         assert_eq!(reopened.revision, revision);
@@ -395,7 +409,7 @@ mod persistence_tests {
         finish(&mut state);
         let old = names(&state);
         state.restart();
-        state.step(1);
+        state.receive(Receive::Block);
         state.restart();
         assert_eq!(names(&state), old);
         fs::remove_dir(f.home.join("remove")).unwrap();

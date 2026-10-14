@@ -1,4 +1,4 @@
-use launchpad_core::search::HomeIndex;
+use launchpad_core::search::{HomeIndex, Receive};
 use std::{
     fs,
     path::PathBuf,
@@ -34,7 +34,7 @@ fn custom_ignores_prune_trees_before_budgets_and_survive_restart() {
         index.limits.max_entries = 2;
         index.limits.max_bytes = 200;
         while index.is_scanning() {
-            index.step(128);
+            index.receive(Receive::Block);
         }
         assert_eq!(index.status(), "HOME indexed · 1 dirs · F5 refresh");
         assert_eq!(index.dirs[0].path, "/logical/home/cache-old");
@@ -54,7 +54,7 @@ fn custom_ignores_handle_home_ancestors_and_empty_lists() {
         let mut index =
             HomeIndex::new_with_ignore("/logical/home".into(), tree.0.clone(), vec![ignore.into()])
                 .unwrap();
-        index.step(1);
+        index.receive(Receive::Block);
         assert!(!index.is_scanning());
         assert_eq!(index.status(), "HOME indexed · 0 dirs · F5 refresh");
         assert!(index.validate("~/visible/nested").is_ok());
@@ -67,7 +67,7 @@ fn custom_ignores_handle_home_ancestors_and_empty_lists() {
         let mut index =
             HomeIndex::new_with_ignore("/logical/home".into(), tree.0.clone(), ignore).unwrap();
         while index.is_scanning() {
-            index.step(128);
+            index.receive(Receive::Block);
         }
         assert_eq!(index.dirs.len(), 2);
     }
@@ -98,7 +98,7 @@ fn custom_ignores_follow_host_path_rules_independently_of_filesystem_root() {
         let mut index =
             HomeIndex::new_with_ignore(home.into(), tree.0.clone(), vec![ignore.into()]).unwrap();
         while index.is_scanning() {
-            index.step(128);
+            index.receive(Receive::Block);
         }
         assert_eq!(index.dirs.len(), count, "{home}: {ignore}");
         if count == 1 {
@@ -165,7 +165,7 @@ fn windows_host_paths_map_to_the_sandbox_and_remain_launchable() {
     for home in [r"C:\Users\Ada", r"\\server\share\Ada"] {
         let mut index = HomeIndex::new(home.into(), tree.0.clone()).unwrap();
         while index.is_scanning() {
-            index.step(128);
+            index.receive(Receive::Block);
         }
         let expected = format!(r"{home}\Projects\team notes");
         for raw in [
@@ -249,7 +249,7 @@ fn parent_ignore_files_and_git_excludes_apply_to_the_search_root() {
     fs::write(tree.0.join("home/.gitignore"), "!restored/\n").unwrap();
     let mut index = HomeIndex::new("/logical/home".into(), tree.0.join("home")).unwrap();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
     paths.sort();
@@ -292,7 +292,7 @@ fn project_ignore_rules_apply_with_nested_negation() {
     let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
     index.limits.max_entries = 7;
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
     paths.sort();
@@ -328,7 +328,7 @@ fn windows_hidden_attributes_prune_subtrees_before_index_limits() {
     index.limits.max_entries = 4;
     index.limits.max_bytes = 16 * 1024;
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
     paths.sort();
@@ -356,20 +356,20 @@ fn hidden_windows_home_is_scanned_and_refresh_rechecks_attributes() {
     tree.hidden("", true);
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.dirs.len(), 2, "HOME itself must remain traversable");
     tree.hidden("ordinary", true);
     index = index.restart();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert!(index.dirs.is_empty());
     assert!(index.validate("~/ordinary/nested").is_ok());
     tree.hidden("ordinary", false);
     index = index.restart();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert_eq!(
         index.dirs.len(),
@@ -389,7 +389,7 @@ fn hidden_subtrees_are_pruned_before_entry_and_memory_budgets() {
     index.limits.max_entries = 2;
     index.limits.max_bytes = 200;
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.status(), "HOME indexed · 1 dirs · F5 refresh");
     assert_eq!(index.dirs[0].path, "/logical/home/visible");
@@ -407,20 +407,20 @@ fn node_modules_is_controlled_by_ignore_files() {
     tree.dir("project/node_modules/package");
     let mut index = HomeIndex::new("/logical/home".into(), tree.0.clone()).unwrap();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.dirs.len(), 5, "unignored dependencies are indexed");
     fs::write(tree.0.join(".gitignore"), "node_modules/\n").unwrap();
     index = index.restart();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.dirs.len(), 1);
     assert_eq!(index.dirs[0].path, "/logical/home/project");
     fs::write(tree.0.join("project/.gitignore"), "!node_modules/\n").unwrap();
     index = index.restart();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     let mut paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
     paths.sort();
@@ -448,12 +448,8 @@ fn skips_symlinks_and_unrepresentable_names() {
     symlink(&tree.0, tree.0.join("cycle")).unwrap();
     symlink(tree.0.join("normal"), tree.0.join("internal-link")).unwrap();
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
-    // A slice may yield on its time budget before visiting every entry.
-    for _ in 0..1000 {
-        if !index.is_scanning() {
-            break;
-        }
-        index.step(100);
+    while index.is_scanning() {
+        index.receive(Receive::Block);
     }
     assert!(!index.is_scanning());
     assert_eq!(
@@ -511,18 +507,14 @@ fn bounded_scan_reports_limits_and_read_errors() {
     tree.dir("a/b/c");
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     index.limits.max_directories = 1;
-    // A slice may yield on its time budget before reaching the directory cap.
-    for _ in 0..1000 {
-        if !index.is_scanning() {
-            break;
-        }
-        index.step(100);
+    while index.is_scanning() {
+        index.receive(Receive::Block);
     }
     assert!(!index.is_scanning());
     assert_eq!(index.dirs.len(), 1);
     assert!(index.status().contains("limit"));
     let mut missing = HomeIndex::new(tree.0.join("missing"), tree.0.join("missing")).unwrap();
-    missing.step(100);
+    missing.receive(Receive::Block);
     assert!(!missing.is_scanning());
     assert!(missing.status().contains("unavailable"));
 }
@@ -602,7 +594,7 @@ fn background_indexing_respects_dismissal_and_section_navigation() {
     let mut app = App::from_home("/home/ada".into(), tree.0.clone());
     // Recording in memory keeps one recent row for section-navigation coverage.
     app.simulate_launch = true;
-    // Initialization may use a whole time slice before producing suggestions.
+    // Each tick adds at most one batch, and the end of the walk is a separate tick.
     for _ in 0..1000 {
         app.index_tick();
         if !app.suggestions.is_empty() {
@@ -655,7 +647,7 @@ fn logical_home_is_distinct_from_filesystem_mapping() {
     tree.dir("nested/notes");
     let mut index = HomeIndex::new("/logical/user-home".into(), tree.0.clone()).unwrap();
     for _ in 0..100 {
-        index.step(1);
+        index.receive(Receive::Block);
     }
     assert!(
         index
@@ -677,14 +669,14 @@ fn directory_entry_and_depth_caps_remain_explicit() {
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     index.limits.max_entries = 1;
     for _ in 0..100 {
-        index.step(1);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.dirs.len(), 1);
     assert!(index.status().contains("limit"));
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     index.limits.max_depth = 1;
     for _ in 0..100 {
-        index.step(1);
+        index.receive(Receive::Block);
     }
     assert_eq!(index.dirs.len(), 1);
     assert!(index.status().contains("limit"));
@@ -749,13 +741,13 @@ fn indexes_nested_directories_incrementally_not_files() {
         index.dirs.is_empty(),
         "constructing an index does not walk home"
     );
-    index.step(1);
+    index.receive(Receive::Block);
     assert!(
         index.is_scanning(),
-        "one work unit cannot walk a nested tree"
+        "the end of the walk arrives after the last batch"
     );
     for _ in 0..100 {
-        index.step(1);
+        index.receive(Receive::Block);
     }
     assert!(!index.is_scanning());
     let paths: Vec<_> = index.dirs.iter().map(|d| d.path.as_str()).collect();
@@ -778,11 +770,38 @@ fn byte_budget_stops_before_retaining_long_paths() {
     let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
     index.limits.max_bytes = 1;
     for _ in 0..100 {
-        index.step(100);
+        index.receive(Receive::Block);
     }
     assert!(!index.is_scanning());
     assert!(index.dirs.is_empty());
     assert!(index.status().contains("limit"));
+}
+
+#[test]
+fn parallel_walk_shares_budgets_and_sorts_the_completed_index() {
+    let tree = Tree::new();
+    for i in 0..40 {
+        for j in 0..10 {
+            tree.dir(&format!("group-{i}/item-{j}"));
+        }
+    }
+    for (directories, entries, expected) in [(100, 2_000_000, 100), (200_000, 150, 150)] {
+        let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
+        index.limits.max_directories = directories;
+        index.limits.max_entries = entries;
+        while index.is_scanning() {
+            index.receive(Receive::Block);
+        }
+        assert_eq!(index.dirs.len(), expected);
+        assert!(index.status().contains("limit"));
+        assert!(index.dirs.is_sorted_by(|a, b| a.path < b.path));
+    }
+    let mut index = HomeIndex::new(tree.0.clone(), tree.0.clone()).unwrap();
+    while index.is_scanning() {
+        index.receive(Receive::Block);
+    }
+    assert_eq!(index.dirs.len(), 440);
+    assert!(index.dirs.is_sorted_by(|a, b| a.path < b.path));
 }
 
 fn ranked(raw: &str, paths: &[String], home: &str, recent: &[String]) -> Vec<String> {
@@ -818,7 +837,7 @@ fn equal_scores_prefer_shallower_directories_over_path_order() {
     tree.dir("Projects/zellij-launchpad");
     let mut index = HomeIndex::new("/home/ada".into(), tree.0.clone()).unwrap();
     while index.is_scanning() {
-        index.step(128);
+        index.receive(Receive::Block);
     }
     let paths: Vec<_> = index.dirs.iter().map(|d| d.path.clone()).collect();
     for raw in ["proj/zel", "~/Projects/zel", "proj/zell"] {
