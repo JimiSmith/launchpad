@@ -82,7 +82,7 @@ scratch. There is no expiry timer or filesystem watcher.
 ## Matching and input
 
 Frizbee ranks candidates using the existing normalization and matching behavior.
-Each directory scores the better of its full path and its own name. A missing
+Frizbee matches the query against the full path of each directory. A missing
 letter is a normal fuzzy match, so all queries accept it. A swapped, extra or
 wrong letter needs a typo. The typo limit is the byte length of the typed query
 divided by 4, from 2 to 6 (the fff-search rule). Explicit paths (`~`, `/`, `./`,
@@ -95,24 +95,30 @@ Frecency raises the score of launched directories. Frecency is a number from how
 often and how recently you launched a directory (the fff-search rule). Each launch in
 the last 30 days adds `exp(-0.0693 * days_ago)`, so a launch counts half after 10
 days. A sum above 10 becomes `10 + sqrt(sum - 10)`, and the result is rounded. The
-total score is `score + score * frecency / 100`: each recent launch adds about 1%, so
+frecency boost is `score * frecency / 100`: each recent launch adds about 1%, so
 a much better text match still wins. The boost is rounded down, so it can be 0
 for a short query. The worker loads the launch times at
 start, at F5 and at the first query after Ctrl+L. [Frecency storage](history.md#frecency).
+
+A match in the directory's own name (its last `/` segment) gets a bonus (the
+fff-search rule). Launchpad estimates the start of the match from the column of its
+last matched character and the query length. If that start is in the name and the name is equal to the query
+(ASCII case-insensitive), the bonus is 40% of the score. If the start is in the
+name and the name is not equal to the query, the bonus is about 16%. A query with
+a `/`, such as `repo/branch`, usually starts its match before the name, so it gets
+no bonus. The total is `score + frecency boost + name bonus`.
 
 Equal totals are common because Frizbee ignores text after the best alignment, so
 ties are broken in order by:
 
 1. higher frecency (a launched directory then wins a tie, also when its boost is 0);
-2. the directory's own name containing the query's last typed `/` segment
-   (exact substring with no typos; skipped for a trailing `/`, `~`, `.` and
-   `..`), so `repo/branch` prefers the checkout over folders inside it;
-3. fewer path components;
-4. path order.
+2. fewer path components, so `repo/branch` prefers the checkout over folders inside it;
+3. path order.
 
-Higher frecency comes before the last-segment tie-break. If the scores are equal, a
-launched folder inside a checkout ranks above the checkout. The boost can also put
-it above a checkout that scores slightly higher.
+For `repo/branch`, a launched folder inside the checkout ranks above the checkout,
+because frecency comes before depth. A query in the checkout's name, such as
+`branch`, gives the checkout the name bonus. This bonus is larger than the boost
+of a few launches, so the checkout then ranks first.
 
 Tie-breaks never outrank a higher score or change which directories match. The UI receives at most 100 paths / 64 KiB, rather than a copy of the catalogue.
 Queries over 100 Unicode scalar values return no suggestions, including after

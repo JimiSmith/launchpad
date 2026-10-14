@@ -889,7 +889,7 @@ fn frecency_raises_launched_directories_above_equal_scores() {
     .into();
     let wrangler = paths[1].clone();
     let launchpad = paths[2].clone();
-    // Without launches: the last segment, then depth, then path order.
+    // Without launches: depth, then path order.
     assert_eq!(
         ranked("proj/zel", &paths, home, &[]),
         [wrangler.clone(), launchpad.clone(), paths[0].clone()]
@@ -908,7 +908,7 @@ fn frecency_raises_launched_directories_above_equal_scores() {
             "{spelling}"
         );
     }
-    // The frecency tie-break comes before the last-segment tie-break.
+    // The frecency tie-break comes before depth.
     assert_eq!(
         ranked("proj/zel", &paths, home, &[paths[0].clone()])[0],
         paths[0]
@@ -973,9 +973,11 @@ fn frecency_wins_a_tie_when_its_boost_rounds_to_zero() {
 fn the_frecency_boost_lifts_a_slightly_worse_match() {
     use launchpad_core::search::matches_in;
     let home = "/home/ada";
+    // Both matches are in the name, and neither name is equal to the query, so both get
+    // the bonus of `score / 6`.
     let paths: Vec<_> = [
-        "/home/ada/Projects/launchpad",
-        "/home/ada/Projects/laun-chpad",
+        "/home/ada/Projects/my-launchpad",
+        "/home/ada/Projects/my-laun-chpad",
     ]
     .map(str::to_owned)
     .into();
@@ -984,8 +986,9 @@ fn the_frecency_boost_lifts_a_slightly_worse_match() {
     assert_eq!(ranked("launchpad", &paths, home, &[]), paths);
     // Up to 10 launches now give a frecency equal to their count. Use the fewest
     // launches whose boost puts the worse match above the better one.
+    let total = |score: u32, n: u32| score + score * n / 100 + score / 6;
     let launches = (1..=10)
-        .find(|&n| scores[1] + scores[1] * n / 100 > scores[0])
+        .find(|&n| total(scores[1], n) > total(scores[0], 0))
         .expect("the score gap is too large for the fixture");
     let frecency = Frecency::new(home, NOW, (0..launches).map(|_| (paths[1].as_str(), NOW)));
     assert_eq!(frecency.get(&paths[1]), launches);
@@ -995,24 +998,56 @@ fn the_frecency_boost_lifts_a_slightly_worse_match() {
     );
 }
 
-/// The Frizbee score of each path: the better of its full path and its own name.
+/// The Frizbee score of each full path, before the frecency boost and the name bonus.
 fn frizbee_scores(query: &str, paths: &[String]) -> Vec<u32> {
     use neo_frizbee::{Config, Matcher};
-    let names: Vec<_> = paths
-        .iter()
-        .map(|p| p.rsplit('/').next().unwrap())
-        .collect();
-    let mut matcher = Matcher::new(query, &Config::default());
     let mut scores = vec![0; paths.len()];
-    for m in matcher
-        .match_list(paths)
-        .into_iter()
-        .chain(matcher.match_list(&names))
-    {
-        let score = &mut scores[m.index as usize];
-        *score = (*score).max(u32::from(m.score));
+    for m in Matcher::new(query, &Config::default()).match_list(paths) {
+        scores[m.index as usize] = u32::from(m.score);
     }
     scores
+}
+
+#[test]
+fn name_bonus_prefers_an_equal_name_then_a_match_in_the_name() {
+    let home = "/home/ada";
+    // The depth is equal and path order gives the opposite order, so only the bonus decides.
+    let paths: Vec<_> = [
+        "/home/ada/docs/a",
+        "/home/ada/y/docs-old",
+        "/home/ada/z/docs",
+    ]
+    .map(str::to_owned)
+    .into();
+    let scores = frizbee_scores("docs", &paths);
+    assert!(
+        scores.iter().all(|&s| s == scores[0]),
+        "the fixture needs equal scores: {scores:?}"
+    );
+    assert_eq!(
+        ranked("docs", &paths, home, &[]),
+        [paths[2].clone(), paths[1].clone(), paths[0].clone()]
+    );
+    // The name compares without ASCII case.
+    let paths: Vec<_> = ["/home/ada/y/Docs-old", "/home/ada/z/Docs"]
+        .map(str::to_owned)
+        .into();
+    let scores = frizbee_scores("docs", &paths);
+    assert_eq!(scores[0], scores[1], "the fixture needs equal scores");
+    assert_eq!(
+        ranked("docs", &paths, home, &[]),
+        [paths[1].clone(), paths[0].clone()]
+    );
+    // A last character with more than one byte still starts the match in the name.
+    let paths: Vec<_> = ["/home/ada/y/café-old", "/home/ada/z/café"]
+        .map(str::to_owned)
+        .into();
+    let scores = frizbee_scores("café", &paths);
+    assert_eq!(scores[0], scores[1], "the fixture needs equal scores");
+    assert_eq!(
+        ranked("café", &paths, home, &[]),
+        [paths[1].clone(), paths[0].clone()]
+    );
 }
 
 #[test]
@@ -1036,9 +1071,10 @@ fn a_much_better_match_wins_over_frecency() {
 }
 
 #[test]
-fn last_segment_names_the_checkout_over_folders_inside_it() {
-    // Projects/<repo>/<branch> worktrees: a subfolder ties with its checkout on
-    // score, but only the checkout is named by `main` or `105`.
+fn checkouts_rank_above_folders_inside_them() {
+    // Projects/<repo>/<branch> worktrees: a subfolder ties with its checkout on score.
+    // A query with a `/` starts its match before the last segment, so it gets no name
+    // bonus. Depth puts the checkout first.
     let home = "/home/ada";
     let paths: Vec<_> = [
         "/home/ada/Projects/zellij-launchpad/fix-history",
@@ -1065,21 +1101,18 @@ fn last_segment_names_the_checkout_over_folders_inside_it() {
         ranked("launchpad/main", &paths, home, &[paths[3].clone()])[..2],
         [paths[3].clone(), paths[2].clone()]
     );
-    // Substring, not fuzzy: `tie` is scattered through `native` but only
-    // contained in the checkout's name.
-    let paths: Vec<_> = [
-        "/home/ada/Projects/zellij-launchpad/feat-search-tiebreaks",
-        "/home/ada/Projects/zellij-launchpad/feat-search-tiebreaks/native",
-    ]
-    .map(str::to_owned)
-    .into();
-    assert_eq!(ranked("launchpad/tie", &paths, home, &[]), paths);
+    // A query in the name gives the checkout the bonus, which keeps it above the
+    // launched subfolder.
+    assert_eq!(
+        ranked("main", &paths, home, &[paths[3].clone()])[..2],
+        [paths[2].clone(), paths[3].clone()]
+    );
 }
 
 #[test]
-fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
-    // `~`, `./` and `..` expand to HOME, whose own name (`ada`) must not
-    // promote `canada` or `ada-lib` over launched directories.
+fn home_queries_give_no_name_bonus() {
+    // `~`, `./` and `..` expand to HOME. Its name (`ada`) must not promote `canada`
+    // or `ada-lib` over launched directories.
     let home = "/home/ada";
     let paths: Vec<_> = [
         "/home/ada/canada",
@@ -1096,8 +1129,8 @@ fn home_queries_name_no_folder_for_the_last_segment_tie_break() {
         // Equal frecency: the shallower directory first.
         assert_eq!(results[..2], [paths[4].clone(), paths[3].clone()], "{raw}");
     }
-    // A trailing `/` means no segment rule: `Projects-archive` ties with the
-    // launched checkout but gets no boost for containing `Projects`.
+    // The match of `~/Projects/` starts before the last segment: `Projects-archive`
+    // ties with the launched checkout and gets no bonus for containing `Projects`.
     let paths: Vec<_> = [
         "/home/ada/Projects/Projects-archive",
         "/home/ada/Projects/zellij-launchpad",
@@ -1144,7 +1177,7 @@ fn exact_matches_rank_above_typo_matches() {
     .map(str::to_owned)
     .into();
     let recent = [paths[0].clone()];
-    // A trailing `/` skips the last-segment tie-break.
+    // A trailing `/` starts the match before the name, so neither path gets the name bonus.
     for raw in ["launchpad/", "proj/launchpad/"] {
         let results = ranked(raw, &paths, home, &recent);
         assert_eq!(results, [paths[1].clone(), paths[0].clone()], "{raw}");
