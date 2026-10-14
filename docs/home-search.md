@@ -31,7 +31,8 @@ The walk runs on its own threads, one for each CPU and at most 12. The walk
 threads send batches of at most 128 directories. A thread sends a partial batch
 at its next entry after 10 ms. The search worker adds the batches between
 requests. F5 and a new epoch stop the walk threads at their next entry and
-discard their late batches. The completed index is
+discard their late batches. Only one walk runs at a time: if a hung filesystem
+call holds the old walk, the new walk starts after the old walk exits. The completed index is
 sorted by path. During a scan, results with equal scores can change order.
 
 Limits are 200,000 retained directories, 2,000,000 visited entries,

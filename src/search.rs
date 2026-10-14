@@ -189,6 +189,8 @@ pub struct HomeIndex {
 }
 enum Scan {
     NotStarted,
+    /// The walk starts after the coordinating thread of the cancelled walk exits.
+    Waiting(std::thread::JoinHandle<()>),
     Running(ParallelScan),
     Finished,
 }
@@ -197,7 +199,7 @@ enum Scan {
 pub enum Receive {
     /// Return at once if no message is ready.
     Poll,
-    /// Wait until the next batch arrives or the walk ends.
+    /// Wait until the next batch arrives or the walk ends. Also wait for a cancelled walk.
     Block,
 }
 /// Only completed scans are eligible to replace a persistent snapshot.
@@ -307,10 +309,17 @@ impl HomeIndex {
         };
         format!("{state} · {} dirs · F5 refresh", self.dirs.len())
     }
-    pub fn restart(&self) -> Self {
+    /// Cancels the walk of `self`, and `self` stops scanning. The new index starts its walk
+    /// after the cancelled walk exits.
+    pub fn restart(&mut self) -> Self {
         let mut index = Self::new(self.home.clone(), self.root.clone()).expect("validated HOME");
         index.ignore = self.ignore.clone();
         index.limits = self.limits;
+        index.scan = match std::mem::replace(&mut self.scan, Scan::Finished) {
+            Scan::Running(mut scan) => scan.walk.take().map_or(Scan::NotStarted, Scan::Waiting),
+            Scan::Waiting(walk) => Scan::Waiting(walk),
+            Scan::NotStarted | Scan::Finished => Scan::NotStarted,
+        };
         index
     }
     pub fn scan_state(&self) -> ScanState {
@@ -327,9 +336,17 @@ impl HomeIndex {
     pub fn is_scanning(&self) -> bool {
         !matches!(self.scan, Scan::Finished)
     }
-    /// Starts the walk on the first call. Adds at most one batch of directories.
+    /// Starts the walk after the cancelled walk exits. Adds at most one batch of directories.
     /// Returns true if the index changed. The completed index is sorted by path.
     pub fn receive(&mut self, mode: Receive) -> bool {
+        if let Scan::Waiting(previous) = &self.scan {
+            if mode == Receive::Poll && !previous.is_finished() {
+                return false;
+            }
+            if let Scan::Waiting(previous) = std::mem::replace(&mut self.scan, Scan::NotStarted) {
+                let _ = previous.join();
+            }
+        }
         if matches!(self.scan, Scan::NotStarted) {
             self.scan = self.start();
             if matches!(self.scan, Scan::Finished) {
@@ -432,7 +449,11 @@ impl HomeIndex {
                 });
             });
         match spawned {
-            Ok(_) => Scan::Running(ParallelScan { messages, shared }),
+            Ok(walk) => Scan::Running(ParallelScan {
+                messages,
+                shared,
+                walk: Some(walk),
+            }),
             Err(error) => {
                 self.error = Some(format!("Directory scan unavailable: {error}"));
                 Scan::Finished
@@ -460,6 +481,8 @@ enum WalkMessage {
 struct ParallelScan {
     messages: Receiver<WalkMessage>,
     shared: Arc<WalkShared>,
+    /// The coordinating thread. It exits after all walk threads exit.
+    walk: Option<std::thread::JoinHandle<()>>,
 }
 impl Drop for ParallelScan {
     fn drop(&mut self) {
@@ -609,5 +632,63 @@ impl ignore::ParallelVisitor for Visitor {
 impl Drop for Visitor {
     fn drop(&mut self) {
         self.send_batch();
+    }
+}
+
+#[cfg(test)]
+mod walk_tests {
+    use super::*;
+
+    fn wait_until(mut done: impl FnMut() -> bool) {
+        let started = Instant::now();
+        while !done() {
+            assert!(started.elapsed() < Duration::from_secs(10), "timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn a_new_walk_waits_until_the_cancelled_walk_exits() {
+        let home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/search-unit-tests")
+            .join(format!("{}-held-walk", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(home.join("one/two")).unwrap();
+        let home = home.canonicalize().unwrap();
+        let mut first = HomeIndex::new(home.clone(), home.clone()).unwrap();
+        first.receive(Receive::Poll);
+        let Scan::Running(scan) = &mut first.scan else {
+            panic!("the first walk starts");
+        };
+        // This thread replaces the coordinating thread and waits like a hung filesystem call.
+        let (release, gate) = mpsc::channel::<()>();
+        let held = std::thread::spawn(move || {
+            let _ = gate.recv();
+        });
+        let _ = scan.walk.replace(held);
+        let shared = Arc::clone(&scan.shared);
+
+        let mut second = first.restart();
+        assert!(shared.cancel.load(Ordering::Relaxed));
+        for _ in 0..20 {
+            assert!(!second.receive(Receive::Poll));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(matches!(second.scan, Scan::Waiting(_)), "no second walk");
+        let mut third = second.restart();
+        assert!(
+            matches!(second.scan, Scan::Finished),
+            "the requests collapse into one"
+        );
+        assert!(!third.receive(Receive::Poll));
+        assert!(matches!(third.scan, Scan::Waiting(_)));
+
+        release.send(()).unwrap();
+        wait_until(|| {
+            third.receive(Receive::Poll);
+            !third.is_scanning()
+        });
+        assert_eq!(third.scan_state(), ScanState::Complete { limited: false });
+        assert_eq!(third.dirs.len(), 2);
     }
 }

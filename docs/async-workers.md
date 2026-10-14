@@ -27,7 +27,8 @@ name is no longer rejected as if it were a lossy WASI path.
 A missing response after 15 seconds disables search validation with a visible
 error. There is no synchronous fallback or launch retry. A running match or slow
 filesystem syscall cannot be forcibly cancelled; late replies remain fenced.
-Quit does not wait for a stalled filesystem worker.
+Quit does not wait for a stalled filesystem worker. A refresh does not start a
+second walk while a stalled walk runs.
 
 Core tests cover stale queries, validation, refresh and UI behavior. Native worker
 tests use disposable filesystem roots; the live harness exercises real terminal

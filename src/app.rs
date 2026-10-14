@@ -570,7 +570,7 @@ impl App {
             let compact = self.compact;
             let simulate_launch = self.simulate_launch;
             let remote = self.remote.take();
-            let index = self.index.as_ref().map(|i| i.restart());
+            let index = self.index.as_mut().map(|i| i.restart());
             let status = self.search_status.clone();
             let windows_paths = self.editor.windows_paths;
             let saved = std::mem::take(&mut self.saved);
