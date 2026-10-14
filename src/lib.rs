@@ -2,6 +2,7 @@ pub mod app;
 pub mod cells;
 pub mod commands;
 pub mod editor;
+pub mod frecency;
 pub mod help;
 pub mod host_path;
 pub mod remote;

@@ -303,6 +303,7 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                     s.expect('Zellij did not create')
                     assert any(p['id'] == origin['id'] and p['tab_name'] == origin['tab_name'] for p in s.panes())
                     assert not list((s.out / 'state/launchpad/history.d').glob('*.json'))
+                    assert not list((s.out / 'state/launchpad/frecency.d').glob('*.json'))
                     s.fixture('missing')
                     s.send('\r')
                     s.pump(.6)
@@ -322,6 +323,9 @@ def native(floating_modes=(False, True), cases=(('Shell', False), ('Shell', True
                 state = json.loads((s.out / 'state/launchpad/history.json').read_text())
                 assert state['entries'][0]['path'] == str(target)
                 assert 'tool' not in state['entries'][0]
+                launches = [launch for record in (s.out / 'state/launchpad/frecency.d').glob('*.json')
+                            for launch in json.loads(record.read_text())['launches']]
+                assert [launch['path'] for launch in launches] == [str(target)], launches
                 s.cli('action', 'write-chars', '--pane-id', str(launched['id']), 'exit ' + ('17' if floating else '0') + '\n')
                 s.pump(.4)
                 assert [p['id'] for p in s.panes() if not p['is_plugin']] == [neighbor['id']]
@@ -374,6 +378,7 @@ def default_shell_rejection_case(auto_name_tabs):
         s.send('\r')
         s.expect('Default shell failed')
         assert not json.loads((s.out / 'state/launchpad/history.json').read_text())['entries']
+        assert not list((s.out / 'state/launchpad/frecency.d').glob('*.json'))
         panes = [p for p in s.panes() if not p['is_plugin']]
         assert len(panes) == 2 and all(p['tab_name'] == 'Tab #1' for p in panes)
         s.fixture('default-shell')

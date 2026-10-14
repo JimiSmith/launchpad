@@ -33,7 +33,7 @@ pub fn age(opened_at: u64, now: u64) -> String {
         _ => format!("{}d ago", seconds / 86400),
     }
 }
-fn valid_token(token: &str) -> bool {
+pub(crate) fn valid_token(token: &str) -> bool {
     !token.is_empty()
         && token.len() <= 100
         && token
@@ -41,15 +41,17 @@ fn valid_token(token: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 fn valid_entry(entry: &Entry) -> bool {
-    valid_token(&entry.id)
-        && entry.path.len() <= 4096
-        && launchpad_core::host_path::HostPath::parse(&entry.path).is_some_and(|p| !p.has_parent())
-        && !entry.path.chars().any(char::is_control)
+    valid_token(&entry.id) && valid_path(&entry.path)
 }
-fn safe_path(path: &Path, directory: bool) -> Result<(), String> {
+pub(crate) fn valid_path(path: &str) -> bool {
+    path.len() <= 4096
+        && launchpad_core::host_path::HostPath::parse(path).is_some_and(|p| !p.has_parent())
+        && !path.chars().any(char::is_control)
+}
+pub(crate) fn safe_path(path: &Path, directory: bool) -> Result<(), String> {
     match concurrent_io(|| fs::symlink_metadata(path)) {
         Ok(m) if (directory && m.is_dir()) || (!directory && m.is_file()) => Ok(()),
-        Ok(_) => Err("Unsafe history path (symlink or non-regular file)".into()),
+        Ok(_) => Err("Unsafe state path (symlink or non-regular file)".into()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("Inspect {}: {e}", path.display())),
     }
@@ -58,7 +60,9 @@ fn safe_path(path: &Path, directory: bool) -> Result<(), String> {
 /// Windows reports delete-pending files as PermissionDenied while another
 /// instance has a reader open. WASI forwards that error too. Give the reader a
 /// bounded opportunity to close, then propagate genuine permission failures.
-fn concurrent_io<T>(mut operation: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+pub(crate) fn concurrent_io<T>(
+    mut operation: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
     for delay in [1, 2, 4, 8] {
         match operation() {
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -68,6 +72,85 @@ fn concurrent_io<T>(mut operation: impl FnMut() -> std::io::Result<T>) -> std::i
         }
     }
     operation()
+}
+/// A unique operation ID: wall-clock nanoseconds, process ID and a process-wide counter.
+/// Returns the ID and the Unix seconds it contains.
+pub fn operation_id() -> (String, u64) {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    (
+        format!("{:039}-{}-{serial:020}", now.as_nanos(), std::process::id()),
+        now.as_secs(),
+    )
+}
+/// Removes `{prefix}-*.tmp` files in `root` that are older than 60 seconds.
+fn cleanup_temps(root: &Path, prefix: &str) -> Result<(), String> {
+    let now = std::time::SystemTime::now();
+    for (n, file) in fs::read_dir(root).map_err(|e| e.to_string())?.enumerate() {
+        if n >= 128 {
+            return Err(
+                "State directory exceeds 128 files; move the state directory aside to recover"
+                    .into(),
+            );
+        }
+        let file = file.map_err(|e| e.to_string())?;
+        let name = file.file_name();
+        let Some(token) = name
+            .to_str()
+            .and_then(|s| s.strip_prefix(prefix))
+            .and_then(|s| s.strip_prefix('-'))
+            .and_then(|s| s.strip_suffix(".tmp"))
+        else {
+            continue;
+        };
+        if !valid_token(token) {
+            continue;
+        }
+        let path = file.path();
+        safe_path(&path, false)?;
+        if fs::symlink_metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age.as_secs() > 60)
+        {
+            // Unlinking a paused writer's private temp can only make its own
+            // rename fail; it cannot publish over or unlock another writer.
+            let _ = fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
+/// Writes `bytes` to the private temp `{root}/{prefix}-{token}.tmp`, then renames it to `target`.
+pub(crate) fn publish(
+    root: &Path,
+    prefix: &str,
+    target: &Path,
+    token: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    cleanup_temps(root, prefix)?;
+    use std::io::Write;
+    let temp = root.join(format!("{prefix}-{token}.tmp"));
+    safe_path(target, false)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| e.to_string())?;
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        // Windows cannot reliably replace a destination still held open by
+        // another writer after its rename. Close before publishing.
+        drop(file);
+        concurrent_io(|| fs::rename(&temp, target))
+    })();
+    let _ = fs::remove_file(&temp);
+    result.map_err(|e| format!("Publish {}: {e}", target.display()))
 }
 impl Store {
     pub fn new(root: &Path) -> Self {
@@ -80,7 +163,9 @@ impl Store {
         self.events()?;
         let journal = self.root.join("history.d");
         fs::create_dir_all(&journal).map_err(|e| e.to_string())?;
-        self.atomic(
+        publish(
+            &self.root,
+            "history",
             &journal.join(format!("{}.json", entry.id)),
             &entry.id,
             &serde_json::to_vec(&Event {
@@ -92,70 +177,12 @@ impl Store {
         )?;
         self.materialize(&entry.id)
     }
-    fn cleanup_temps(&self) -> Result<(), String> {
-        let now = std::time::SystemTime::now();
-        for (n, file) in fs::read_dir(&self.root)
-            .map_err(|e| e.to_string())?
-            .enumerate()
-        {
-            if n >= 128 {
-                return Err(
-                    "History state exceeds 128 files; move the state directory aside to recover"
-                        .into(),
-                );
-            }
-            let file = file.map_err(|e| e.to_string())?;
-            let name = file.file_name();
-            let Some(token) = name
-                .to_str()
-                .and_then(|s| s.strip_prefix("history-"))
-                .and_then(|s| s.strip_suffix(".tmp"))
-            else {
-                continue;
-            };
-            if !valid_token(token) {
-                continue;
-            }
-            let path = file.path();
-            safe_path(&path, false)?;
-            if fs::symlink_metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| now.duration_since(t).ok())
-                .is_some_and(|age| age.as_secs() > 60)
-            {
-                // Unlinking a paused writer's private temp can only make its own
-                // rename fail; it cannot publish over or unlock another writer.
-                let _ = fs::remove_file(path);
-            }
-        }
-        Ok(())
-    }
-    fn atomic(&self, target: &Path, token: &str, bytes: &[u8]) -> Result<(), String> {
-        self.cleanup_temps()?;
-        use std::io::Write;
-        let temp = self.root.join(format!("history-{token}.tmp"));
-        safe_path(target, false)?;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .map_err(|e| e.to_string())?;
-        let result = (|| -> std::io::Result<()> {
-            file.write_all(bytes)?;
-            file.sync_all()?;
-            // Windows cannot reliably replace a destination still held open by
-            // another writer after its rename. Close before publishing.
-            drop(file);
-            concurrent_io(|| fs::rename(&temp, target))
-        })();
-        let _ = fs::remove_file(&temp);
-        result.map_err(|e| format!("Publish {}: {e}", target.display()))
-    }
     fn materialize(&self, token: &str) -> Result<(), String> {
         let events = self.events()?;
         let kept = Self::select(&events);
-        self.atomic(
+        publish(
+            &self.root,
+            "history",
             &self.root.join("history.json"),
             token,
             &serde_json::to_vec(&Snapshot {
@@ -202,7 +229,9 @@ impl Store {
         self.events()?;
         let journal = self.root.join("history.d");
         fs::create_dir_all(&journal).map_err(|e| e.to_string())?;
-        self.atomic(
+        publish(
+            &self.root,
+            "history",
             &journal.join(format!("{token}.json")),
             token,
             &serde_json::to_vec(&Event {

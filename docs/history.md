@@ -107,9 +107,51 @@ is not a transaction and is not a backup/restore mechanism.
 
 ## Verification
 
-The native history module retains tests for concurrency, corruption, age,
-deduplication, clear/delete and filesystem bounds. `tools/verify_native.py` checks
+The native history and frecency modules have tests for concurrency, corruption,
+age, deduplication, clear/delete and filesystem bounds. `tools/verify_native.py` checks
 persistence and rejected-launch rollback in disposable real Zellij sessions.
+
+## Frecency
+
+Search ranks launched directories higher with a frecency score. The score comes
+from a separate store of launch times in the same state directory. The ranking
+rule is in [Matching and input](home-search.md#matching-and-input).
+
+Each launch writes one record to `frecency.d/`, at the same point as the history
+record and with the same operation ID. A failure to write is logged and does not
+stop the launch. A known rejection removes the record of that attempt, like history.
+
+The store uses the history journal protocol: immutable version-1 records, a
+`create_new` temp file, `sync_all`, rename, and no lock. A record holds launches
+(`id`, `path`, `at` in UTC Unix seconds) or is a clear marker. The search worker
+compacts the journal at start, at F5 and at the first query after a clear:
+
+1. Read the valid records. A launch that is in more than one record counts once.
+2. Remove launches with an operation ID before the latest clear marker, launches
+   older than 30 days, and all but the newest 128 launches of each directory.
+   Launches share the cap when their paths name the same directory after
+   normalization against HOME. On Windows, the case of the letters does not count.
+   A directory with no launches left is removed.
+3. Publish the kept launches as one new record. Then remove the observed records
+   that it replaces. The latest clear marker stays. If one record cannot be removed,
+   the compaction still tries to remove the other records.
+
+A launch that another instance publishes during a compaction stays in its own
+record, so concurrent instances do not lose launches. Two compactions can each
+keep the same launch for a short time; readers count it once. A rejected launch
+that a compaction already copied stays in the store.
+
+Clear (Ctrl+L) writes a clear marker to the frecency store as well as to history,
+so cleared directories lose their rank. If history is cleared but frecency is not,
+Recent shows the cleared list and the message shows the frecency error. Removing one
+Recent row does not change frecency. A journal scan stops at 1024 files or at
+64 MiB read from all files, and each record is read with an 8 MiB cap. Unknown
+and corrupt files are ignored and stay for diagnosis. The symlink checks and the
+temporary file cleanup are the same as for history. If the
+store cannot be read, search ranks without frecency and the search status shows
+the error. If a replaced record cannot be removed, search keeps the scores and the
+status shows a warning. The worker shows the status after each load, so a fixed
+store also removes the error from the status.
 
 ## Saved directories
 

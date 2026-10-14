@@ -1,4 +1,5 @@
 pub mod config;
+pub mod frecency;
 pub mod herdr;
 pub mod history;
 pub mod host;
