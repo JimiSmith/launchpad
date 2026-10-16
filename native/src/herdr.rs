@@ -177,6 +177,19 @@ impl Herdr {
             }
         }
     }
+    /// The directory of the foreground process in `pane_id`, if herdr knows it.
+    fn foreground_dir(&self, pane_id: &str) -> Option<PathBuf> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            pane: PaneInfo,
+        }
+        #[derive(serde::Deserialize)]
+        struct PaneInfo {
+            foreground_cwd: Option<PathBuf>,
+        }
+        let reply: Reply = self.call(&["pane", "get", pane_id]).ok()?;
+        reply.pane.foreground_cwd
+    }
     /// Opens the plugin's Launchpad pane in a new, focused tab in `dir`.
     /// Without a directory herdr starts it in the plugin's own.
     pub fn open_plugin_tab(&self, plugin: &str, dir: Option<&Path>) -> Result<(), Failure> {
@@ -259,7 +272,7 @@ pub fn plugin_open_action(workspace: bool) -> Result<(), String> {
     };
     let dir = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
         .ok()
-        .and_then(|json| plugin_context_dir(&json));
+        .and_then(|json| plugin_context_dir(&json, |pane| host.foreground_dir(pane)));
     if workspace {
         host.open_plugin_workspace(&plugin, dir.as_deref())
     } else {
@@ -267,16 +280,23 @@ pub fn plugin_open_action(workspace: bool) -> Result<(), String> {
     }
     .map_err(|e| e.to_string())
 }
-/// The focused pane's directory from herdr's plugin invocation context,
-/// else the workspace's, if absolute.
-pub fn plugin_context_dir(json: &str) -> Option<PathBuf> {
+/// The first absolute directory of: the focused pane's foreground process, from `foreground`,
+/// then the focused pane and the workspace, from herdr's plugin invocation context.
+pub fn plugin_context_dir(
+    json: &str,
+    foreground: impl FnOnce(&str) -> Option<PathBuf>,
+) -> Option<PathBuf> {
     #[derive(serde::Deserialize)]
     struct Context {
+        focused_pane_id: Option<String>,
         focused_pane_cwd: Option<PathBuf>,
         workspace_cwd: Option<PathBuf>,
     }
     let context = serde_json::from_str::<Context>(json).ok()?;
-    [context.focused_pane_cwd, context.workspace_cwd]
+    // The pane's cwd is the last directory that was reported to herdr. A tool
+    // that changes its own directory does not report it.
+    let foreground = context.focused_pane_id.as_deref().and_then(foreground);
+    [foreground, context.focused_pane_cwd, context.workspace_cwd]
         .into_iter()
         .flatten()
         .find(|path| path.is_absolute())
@@ -479,13 +499,36 @@ mod tests {
             "focused_pane_cwd": usr,
             "invocation_source": "keybinding",
         });
-        assert_eq!(plugin_context_dir(&context.to_string()), Some(usr.into()));
-        assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":null}"#), None);
-        assert_eq!(plugin_context_dir(r#"{"focused_pane_cwd":"usr"}"#), None);
+        let unknown = |_: &str| None;
+        let dir = |json: &str| plugin_context_dir(json, unknown);
+        assert_eq!(dir(&context.to_string()), Some(usr.into()));
+        assert_eq!(dir(r#"{"focused_pane_cwd":null}"#), None);
+        assert_eq!(dir(r#"{"focused_pane_cwd":"usr"}"#), None);
         let context = serde_json::json!({"focused_pane_cwd": null, "workspace_cwd": srv});
-        assert_eq!(plugin_context_dir(&context.to_string()), Some(srv.into()));
-        assert_eq!(plugin_context_dir(r#"{"workspace_id":"w1"}"#), None);
-        assert_eq!(plugin_context_dir("not json"), None);
+        assert_eq!(dir(&context.to_string()), Some(srv.into()));
+        assert_eq!(dir(r#"{"workspace_id":"w1"}"#), None);
+        assert_eq!(dir("not json"), None);
+    }
+    #[test]
+    fn plugin_tabs_prefer_the_focused_panes_foreground_directory() {
+        let (usr, srv) = if cfg!(windows) {
+            (r"C:\usr", r"C:\srv")
+        } else {
+            ("/usr", "/srv")
+        };
+        let context =
+            serde_json::json!({"focused_pane_id": "w1:p2", "focused_pane_cwd": usr}).to_string();
+        let mut asked = None;
+        let dir = plugin_context_dir(&context, |pane| {
+            asked = Some(pane.to_string());
+            Some(srv.into())
+        });
+        assert_eq!(dir, Some(srv.into()));
+        assert_eq!(asked.as_deref(), Some("w1:p2"));
+        assert_eq!(
+            plugin_context_dir(&context, |_| Some("srv".into())),
+            Some(usr.into())
+        );
     }
     #[test]
     fn cwd_reports_use_forms_herdr_accepts() {
