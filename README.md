@@ -138,7 +138,8 @@ description = "launchpad"
 ```
 
 Then run `herdr server reload-config`. The key opens Launchpad in a new tab, in
-the focused pane's directory, and the chosen tool takes over that tab's pane
+the directory of the focused pane's foreground process (for example, a tool
+that changed its own directory), and the chosen tool takes over that tab's pane
 (on Windows, Launchpad stays alive under it). Quit closes the tab. Without a
 key, run `herdr plugin action invoke launchpad.open`.
 

@@ -218,14 +218,19 @@ fn workspace_action_moves_the_plugin_pane_and_focuses_its_new_tab() {
 case "$1 $2" in
 "plugin pane") printf '%s\n' '{"result":{"plugin_pane":{"pane":{"pane_id":"w1:p9","tab_id":"w1:t4"}}}}';;
 "pane move") printf '%s\n' '{"result":{"move_result":{"pane":{"pane_id":"w8:p1","tab_id":"w8:t1"}}}}';;
+"pane get") printf '%s\n' '{"result":{"pane":{"cwd":"/srv","foreground_cwd":"/srv/a b;$HOME"}}}';;
 "tab focus") printf '%s\n' '{"result":{}}';;
 *) exit 1;;
 esac"#,
     );
-    // Exercise the real action entrypoint and directory fallback, including
-    // characters that must remain literal CLI arguments.
+    // Exercise the real action entrypoint and the focused pane's foreground
+    // directory, with characters that must remain literal CLI arguments.
     let cwd = "/srv/a b;$HOME";
-    let context = serde_json::json!({"focused_pane_cwd": cwd, "workspace_cwd": "/srv"});
+    let context = serde_json::json!({
+        "focused_pane_id": "w1:p2",
+        "focused_pane_cwd": "/srv",
+        "workspace_cwd": "/srv",
+    });
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_launchpad"))
         .env_clear()
         .env("HERDR_PLUGIN_ID", "launchpad")
@@ -242,7 +247,12 @@ esac"#,
     let focus = "tab|focus|w8:t1|";
     assert_eq!(
         f.calls(),
-        [format!("{open}--cwd|{cwd}|"), moved.into(), focus.into()]
+        [
+            "pane|get|w1:p2|".into(),
+            format!("{open}--cwd|{cwd}|"),
+            moved.into(),
+            focus.into()
+        ]
     );
     std::fs::remove_file(f.root.join("calls")).unwrap();
     f.herdr().open_plugin_workspace("launchpad", None).unwrap();
