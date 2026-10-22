@@ -1,4 +1,7 @@
-use crate::host::{self, Failure, Forward, Launched, Origin, clean};
+use crate::{
+    host::{self, Failure, Forward, Launched, Origin, clean},
+    user_path::{self, ToolPath},
+};
 use launchpad_core::commands::Command as ToolCommand;
 use serde::de::DeserializeOwned;
 use std::{
@@ -12,6 +15,7 @@ use std::{
 pub struct Herdr {
     pub executable: PathBuf,
     pub timeout: Duration,
+    pub tool_path: ToolPath,
 }
 #[derive(serde::Deserialize)]
 struct Reply<T> {
@@ -57,6 +61,7 @@ impl Herdr {
                 .filter(|p| !p.is_empty())
                 .map_or_else(|| "herdr".into(), PathBuf::from),
             timeout: Duration::from_secs(5),
+            tool_path: ToolPath::Current,
         };
         // The workspace action can move this pane during startup. Validate
         // the caller context without reading a tab that the move may remove.
@@ -137,20 +142,33 @@ impl Herdr {
     /// in place, as `exec` does: herdr then tracks the tool's cwd exactly as
     /// for its own shells and closes the pane when it exits. Only a failure
     /// returns.
-    pub fn launch(&self, path: &str, tool: &ToolCommand) -> Result<Launched, Failure> {
+    ///
+    /// With `ToolPath::Current`, the tool gets the PATH that the Shell tool's
+    /// program, `default_shell` or the detected shell, gets now.
+    pub fn launch(
+        &self,
+        path: &str,
+        tool: &ToolCommand,
+        default_shell: Option<&str>,
+    ) -> Result<Launched, Failure> {
+        let shell = shell_program(default_shell);
+        let (program, mut command) = tool_command(tool, &shell);
+        if self.tool_path == ToolPath::Current
+            && let Some(current) = user_path::current(&shell, Instant::now() + self.timeout)
+        {
+            command.env("PATH", current);
+        }
         #[cfg(unix)]
         if self.is_pane_root() {
             use std::os::unix::process::CommandExt;
-            let (program, mut command) = tool_command(tool);
             let error = command.current_dir(path).env("PWD", path).exec();
             return Err(Failure::Rejected(format!(
                 "Cannot start {program} in {path}: {error}"
             )));
         }
-        self.spawn(path, tool).map(Launched::Running)
+        self.spawn(path, &program, command).map(Launched::Running)
     }
-    fn spawn(&self, path: &str, tool: &ToolCommand) -> Result<Child, Failure> {
-        let (program, mut command) = tool_command(tool);
+    fn spawn(&self, path: &str, program: &str, mut command: Command) -> Result<Child, Failure> {
         let fail = |e| Failure::Rejected(format!("Cannot start {program} in {path}: {e}"));
         #[cfg(windows)]
         windows::ignore_console_interrupts(true);
@@ -269,6 +287,7 @@ pub fn plugin_open_action(workspace: bool) -> Result<(), String> {
             .filter(|p| !p.is_empty())
             .map_or_else(|| "herdr".into(), PathBuf::from),
         timeout: Duration::from_secs(5),
+        tool_path: ToolPath::Inherited,
     };
     let dir = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
         .ok()
@@ -301,23 +320,26 @@ pub fn plugin_context_dir(
         .flatten()
         .find(|path| path.is_absolute())
 }
-/// The tool's program name and command, without a directory.
-fn tool_command(tool: &ToolCommand) -> (String, Command) {
+/// The Shell tool's program: `default_shell` if set, else the detected shell.
+fn shell_program(default_shell: Option<&str>) -> String {
+    if let Some(shell) = default_shell {
+        return shell.into();
+    }
+    // herdr's login-shell mode sets $SHELL to its default shell, which may be
+    // Launchpad itself.
+    let own = std::env::current_exe().ok();
+    let not_launchpad = |shell: &String| !names_launchpad(shell, own.as_deref());
+    let env_shell = std::env::var("SHELL").ok().filter(not_launchpad);
+    let login = login_shell().filter(not_launchpad);
+    fallback_shell([env_shell, login], cfg!(windows), on_path)
+}
+/// The tool's program name and command, without a directory. Shell has no
+/// executable of its own and starts `shell`.
+fn tool_command(tool: &ToolCommand, shell: &str) -> (String, Command) {
     // `default_shell` from Launchpad's config arrives as Shell's executable.
     let (program, arguments) = match &tool.executable {
         Some(executable) => (executable.clone(), &tool.arguments[..]),
-        None => {
-            // herdr's login-shell mode sets $SHELL to its default shell,
-            // which may be Launchpad itself.
-            let own = std::env::current_exe().ok();
-            let not_launchpad = |shell: &String| !names_launchpad(shell, own.as_deref());
-            let env_shell = std::env::var("SHELL").ok().filter(not_launchpad);
-            let login = login_shell().filter(not_launchpad);
-            (
-                fallback_shell([env_shell, login], cfg!(windows), on_path),
-                &[][..],
-            )
-        }
+        None => (shell.to_string(), &[][..]),
     };
     let mut command = Command::new(&program);
     command.args(arguments);
@@ -604,7 +626,7 @@ mod tests {
             "C:/Windows/System32/WindowsPowerShell/v1.0/PowerShell.EXE",
         ] {
             tool.executable = Some(program.into());
-            let (_, command) = super::tool_command(&tool);
+            let (_, command) = super::tool_command(&tool, "");
             let args: Vec<_> = command.get_args().collect();
             assert_eq!(
                 args,
@@ -613,14 +635,14 @@ mod tests {
         }
         for program in ["cmd.exe", "bash.exe", "pwsh-wrapper.exe"] {
             tool.executable = Some(program.into());
-            assert_eq!(super::tool_command(&tool).1.get_args().count(), 0);
+            assert_eq!(super::tool_command(&tool, "").1.get_args().count(), 0);
         }
         // A configured command may run a script and exit; do not turn it into
         // an interactive shell or reinterpret its arguments.
         tool.id = Tool::new("script").unwrap();
         tool.executable = Some("pwsh.exe".into());
         tool.arguments = vec!["-File".into(), "tool.ps1".into()];
-        let (_, command) = super::tool_command(&tool);
+        let (_, command) = super::tool_command(&tool, "");
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
             ["-File", "tool.ps1"]

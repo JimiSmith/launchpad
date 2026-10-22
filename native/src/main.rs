@@ -11,6 +11,7 @@ use launchpad::{
 };
 use launchpad_core::{
     app::{Action, App, HistoryMutation, Launch, RecentDirectory},
+    commands::Tool,
     view::{self, HitMap, Pointer},
 };
 use std::{
@@ -308,7 +309,11 @@ fn run(args: Args) -> Result<(), String> {
                 break;
             }
             screen.suspend();
-            match host.launch(&launch.path, &command) {
+            let default_shell = app
+                .commands
+                .get(Tool::Shell)
+                .and_then(|shell| shell.executable.as_deref());
+            match host.launch(&launch.path, &command, default_shell) {
                 Ok(Launched::Replaced) => break,
                 Ok(Launched::Running(child)) => {
                     running = Some(child);
