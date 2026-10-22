@@ -132,6 +132,15 @@ first present of `pwsh.exe` then `powershell.exe` on Windows, or `bash` then
 `/bin/sh` elsewhere. Presence means a file of that name in a PATH directory.
 Launchpad does not read herdr's configuration.
 
+Each tool gets the user's current PATH, not the PATH that herdr had when it
+started. On Linux and macOS, Launchpad runs Shell's program as
+`<shell> -l -i -c 'printenv PATH'` without a controlling terminal, and uses the
+last line of the output. On Windows, Launchpad reads `Path` from
+`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment` and then
+from `HKCU\Environment`, expanded. If the shell fails, or does not finish within
+the herdr CLI timeout, or the registry has no PATH, the tool gets Launchpad's
+own PATH.
+
 A stop signal (SIGTERM, SIGHUP, SIGINT, SIGQUIT) that arrives after a tool is
 chosen but before it starts, for example during the tab rename, cancels the
 launch: the tab name and history attempt are rolled back and Launchpad quits,

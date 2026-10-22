@@ -8,5 +8,6 @@ pub mod input;
 pub mod saved;
 pub mod search;
 pub mod terminal;
+pub mod user_path;
 pub mod worker;
 pub mod zellij;

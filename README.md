@@ -90,6 +90,10 @@ and macOS (zsh by default on macOS), then `pwsh.exe` if it is on PATH, else
 elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
 if herdr is configured to use a different shell.
 
+Tools get your current PATH, so a PATH change takes effect without a herdr
+restart. On Linux and macOS, the PATH comes from that shell as a login shell.
+On Windows, it comes from the registry.
+
 The rest of this section is about the second case. When a tool starts, Launchpad
 reports its directory to herdr, as a shell prompt
 does, and moves into it. herdr's "new pane follows cwd", git detection and

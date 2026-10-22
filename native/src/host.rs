@@ -140,11 +140,17 @@ impl Host {
         Ok(())
     }
     /// Launches in the originating pane. A Zellij shell needs the caller's
-    /// handoff arguments; herdr runs the default shell directly.
-    pub fn launch(&self, path: &str, tool: &ToolCommand) -> Result<Launched, Failure> {
+    /// handoff arguments; herdr runs the default shell directly. Only herdr
+    /// uses `default_shell`; see `Herdr::launch`.
+    pub fn launch(
+        &self,
+        path: &str,
+        tool: &ToolCommand,
+        default_shell: Option<&str>,
+    ) -> Result<Launched, Failure> {
         match self {
             Self::Zellij(host) => host.launch(path, tool).map(|()| Launched::Replaced),
-            Self::Herdr(host) => host.launch(path, tool),
+            Self::Herdr(host) => host.launch(path, tool, default_shell),
         }
     }
     /// Waits for a tool Launchpad runs itself, then closes the pane with it.

@@ -2,6 +2,7 @@
 use launchpad::{
     herdr::Herdr,
     host::{Failure, Forward, Host, Launched, Origin},
+    user_path::ToolPath,
 };
 use launchpad_core::commands::{Command, Tool};
 use std::{path::PathBuf, time::Duration};
@@ -49,6 +50,7 @@ impl Fixture {
         Herdr {
             executable: self.root.join("herdr"),
             timeout: Duration::from_secs(2),
+            tool_path: ToolPath::Inherited,
         }
     }
     fn host(&self) -> Host {
@@ -330,11 +332,13 @@ fn missing_executable_is_rejected_before_anything_runs() {
     let f = Fixture::new("missing");
     let result = f
         .host()
-        .launch("/tmp", &tool("launchpad-no-such-tool", &[]));
+        .launch("/tmp", &tool("launchpad-no-such-tool", &[]), None);
     assert!(matches!(result, Err(Failure::Rejected(_))));
-    let result = f
-        .host()
-        .launch(f.root.join("absent").to_str().unwrap(), &tool("true", &[]));
+    let result = f.host().launch(
+        f.root.join("absent").to_str().unwrap(),
+        &tool("true", &[]),
+        None,
+    );
     assert!(matches!(result, Err(Failure::Rejected(_))));
     assert!(
         !f.calls().iter().any(|c| c.starts_with("pane|close")),
@@ -362,6 +366,7 @@ fn tool_runs_in_the_directory_with_literal_arguments_then_closes_the_pane() {
                     ";",
                 ],
             ),
+            None,
         )
         .unwrap()
     else {
@@ -386,7 +391,7 @@ fn tool_runs_in_the_directory_with_literal_arguments_then_closes_the_pane() {
 fn failing_tool_still_closes_the_pane() {
     let f = Fixture::new("fail");
     let host = f.host();
-    let Launched::Running(child) = host.launch("/tmp", &tool("false", &[])).unwrap() else {
+    let Launched::Running(child) = host.launch("/tmp", &tool("false", &[]), None).unwrap() else {
         panic!("herdr launches run as a child");
     };
     host.finish(child, Forward::new().unwrap()).unwrap();
@@ -423,7 +428,7 @@ fn a_pane_that_is_already_gone_is_reported_after_the_tool_is_reaped() {
     let f = Fixture::new("gone");
     std::fs::write(f.root.join("gone"), "").unwrap();
     let host = f.host();
-    let Launched::Running(child) = host.launch("/tmp", &tool("true", &[])).unwrap() else {
+    let Launched::Running(child) = host.launch("/tmp", &tool("true", &[]), None).unwrap() else {
         panic!("herdr launches run as a child");
     };
     let pid = child.id();
@@ -437,7 +442,8 @@ fn a_pane_that_is_already_gone_is_reported_after_the_tool_is_reaped() {
 fn termination_signals_are_forwarded_to_the_tool() {
     let f = Fixture::new("forward");
     let host = f.host();
-    let Launched::Running(child) = host.launch("/tmp", &tool("sleep", &["30"])).unwrap() else {
+    let Launched::Running(child) = host.launch("/tmp", &tool("sleep", &["30"]), None).unwrap()
+    else {
         panic!("herdr launches run as a child");
     };
     // Registered before the signal, as main does at startup; this process
@@ -460,9 +466,11 @@ fn launchpad_follows_the_tool_into_its_directory_but_not_on_failure() {
     let dir = f.root.join("target dir");
     std::fs::create_dir(&dir).unwrap();
     let before = std::env::current_dir().unwrap();
-    let result = f
-        .host()
-        .launch(dir.to_str().unwrap(), &tool("launchpad-no-such-tool", &[]));
+    let result = f.host().launch(
+        dir.to_str().unwrap(),
+        &tool("launchpad-no-such-tool", &[]),
+        None,
+    );
     assert!(matches!(result, Err(Failure::Rejected(_))));
     assert_eq!(
         std::env::current_dir().unwrap(),
@@ -471,7 +479,7 @@ fn launchpad_follows_the_tool_into_its_directory_but_not_on_failure() {
     );
     let host = f.host();
     let Launched::Running(child) = host
-        .launch(dir.to_str().unwrap(), &tool("true", &[]))
+        .launch(dir.to_str().unwrap(), &tool("true", &[]), None)
         .unwrap()
     else {
         panic!("herdr launches run as a child");
@@ -493,4 +501,78 @@ fn only_the_panes_own_process_counts_as_its_root() {
     assert!(f.herdr().is_pane_root());
     f.replace("exit 1");
     assert!(!f.herdr().is_pane_root(), "errors mean no");
+}
+#[test]
+fn tools_get_the_path_that_the_default_shell_gets_now() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new("current-path");
+    let bin = f.root.join("fresh bin");
+    std::fs::create_dir(&bin).unwrap();
+    let write = |path: &std::path::Path, body: &str| {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    };
+    let shell = f.root.join("shell");
+    write(
+        &shell,
+        &format!(
+            r#"printf '%s|' "$@" > "{root}/shell-args"; echo Welcome; echo '{bin}:/usr/bin:/bin'"#,
+            root = f.root.display(),
+            bin = bin.display()
+        ),
+    );
+    write(&bin.join("fresh-tool"), r#"printf '%s' "$PATH" > out"#);
+    let host = Herdr {
+        tool_path: ToolPath::Current,
+        ..f.herdr()
+    };
+    let Launched::Running(child) = host
+        .launch(
+            f.root.to_str().unwrap(),
+            &tool("fresh-tool", &[]),
+            shell.to_str(),
+        )
+        .unwrap()
+    else {
+        panic!("herdr launches run as a child");
+    };
+    host.finish(child, Forward::new().unwrap()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("shell-args")).unwrap(),
+        "-l|-i|-c|printenv PATH|"
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("out")).unwrap(),
+        format!("{}:/usr/bin:/bin", bin.display())
+    );
+}
+#[test]
+fn tools_keep_the_inherited_path_if_the_shell_fails_or_hangs() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new("inherited-path");
+    let shell = f.root.join("shell");
+    let host = Herdr {
+        tool_path: ToolPath::Current,
+        ..f.herdr()
+    };
+    for body in ["echo /nowhere; exit 1", "exec sleep 30"] {
+        std::fs::write(&shell, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let Launched::Running(child) = host
+            .launch(
+                f.root.to_str().unwrap(),
+                &tool("sh", &["-c", r#"printf '%s' "$PATH" > out"#]),
+                shell.to_str(),
+            )
+            .unwrap()
+        else {
+            panic!("herdr launches run as a child");
+        };
+        host.finish(child, Forward::new().unwrap()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(f.root.join("out")).unwrap(),
+            std::env::var("PATH").unwrap(),
+            "{body}"
+        );
+    }
 }
