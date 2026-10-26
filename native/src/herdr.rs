@@ -74,6 +74,7 @@ impl Herdr {
         Ok(host)
     }
     fn command(&self) -> Command {
+        #[cfg_attr(not(unix), expect(unused_mut))]
         let mut command = Command::new(&self.executable);
         // Keep the CLI out of the terminal's foreground group, so closing
         // this pane cannot hang it up before herdr replies.
