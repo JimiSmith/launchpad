@@ -245,6 +245,7 @@ esac"#,
     let open =
         "plugin|pane|open|--plugin|launchpad|--entrypoint|launchpad|--placement|tab|--no-focus|";
     // Like the new-tab action, leave the initial tab name to Herdr.
+    let version = "--version|";
     let moved = "pane|move|w1:p9|--new-workspace|--focus|";
     let focus = "tab|focus|w8:t1|";
     assert_eq!(
@@ -252,41 +253,96 @@ esac"#,
         [
             "pane|get|w1:p2|".into(),
             format!("{open}--cwd|{cwd}|"),
+            version.into(),
             moved.into(),
             focus.into()
         ]
     );
     std::fs::remove_file(f.root.join("calls")).unwrap();
     f.herdr().open_plugin_workspace("launchpad", None).unwrap();
-    assert_eq!(f.calls(), [open, moved, focus]);
+    assert_eq!(f.calls(), [open, version, moved, focus]);
+}
+/// A fake CLI for the workspace action. A call whose first two words are
+/// `fail` exits with a rejection, and `kill` makes it end on a signal.
+fn workspace_cli(version: &str, fail: &str, kill: &str) -> String {
+    format!(
+        r#"printf '%s|' "$@" >> "${{0%/*}}/calls"; echo >> "${{0%/*}}/calls"
+case "$1 $2" in
+"{fail}") printf '%s\n' '{{"error":{{"message":"fixture rejection"}}}}' >&2; exit 1;;
+"{kill}") kill -9 $$;;
+"--version ") printf '%s\n' '{version}';;
+"plugin pane") printf '%s\n' '{{"result":{{"plugin_pane":{{"pane":{{"pane_id":"w1:p9","tab_id":"w1:t4"}}}}}}}}';;
+"workspace create") printf '%s\n' '{{"result":{{"root_pane":{{"pane_id":"w8:p0","tab_id":"w8:t1"}},"workspace":{{"workspace_id":"w8"}}}}}}';;
+"pane move") printf '%s\n' '{{"result":{{"move_result":{{"pane":{{"pane_id":"w8:p1","tab_id":"w8:t1"}}}}}}}}';;
+*) printf '%s\n' '{{"result":{{}}}}';;
+esac"#
+    )
 }
 #[test]
-fn workspace_action_stops_on_failure_without_retrying_or_closing_panes() {
-    for stage in ["plugin", "pane", "tab"] {
-        let f = Fixture::new(&format!("plugin-workspace-fail-{stage}"));
-        f.replace(&format!(
-            r#"printf '%s|' "$@" >> "${{0%/*}}/calls"; echo >> "${{0%/*}}/calls"
-if [ "$1" = "{stage}" ]; then
-    printf '%s\n' '{{"error":{{"message":"fixture rejection"}}}}' >&2; exit 1
-fi
-case "$1" in
-plugin) printf '%s\n' '{{"result":{{"plugin_pane":{{"pane":{{"pane_id":"w1:p9","tab_id":"w1:t4"}}}}}}}}';;
-pane) printf '%s\n' '{{"result":{{"move_result":{{"pane":{{"pane_id":"w8:p1","tab_id":"w8:t1"}}}}}}}}';;
-esac"#
-        ));
+fn workspace_action_closes_the_plugin_pane_only_when_its_move_is_rejected() {
+    let close = "pane|close|w1:p9|";
+    for (fail, kill, expected) in [
+        ("plugin pane", "", vec![]),
+        ("pane move", "", vec![close]),
+        ("", "pane move", vec![]),
+        ("tab focus", "", vec![]),
+    ] {
+        let f = Fixture::new("plugin-workspace-fail");
+        f.replace(&workspace_cli("herdr 0.9.4", fail, kill));
         let error = f
             .herdr()
             .open_plugin_workspace("launchpad", None)
             .unwrap_err();
-        assert!(matches!(error, Failure::Rejected(_)), "{error:?}");
-        assert!(error.to_string().contains("fixture rejection"));
-        let expected = match stage {
-            "plugin" => 1,
-            "pane" => 2,
-            _ => 3,
-        };
-        assert_eq!(f.calls().len(), expected);
-        assert!(f.calls().iter().all(|call| !call.contains("|close|")));
+        let closes: Vec<_> = f
+            .calls()
+            .into_iter()
+            .filter(|c| c.contains("|close|"))
+            .collect();
+        assert_eq!(closes, expected, "{fail}{kill}: {error}");
+    }
+}
+#[test]
+fn workspace_action_on_tuios_creates_the_workspace_closes_its_shell_and_focuses_it() {
+    let f = Fixture::new("plugin-workspace-tuios");
+    f.replace(&workspace_cli("herdr 0.9.5+tuios", "", ""));
+    f.herdr()
+        .open_plugin_workspace("launchpad", Some(std::path::Path::new("/srv/a b")))
+        .unwrap();
+    assert_eq!(
+        f.calls(),
+        [
+            "plugin|pane|open|--plugin|launchpad|--entrypoint|launchpad|--placement|tab|--no-focus|--cwd|/srv/a b|",
+            "--version|",
+            "workspace|create|--no-focus|--cwd|/srv/a b|",
+            "pane|move|w1:p9|--tab|w8:t1|--split|right|--no-focus|",
+            "pane|close|w8:p0|",
+            "workspace|focus|w8|",
+        ]
+    );
+}
+#[test]
+fn workspace_action_on_tuios_removes_what_a_rejected_call_leaves() {
+    let close_plugin = "pane|close|w1:p9|";
+    let close_workspace = "workspace|close|w8|";
+    for (fail, kill, expected) in [
+        ("workspace create", "", vec![close_plugin]),
+        ("pane move", "", vec![close_workspace, close_plugin]),
+        ("", "pane move", vec![]),
+        ("pane close", "", vec!["pane|close|w8:p0|"]),
+    ] {
+        let f = Fixture::new("plugin-workspace-tuios-fail");
+        f.replace(&workspace_cli("herdr 0.9.5+tuios", fail, kill));
+        let error = f
+            .herdr()
+            .open_plugin_workspace("launchpad", None)
+            .unwrap_err();
+        let closes: Vec<_> = f
+            .calls()
+            .into_iter()
+            .filter(|c| c.contains("|close|"))
+            .collect();
+        assert_eq!(closes, expected, "{fail}{kill}: {error}");
+        assert!(!f.calls().iter().any(|c| c.contains("|focus|")));
     }
 }
 #[test]
