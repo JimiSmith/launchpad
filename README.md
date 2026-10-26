@@ -8,7 +8,8 @@ tool itself (see [herdr](#herdr)). Launchpad names the originating tab
 dashboard.
 
 Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**, or inside
-herdr (tested with 0.9.0; see [herdr](#herdr)). Launchpad must run inside a Zellij
+herdr (tested with 0.9.0; see [herdr](#herdr)), including the herdr
+compatibility mode of [tuios](#tuios). Launchpad must run inside a Zellij
 or herdr terminal pane. No Zellij plugin, WASM runtime, or plugin permissions are
 needed.
 
@@ -226,6 +227,28 @@ It only reaches sessions and servers started with it; attaching to one that is
 already running keeps that server's environment. Values ignore case, and an
 empty value counts as unset. `--host zellij` or `--host herdr` on the command
 line overrides the variable.
+
+### tuios
+
+[tuios](https://tuios.dev) has a herdr compatibility mode.
+Each tuios pane has herdr's environment, and `$HERDR_BIN_PATH` points to tuios,
+which answers herdr's command line. Launchpad sees a tuios pane as a herdr
+pane, so the [herdr](#herdr) section applies. Tested with tuios 0.11.0 on Linux.
+
+The plugin works with these differences:
+
+- tuios finds a plugin that herdr installed. To use it, run
+  `tuios plugins enable launchpad` in a terminal outside tuios.
+- To install the plugin with tuios, run `tuios plugins install JimiSmith/launchpad`
+  in a terminal outside tuios. tuios runs the same install script as herdr and
+  enables the plugin.
+- Run an action with `tuios plugins run launchpad open`, or from a pane with
+  `"$HERDR_BIN_PATH" plugin action invoke open --plugin launchpad`. Use
+  `open-workspace` in place of `open` for a new workspace.
+- tuios cannot move a pane to a new workspace. Thus `open-workspace` creates
+  the workspace, moves Launchpad into its tab, and closes the shell that the
+  tab starts with. Launchpad finds tuios from the `+tuios` suffix in the output
+  of `"$HERDR_BIN_PATH" --version`.
 
 ## Configure commands and colours
 

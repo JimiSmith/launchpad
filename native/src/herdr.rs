@@ -31,6 +31,10 @@ struct Pane {
     tab_id: String,
 }
 #[derive(serde::Deserialize)]
+struct Moved {
+    move_result: PaneReply,
+}
+#[derive(serde::Deserialize)]
 struct TabReply {
     tab: Tab,
 }
@@ -69,13 +73,18 @@ impl Herdr {
         host.pane().map_err(|e| e.to_string())?;
         Ok(host)
     }
-    fn call<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Failure> {
+    fn command(&self) -> Command {
+        #[cfg_attr(not(unix), expect(unused_mut))]
         let mut command = Command::new(&self.executable);
-        command.args(args);
         // Keep the CLI out of the terminal's foreground group, so closing
         // this pane cannot hang it up before herdr replies.
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        command
+    }
+    fn call<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Failure> {
+        let mut command = self.command();
+        command.args(args);
         let output = host::run(command, "herdr", Instant::now() + self.timeout)?;
         if !output.status.success() {
             if output.status.code().is_none() {
@@ -219,18 +228,78 @@ impl Herdr {
     }
     /// Moves a new plugin pane into the first and only tab of a new workspace.
     pub fn open_plugin_workspace(&self, plugin: &str, dir: Option<&Path>) -> Result<(), Failure> {
-        #[derive(serde::Deserialize)]
-        struct Moved {
-            move_result: PaneReply,
-        }
-        // Moving the pane creates the workspace without a spare shell tab
-        // and removes the temporary tab. Keep it unfocused until it moves.
+        // Keep the pane unfocused in its temporary tab until it moves.
         let pane = self.open_plugin_pane(plugin, dir, false)?;
-        let moved: Moved =
-            self.call(&["pane", "move", &pane.pane_id, "--new-workspace", "--focus"])?;
+        if self.is_tuios() {
+            return self.move_pane_to_new_tuios_workspace(&pane, dir);
+        }
+        let moved: Moved = self
+            .call(&["pane", "move", &pane.pane_id, "--new-workspace", "--focus"])
+            .map_err(|e| self.close_unmoved_pane(&pane, e))?;
         // Moving across workspaces changes both IDs; use the returned tab.
         self.call::<serde_json::Value>(&["tab", "focus", &moved.move_result.pane.tab_id])
             .map(|_| ())
+    }
+    /// Creates a workspace in `dir`, moves `pane` into its first tab, closes
+    /// the shell pane that the tab starts with, and focuses the workspace.
+    fn move_pane_to_new_tuios_workspace(
+        &self,
+        pane: &Pane,
+        dir: Option<&Path>,
+    ) -> Result<(), Failure> {
+        #[derive(serde::Deserialize)]
+        struct Created {
+            root_pane: Pane,
+            workspace: Workspace,
+        }
+        #[derive(serde::Deserialize)]
+        struct Workspace {
+            workspace_id: String,
+        }
+        let mut args = vec!["workspace", "create", "--no-focus"];
+        if let Some(dir) = dir.and_then(Path::to_str) {
+            args.extend(["--cwd", dir]);
+        }
+        let created: Created = self
+            .call(&args)
+            .map_err(|e| self.close_unmoved_pane(pane, e))?;
+        let root = &created.root_pane;
+        let workspace = &created.workspace.workspace_id;
+        self.call::<serde_json::Value>(&[
+            "pane",
+            "move",
+            &pane.pane_id,
+            "--tab",
+            &root.tab_id,
+            "--split",
+            "right",
+            "--no-focus",
+        ])
+        .map_err(|e| {
+            if matches!(e, Failure::Rejected(_)) {
+                let _ = self.call::<serde_json::Value>(&["workspace", "close", workspace]);
+            }
+            self.close_unmoved_pane(pane, e)
+        })?;
+        self.call::<serde_json::Value>(&["pane", "close", &root.pane_id])?;
+        self.call::<serde_json::Value>(&["workspace", "focus", workspace])
+            .map(|_| ())
+    }
+    /// Closes `pane` after a rejected call, because the pane then stays in its
+    /// temporary tab. After an unknown outcome the pane can be in use.
+    fn close_unmoved_pane(&self, pane: &Pane, error: Failure) -> Failure {
+        if matches!(error, Failure::Rejected(_)) {
+            let _ = self.call::<serde_json::Value>(&["pane", "close", &pane.pane_id]);
+        }
+        error
+    }
+    /// Whether the CLI is the herdr compatibility mode of tuios. Any doubt
+    /// means no.
+    fn is_tuios(&self) -> bool {
+        let mut command = self.command();
+        command.arg("--version");
+        host::run(command, "herdr", Instant::now() + self.timeout)
+            .is_ok_and(|output| output.status.success() && output.stdout.contains("+tuios"))
     }
     fn open_plugin_pane(
         &self,
