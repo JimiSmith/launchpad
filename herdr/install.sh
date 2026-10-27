@@ -12,7 +12,7 @@ release="https://github.com/JimiSmith/launchpad/releases/download/v$version"
 
 case "$(uname -s)-$(uname -m)" in
     Linux-x86_64 | Linux-amd64) archive=launchpad-linux-x86_64.tar.gz ;;
-    Darwin-x86_64) archive=launchpad-macos-x86_64.tar.gz ;;
+    Linux-aarch64 | Linux-arm64) archive=launchpad-linux-aarch64.tar.gz ;;
     Darwin-arm64 | Darwin-aarch64) archive=launchpad-macos-aarch64.tar.gz ;;
     *) archive= ;;
 esac
@@ -58,7 +58,7 @@ download() {
     fi
     tar -xzf "$tmp/$archive" -C "$tmp" launchpad || exit 1
     if ! "$tmp/launchpad" --version >/dev/null 2>&1; then
-        echo "The release binary does not run here (it needs glibc from Ubuntu 24.04 or newer)"
+        echo "The release binary does not run here (it needs glibc from Ubuntu 26.04 or newer)"
         return 1
     fi
     { mkdir -p bin && mv -f "$tmp/launchpad" bin/launchpad; } || exit 1
