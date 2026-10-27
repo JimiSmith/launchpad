@@ -19,18 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             platform: linux-x86_64
             target: x86_64-unknown-linux-gnu
+            binary: launchpad
+          - os: ubuntu-26.04-arm
+            platform: linux-aarch64
+            target: aarch64-unknown-linux-gnu
             binary: launchpad
           - os: windows-2022
             platform: windows-x86_64
             target: x86_64-pc-windows-msvc
             binary: launchpad.exe
-          - os: macos-15-intel
-            platform: macos-x86_64
-            target: x86_64-apple-darwin
-            binary: launchpad
           - os: macos-15
             platform: macos-aarch64
             target: aarch64-apple-darwin
@@ -92,7 +92,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -111,8 +111,8 @@ jobs:
         run: |
           for archive in \
             launchpad-linux-x86_64.tar.gz \
+            launchpad-linux-aarch64.tar.gz \
             launchpad-windows-x86_64.zip \
-            launchpad-macos-x86_64.tar.gz \
             launchpad-macos-aarch64.tar.gz; do
             test -s "$archive"
             sha256sum --check "$archive.sha256"

@@ -56,7 +56,7 @@ and resolve the conflict before making a mutation.
 Follow the tag's `Release native` workflow run using GitHub tooling, such as
 `gh run list`, `gh run view`, and `gh run watch`. Confirm its commit matches the
 intended release. The workflow tests, lints, and builds on matching runners for
-Linux x64, Windows x64, macOS Intel x64, and macOS Apple Silicon ARM64. Local
+Linux x64, Linux ARM64, Windows x64, and macOS Apple Silicon ARM64. Local
 verification does not replace those platform checks.
 
 Verify the published release has the correct tag and prerelease status and all
