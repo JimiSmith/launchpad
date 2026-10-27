@@ -1,138 +1,72 @@
 # Launchpad
 
-A native directory-and-tool dashboard for Zellij and [herdr](https://herdr.dev).
-Fuzzy-find a directory, choose Shell or a configured command, and run that tool
-in the dashboard's pane: Zellij replaces the pane; under herdr Launchpad runs the
-tool itself (see [herdr](#herdr)). Launchpad names the originating tab
-`directory · command label` (see `auto_name_tabs`); tool panes close on exit without returning to the
-dashboard.
+Launchpad is a directory and tool picker for [Zellij](https://zellij.dev),
+[herdr](https://herdr.dev) and [tuios](https://tuios.dev). You choose a directory
+and a tool, and Launchpad runs the tool in its own pane. It runs on Linux, Windows
+and macOS with Zellij 0.45.0 or newer, or inside herdr (tested with 0.9.0). It
+also runs in tuios (tested with 0.11.0 on Linux).
 
-Runs on Linux, Windows and macOS with **Zellij 0.45.0 or newer**, or inside
-herdr (tested with 0.9.0; see [herdr](#herdr)), including the herdr
-compatibility mode of [tuios](#tuios). Launchpad must run inside a Zellij
-or herdr terminal pane. No Zellij plugin, WASM runtime, or plugin permissions are
-needed.
+## Install
 
-## Install and run
+Download the archive for your platform from the
+[releases page](https://github.com/JimiSmith/launchpad/releases). Make sure that
+the archive matches its `.sha256` file. Then put `launchpad` on your PATH.
 
-Tagged releases provide archives for Linux x64, Windows x64, macOS Intel x64 and
-macOS Apple Silicon ARM64, each with a SHA-256 checksum. See
-[release packaging](docs/releases.md) for archive names and platform details.
-herdr users can instead
-[install Launchpad as a herdr plugin](#install-as-a-herdr-plugin).
-
-Or build from this checkout with the pinned Rust toolchain. On Linux and macOS:
+To build from source, install [Rust](https://rustup.rs) and run:
 
 ```sh
 cargo build --release --locked -p launchpad
-mkdir -p ~/.local/bin
 install -m755 target/release/launchpad ~/.local/bin/launchpad
 ```
 
-On Windows, build with the same Cargo command, then run from PowerShell inside
-Zellij:
+If you use herdr or tuios, you can install the plugin instead. See
+[herdr and tuios](#herdr-and-tuios).
 
-```powershell
-.\target\release\launchpad.exe
+## Zellij key binding
+
+Add this binding to your Zellij `config.kdl`. The key opens Launchpad in a new
+tab. Use the absolute path of `examples/launchpad.kdl` from this repository or
+from the release archive.
+
+```kdl
+keybinds {
+    shared {
+        bind "Alt l" { NewTab { layout "/absolute/path/to/launchpad.kdl"; }; }
+    }
+}
 ```
 
-Launchpad uses `HOME`, falling back to `USERPROFILE`, then `HOMEDRIVE` +
-`HOMEPATH`. Windows paths accept drive letters, UNC shares, and either slash style;
-`~` refers to that home directory. Drive-relative paths such as `C:notes` are
-rejected.
+Use Zellij's locked mode (normally Ctrl+G) while Launchpad is open. Otherwise
+Zellij gets the keys before Launchpad.
 
-Run `launchpad` inside Zellij, or start it in its own pane:
+## herdr and tuios
 
-```sh
-zellij run --close-on-exit -- launchpad
-```
+Launchpad is a plugin for herdr. tuios runs herdr plugins, so the same plugin
+works in tuios.
 
-For a new tab, use [examples/launchpad.kdl](examples/launchpad.kdl):
-
-```sh
-zellij action new-tab --layout "$(pwd)/examples/launchpad.kdl"
-```
-
-Ensure `launchpad` is on the Zellij server's PATH. Layouts also accept an
-absolute executable path. Use Zellij's locked mode (normally Ctrl+G) so shortcuts
-reach Launchpad. Quit returns to the invoking shell, or closes a dedicated pane
-started with `--close-on-exit` / `close_on_exit true`.
-
-The input starts blank and shows the invoking cwd as a placeholder. Enter, a tool
-shortcut, or Save on a blank input uses the invoking cwd, so **Enter once launches
-Shell** even while HOME is indexing. Shell uses Zellij's configured default shell. Configured tools
-receive the chosen directory and literal argument arrays. No command availability
-or authentication checks run before launch.
-
-## herdr
-
-Inside a herdr pane Launchpad needs no extra setup:
-
-```sh
-launchpad
-```
-
-herdr cannot replace a pane in place, so Launchpad starts the chosen tool
-itself, in the same pane and the chosen directory. The tab is renamed
-`directory · command label` as in Zellij, unless `auto_name_tabs = false`.
-
-- When Launchpad is the pane's own program, as in the setups below, on Linux and
-  macOS it replaces itself with the tool, as `exec` does. herdr then treats the
-  tool like its own shells: it follows `cd` and closes the pane when the tool
-  exits.
-- Otherwise, such as when you start Launchpad from a shell prompt or on Windows,
-  a small Launchpad process stays alive under the tool and closes the pane with
-  `herdr pane close` when it exits.
-
-Shell starts [`default_shell`](#configure-commands-and-colours) if set.
-Otherwise it starts `$SHELL`; failing that, the account's login shell on Linux
-and macOS (zsh by default on macOS), then `pwsh.exe` if it is on PATH, else
-`powershell.exe` on Windows, and `bash` if it is on PATH, else `/bin/sh`
-elsewhere. Launchpad does not read herdr's own settings, so set `default_shell`
-if herdr is configured to use a different shell.
-
-Tools get your current PATH, so a PATH change takes effect without a herdr
-restart. On Linux and macOS, the PATH comes from that shell as a login shell.
-On Windows, it comes from the registry.
-
-The rest of this section is about the second case. When a tool starts, Launchpad
-reports its directory to herdr, as a shell prompt
-does, and moves into it. herdr's "new pane follows cwd", git detection and
-session restore then use the tool's directory, even if the shell you started
-Launchpad from had reported its own. On Windows that also means the directory
-cannot be renamed or deleted until the pane closes.
-
-Afterwards herdr learns about a `cd` when the shell reports it. On Windows,
-Shell automatically adds cwd reporting for PowerShell (`pwsh` or `powershell`,
-including `.exe` names and full paths). The hook runs after your profile loads,
-preserves your existing prompt, and reports the folder at every prompt with
-the same OSC 9;9 sequence herdr's own PowerShell panes use. No profile changes
-are needed; the older `LaunchpadOriginalPrompt` profile workaround is also
-recognized. Other shells and configured tool commands need their own cwd
-reporting.
-
-On Windows, Launchpad ignores Ctrl+C while a tool runs; the tool still gets it.
-On Unix, Ctrl+\\ does not kill Launchpad. A tool without its own job control
-shares Launchpad's process group, so Ctrl+Z stops both: started from a shell,
-that shell shows the job as stopped (`fg` resumes it); as the pane's own
-program, Launchpad cannot be stopped this way.
-
-### Install as a herdr plugin
+Install the plugin with herdr:
 
 ```sh
 herdr plugin install JimiSmith/launchpad
 ```
 
-herdr clones this repository, shows what it will run, and runs the install
-script. The script puts Launchpad in the plugin's own directory: the release
-archive for the plugin's version on Linux x64, macOS and Windows x64, after
-checking its SHA-256; elsewhere, such as Linux on ARM, a Cargo build, which
-needs [Rust](https://rustup.rs) installed. Add `--ref` with a release tag to
-install that release. The plugin does not put `launchpad` on your PATH, so use the
-[other install methods](#install-and-run) to run it from a prompt or as herdr's
-default shell.
+Install the plugin with tuios, from a terminal outside tuios:
 
-A plugin cannot add keys itself. Bind its action in herdr's `config.toml`:
+```sh
+tuios plugins install JimiSmith/launchpad
+```
+
+If you installed the plugin with herdr, tuios finds it. To use it in tuios,
+run `tuios plugins enable launchpad` from a terminal outside tuios.
+
+The plugin does not put `launchpad` on your PATH. To update the plugin, run the
+install command again.
+
+The plugin has two actions. `launchpad.open` opens Launchpad in a new tab.
+`launchpad.open-workspace` opens Launchpad in a new workspace.
+
+For herdr, add these bindings to herdr's `config.toml`, then run
+`herdr server reload-config`:
 
 ```toml
 [[keys.command]]
@@ -140,19 +74,7 @@ key = "prefix+alt+l"
 type = "plugin_action"
 command = "launchpad.open"
 description = "launchpad"
-```
 
-Then run `herdr server reload-config`. The key opens Launchpad in a new tab, in
-the directory of the focused pane's foreground process (for example, a tool
-that changed its own directory), and the chosen tool takes over that tab's pane
-(on Windows, Launchpad stays alive under it). Quit closes the tab. Without a
-key, run `herdr plugin action invoke launchpad.open`.
-
-To open a new workspace with Launchpad in its first and only tab, use
-`launchpad.open-workspace` instead. It focuses the new workspace and uses the
-same directory as the new-tab action. For example:
-
-```toml
 [[keys.command]]
 key = "prefix+alt+w"
 type = "plugin_action"
@@ -160,276 +82,39 @@ command = "launchpad.open-workspace"
 description = "launchpad in a new workspace"
 ```
 
-After reloading the config, use the key or run
-`herdr plugin action invoke launchpad.open-workspace`.
+For tuios, add these bindings to tuios's `config.toml`, then run
+`tuios config apply`. Run `tuios config path` to find the file.
 
-herdr has no plugin updates: run the install command again for a new version.
-`herdr plugin uninstall launchpad` removes the plugin and its copy of Launchpad.
+```toml
+[[keybindings.command]]
+key = "prefix+alt+l"
+type = "plugin_action"
+command = "launchpad.open"
+description = "launchpad"
 
-### Open Launchpad from a herdr key without the plugin
+[[keybindings.command]]
+key = "prefix+alt+w"
+type = "plugin_action"
+command = "launchpad.open-workspace"
+description = "launchpad in a new workspace"
+```
 
-With `launchpad` on your PATH, bind a key in herdr's `config.toml` to open it
-in a new pane, while herdr's default shell stays a normal shell:
+In herdr, you can also bind a key without the plugin if `launchpad` is on your
+PATH:
 
 ```toml
 [[keys.command]]
 key = "prefix+alt+l"
 type = "pane"
-command = "exec launchpad"  # or an absolute path
+command = "exec launchpad"
 description = "launchpad"
 ```
 
-Then run `herdr server reload-config`. The pane opens zoomed, beside the
-focused pane and in its directory. herdr runs the command through `sh -c`, and
-`exec` makes Launchpad the pane's own program, so on Linux and macOS the chosen
-tool takes over the pane; herdr closes it when the tool exits. The pane stays
-zoomed until you unzoom it (`prefix+z`). On Windows herdr uses `cmd.exe`, so
-write `command = "launchpad"`; Launchpad then stays alive under the tool.
-Quit closes the pane. `type = "popup"` does not work: a popup is not a herdr
-pane, so Launchpad cannot find its tab.
+On Windows, write `command = "launchpad"`.
 
-### Open Launchpad in every new herdr pane
+## Configuration
 
-Make Launchpad herdr's default shell in herdr's `config.toml`
-(`~/.config/herdr/config.toml`; `%APPDATA%\herdr\config.toml` on Windows):
-
-```toml
-[terminal]
-default_shell = "launchpad"  # or an absolute path
-```
-
-Then run `herdr server reload-config`. New tabs, splits and workspaces open
-Launchpad in the directory herdr picks for them, and on Linux and macOS the
-chosen tool takes over the pane directly. Shell starts Launchpad's own
-`default_shell` or detected shell, never herdr's setting, and skips a `$SHELL`
-that names Launchpad (herdr sets it in login-shell mode, the macOS default), so
-it does not start Launchpad again. In that mode Shell starts as a login shell
-too, so it reads your login profile (such as `~/.zprofile`). Quit closes the pane. Panes that already
-exist keep their shell.
-
-`herdr agent start` and `herdr pane run` need a shell prompt, so they do not
-work in a pane still showing Launchpad; choose Shell first, or split from a
-shell pane.
-
-### Zellij and herdr nested
-
-A multiplexer started inside the other inherits its environment, which then
-cannot tell which one owns Launchpad's pane. Launchpad refuses to start until
-you choose. Set `LAUNCHPAD_HOST` where the inner multiplexer starts, so layouts
-and `zellij run` commands need no changes:
-
-```sh
-LAUNCHPAD_HOST=zellij zellij   # Zellij inside herdr
-LAUNCHPAD_HOST=herdr herdr     # herdr inside Zellij
-```
-
-It only reaches sessions and servers started with it; attaching to one that is
-already running keeps that server's environment. Values ignore case, and an
-empty value counts as unset. `--host zellij` or `--host herdr` on the command
-line overrides the variable.
-
-### tuios
-
-[tuios](https://tuios.dev) has a herdr compatibility mode.
-Each tuios pane has herdr's environment, and `$HERDR_BIN_PATH` points to tuios,
-which answers herdr's command line. Launchpad sees a tuios pane as a herdr
-pane, so the [herdr](#herdr) section applies. Tested with tuios 0.11.0 on Linux.
-
-The plugin works with these differences:
-
-- tuios finds a plugin that herdr installed. To use it, run
-  `tuios plugins enable launchpad` in a terminal outside tuios.
-- To install the plugin with tuios, run `tuios plugins install JimiSmith/launchpad`
-  in a terminal outside tuios. tuios runs the same install script as herdr and
-  enables the plugin.
-- Run an action with `tuios plugins run launchpad open`, or from a pane with
-  `"$HERDR_BIN_PATH" plugin action invoke open --plugin launchpad`. Use
-  `open-workspace` in place of `open` for a new workspace.
-- tuios cannot move a pane to a new workspace. Thus `open-workspace` creates
-  the workspace, moves Launchpad into its tab, and closes the shell that the
-  tab starts with. Launchpad finds tuios from the `+tuios` suffix in the output
-  of `"$HERDR_BIN_PATH" --version`.
-
-## Configure commands and colours
-
-The default file is `$XDG_CONFIG_HOME/launchpad/config.toml`, falling back
-to `~/.config/launchpad/config.toml`. Override it with
-`launchpad --config /path/to/config.toml`. Reopen to apply edits; F5
-preserves the loaded configuration. Missing default configuration means Shell-only.
-An explicit missing file, unreadable file, or malformed TOML is a startup error.
-
-```toml
-ignore = ["/home/james/cache", "/home/james/old-projects"]
-default_shell = "/usr/bin/fish"  # optional; see below
-auto_name_tabs = true  # optional; see below
-
-[[commands]]
-id = "claude"
-label = "Claude in Worktree"
-executable = "claude"
-arguments = ["-w"]
-shortcut = "alt+c"
-
-[[commands]]
-id = "hermes"
-executable = "hermes"
-
-[[commands]]
-id = "codex"
-label = "Codex"
-executable = "codex"
-
-[theme]
-background = "default"
-surface = "#1e2030"
-raised = "#363a4f"
-border = "#494d64"
-text = "#cad3f5"
-muted = "#a5adcb"
-accent = "#c6a0f6"
-on_accent = "#181926"
-error = "#ed8796"
-```
-
-Shell stays first. `default_shell` is the executable Shell runs, a name or
-path without arguments. Unset, Shell uses Zellij's configured default shell, or
-under herdr the detected shell (see [herdr](#herdr)). Commands follow file
-order; the first duplicate ID wins.
-`auto_name_tabs` (default `true`) renames the tab to `directory · tool` on
-launch; `false` leaves the tab's name alone.
-Labels default to IDs. Invalid individual definitions are skipped with a visible
-error, while valid commands stay usable. F1 lists all configuration errors.
-The interface places Tool first in its own bordered group, above a Directory
-group containing the input and Saved / Recent. The focused group has an accent
-border; inactive content is dimmed. Selections use an underline, with a compact
-contextual footer. F1 opens the keys screen: every control, configured
-shortcuts, search status and configuration errors.
-Colours default to Catppuccin Macchiato over the terminal background; invalid
-colour values keep their defaults.
-
-Arguments never expand `$HOME`, `~`, globs, or shell operators. Use an explicit
-shell executable with `arguments = ["-c", "your script"]` if you want shell
-interpretation. [Configuration details](docs/configured-commands.md).
-
-An optional `shortcut` launches that command in one keypress: the typed
-directory text (not a highlighted suggestion), or the selected Saved / Recent row's
-directory with this tool. Shortcuts need Ctrl, Alt or Super
-and must not clash with a built-in key or another shortcut; invalid ones are
-dropped with a visible error while the command stays usable. Shell needs none,
-since Enter launches it by default. Alt shortcuts work in any terminal. Ctrl
-shortcuts that legacy encodings cannot express, such as Ctrl+I (Tab) or Ctrl+M
-(Enter), need a terminal with the Kitty keyboard protocol; elsewhere they never
-fire. [Shortcut syntax](docs/configured-commands.md#shortcuts).
-
-## Controls and directory policy
-
-- Ctrl+P / Ctrl+T / Ctrl+R: focus path, tools, or the Saved / Recent list.
-- In the directory input: Left/Right moves one Unicode grapheme; Home/End moves to
-  the beginning/end. Ctrl+Left/Right moves by path segment; Ctrl+Backspace/Delete
-  deletes the same range to the left/right. Ctrl+H is an alias for Ctrl+Backspace
-  for terminals using the legacy encoding. Ordinary Backspace/Delete removes
-  one grapheme. Ctrl+A/E and Ctrl+U still move to the ends and clear the input.
-  Segment operations skip adjacent separators, then traverse the next segment
-  in that direction; inside a segment they traverse only its remaining text.
-  Separators are `/` on Unix and both `/` and `\` for Windows home paths.
-  Spaces and punctuation within a segment stay together; edits do not normalize
-  paths. No text selection is performed.
-- Tab / Shift+Tab cycles forward / backward through tools, path, and Saved / Recent.
-  Type a fuzzy query; arrows select suggestions and Enter accepts.
-  Enter without a highlighted suggestion launches the selected tool.
-- Left/Right choose a tool. Mouse clicks select; the launch button launches.
-- A configured command shortcut (for example Alt+C) launches that command from
-  any section; F1 lists the configured shortcuts.
-- F1 opens the keys screen. F5 refreshes HOME and shared history and clears the input.
-- Saved / Recent shares one section. Left/Right switches lists when it is focused.
-  Saved opens by default when it has entries; otherwise Recent opens. Switching
-  and F5 preserve your choice until you reopen Launchpad.
-- Ctrl+S saves the entered directory, or the selected Saved / Recent directory,
-  after validation. It does not launch or switch lists. Saved contains unique
-  directories sorted by full path. Selecting one fills Directory and keeps Tool.
-  Enter launches with that tool; Delete removes only the saved entry.
-- Selecting a recent row fills Directory and keeps the selected Tool. Enter or
-  Launch revalidates the directory and launches that tool. Delete removes, Ctrl+L twice clears;
-  Esc cancels confirmation.
-- Ctrl+Q / Ctrl+C quits. Esc dismisses transient UI, then quits an untouched dashboard.
-
-Search is HOME-only; relative paths start at HOME. The index uses the `ignore`
-crate's standard handling of `.gitignore`, `.ignore`, parent rules, global Git
-ignores, and `.git/info/exclude`. There is no special exclusion for `node_modules`.
-It excludes hidden directories and never follows symlinks. Hidden and ignored
-directories can be entered literally. Hidden means dot-prefixed names on all platforms, plus the Windows
-Hidden attribute (including AppData). Their descendants are pruned too; F5
-rechecks attribute changes. The exact invoking cwd is the sole exception for
-outside-HOME or symlink directories. Deleted/inaccessible directories fail visibly
-without fallback.
-
-The optional top-level `ignore` array excludes absolute directory paths and their
-descendants from indexing, even if ignore files explicitly include them. Put it
-before any TOML tables. Paths are literal: `~`, environment variables and globs
-are not expanded. Invalid entries are skipped with visible configuration warnings;
-valid entries remain active. Ignored directories can still be entered literally.
-Reopen after editing the configuration; F5 preserves the loaded exclusions.
-
-Typing/paste is capped at 100 Unicode scalar values; completed, invoking, and
-history paths are never truncated. Index limits are 200,000 directories,
-2,000,000 entries, depth 64, and 60 MiB of estimated retained index data. Search,
-traversal, and validation run on a bounded background worker so input remains
-responsive. [Search policy](docs/home-search.md).
-
-The directory index is saved as `launchpad/index.json` under the OS cache
-location: `$XDG_CACHE_HOME` (fallback `~/.cache`) on Linux, `~/Library/Caches` on
-macOS, and `%LOCALAPPDATA%` (fallback `~/AppData/Local`) on Windows. Launchpad
-loads it before starting a background rebuild. Cached results stay searchable
-until the completed replacement is published atomically. F5 also rebuilds while
-keeping the current index available. Without a usable cache, results appear
-progressively during the first scan. You can safely delete `index.json` to force
-a cold start; a changed HOME, ignore configuration, or index format also causes
-a fresh scan. Cache failures are nonfatal and appear in the search status.
-
-Saved directories persist in `saved.json` alongside history under
-`$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`). They are shared
-across panes and sessions; F5 reloads changes. Entries remain until explicitly
-removed, independently of recent history. Missing directories remain listed and
-fail visibly when launched. Saving follows the same directory policy as launching.
-
-Recent history remembers ten unique directories, newest first, under
-`$XDG_STATE_HOME/launchpad` (fallback `~/.local/state/launchpad`).
-It is shared across panes and sessions. F5 reloads other instances' changes.
-Recent stores no tool association. Launching another tool in the same directory
-refreshes that one entry. Existing history is loaded with old tool IDs discarded.
-History records validated attempts, not successful tool execution.
-Search also ranks directories higher when you launched them often and recently in
-the last 30 days (frecency). Clearing Recent also clears frecency.
-[Persistence details](docs/history.md).
-
-## Migrating from the plugin
-
-Replace each `plugin location="…wasm"` block with an ordinary pane command;
-see the layouts in `examples/`. Move command definitions into TOML:
-`command_claude "claude"` becomes `executable = "claude"`,
-`arguments_claude "-w"` becomes `arguments = ["-w"]`, and theme keys move into
-`[theme]` without their `theme_` prefix. Native history starts fresh; existing
-plugin caches are left untouched. WASM builds and plugin installation are no
-longer supported.
-
-## Development
-
-`launchpad-core` owns the state machine, renderer and search implementation;
-`native/` owns terminal input, TOML, worker threads, persistence, and CLI launches.
-
-```sh
-cargo fmt --all --check
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo build --release --locked -p launchpad
-python3 -m venv target/verification-venv
-target/verification-venv/bin/pip install pyte==0.8.2
-bash tools/verify_native.sh
-```
-
-The live suite uses isolated Zellij sessions, disposable HOME/state directories,
-and harmless executable fixtures; it never launches installed coding agents.
-The Bash/Python live suite requires Unix; Windows runs native builds, tests, and
-Clippy in CI.
-See [launch behavior](docs/real-launch.md), [worker design](docs/async-workers.md),
-and [release packaging](docs/releases.md).
+Launchpad reads `~/.config/launchpad/config.toml`. See
+[examples/config.toml](examples/config.toml) and
+[configured commands](docs/configured-commands.md). Press F1 in Launchpad to
+see all keys.
